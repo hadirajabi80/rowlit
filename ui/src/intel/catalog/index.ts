@@ -442,6 +442,8 @@ export class CatalogIndex {
       const arr = this.lookupIn(sch.text, name, sch.quoted);
       const a = pick(arr);
       if (a) return a;
+      // `Sales.Customers` with Sales not loaded yet: ask the host for it (hover, go-to-definition and the next diagnostics pass then succeed)
+      if (!arr.length && this.isUnloadedSchema(sch.text, sch.quoted)) this.requestSchema(sch.text);
       if (this.spec.id === 'tsql' && this.database && this.keyOf(sch.text, sch.quoted) === this.keyOfCatalog(this.database)) {
         // db.obj is invalid T-SQL; tolerate db..obj handled by 3 parts
         return null;
@@ -567,6 +569,21 @@ export class CatalogIndex {
     const k = this.keyOf(name, quoted);
     if (this.schemas.has(k) || this.builtinSchemas.has(k) || this.failedSchemas.has(k)) return false;
     return this.knownSchemaNames.some((n) => this.keyOfCatalog(n) === k);
+  }
+
+  /**
+   * The schema may still arrive: it is listed but not loaded, or the schema list itself is not here yet and the host
+   * can load schemas. False for a schema the server does not have, or one whose load failed.
+   */
+  isSchemaPending(name: string, quoted = false): boolean {
+    if (this.isUnloadedSchema(name, quoted)) return true;
+    const k = this.keyOf(name, quoted);
+    return !!this.snapshot && this.knownSchemaNames.length === 0 && !!this.schemaRequester && !this.schemas.has(k) && !this.builtinSchemas.has(k) && !this.failedSchemas.has(k);
+  }
+
+  /** An Oracle PUBLIC synonym lookup for this name is in flight. */
+  isPublicPending(name: string): boolean {
+    return this.publicPending.has(name.toUpperCase());
   }
 
   // ---------------- other databases of the server (T-SQL `Other.dbo.Orders`)

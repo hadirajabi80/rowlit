@@ -6,7 +6,8 @@ import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import type { Dialect } from '../api/types';
 import { getSpec, type CompletionItem, type CompletionKind, type LexState } from '../intel';
 import { tokenizeLine } from './tokens-core';
-import { bindingByUri, bindingFor, bindingForEditor } from './registry';
+import { bindingByUri, bindingFor, bindingForEditor, type ModelBinding } from './registry';
+import { resolveDefinition } from './definition-nav';
 import { objectUri, parseObjectUri, objectSummary } from './object-uri';
 import { formatRange, formatSql, type FormatWarning } from '../format';
 import { builtinsReady, ensureBuiltins, snippetPickerItems } from '../snippets';
@@ -235,21 +236,76 @@ function registerLanguage(dialect: Dialect): void {
   });
 
   monaco.languages.registerDefinitionProvider(id, {
-    provideDefinition(model, position) {
+    async provideDefinition(model, position, token) {
       const b = bindingFor(model);
       if (!b) return null;
-      const d = b.intel.definition(b.uri, model.getOffsetAt(position));
-      if (!d) return null;
+      const version = model.getVersionId();
+      // `Sales.Customers` with Sales not loaded yet: the lookup requests it and waits for it ("Loading Sales…")
+      const out = await resolveDefinition(b, model.getOffsetAt(position), {
+        isCancelled: () => token.isCancellationRequested || model.isDisposed() || model.getVersionId() !== version,
+        onPending: (p) => showEditorMessage(b.editor, `Loading ${p.loading}…`, position),
+      });
+      if (out.kind === 'cancelled') return null;
+      if (out.kind === 'none') {
+        if (out.waited) reportMissing(b, out.waited.target, out.timedOut);
+        return null;
+      }
+      const d = out.def;
       if (d.kind === 'local') {
         const a = model.getPositionAt(d.range[0]), z = model.getPositionAt(d.range[1]);
         return { uri: model.uri, range: new monaco.Range(a.lineNumber, a.column, z.lineNumber, z.column) };
       }
       const uri = monaco.Uri.parse(objectUri(b.connectionId(), d.ref, d.column, b.uri));
       // a tiny read-only model so Ctrl+hover can preview the object; the opener routes the navigation to the app
-      if (!monaco.editor.getModel(uri)) monaco.editor.createModel(objectSummary(d.ref, b), id, uri);
+      if (!monaco.editor.getModel(uri)) monaco.editor.createModel(objectSummary(d.ref, b.dialect), id, uri);
       return { uri, range: new monaco.Range(1, 1, 1, 1) };
     },
   });
+}
+
+/** A short message under a position (Monaco's own "No definition found" widget); nothing if this Monaco has no such widget. */
+export function showEditorMessage(ed: monaco.editor.ICodeEditor, text: string, position: monaco.IPosition): void {
+  try {
+    const mc = ed.getContribution('editor.contrib.messageController') as { showMessage?: (m: string, p: monaco.IPosition) => void } | null;
+    mc?.showMessage?.(text, position);
+  } catch {
+    /* cosmetic */
+  }
+}
+
+let lastMissing = { key: '', at: 0 };
+/** The name was not there once its schema had loaded (or the load took too long): tell the app, at most once in a few seconds. */
+function reportMissing(b: ModelBinding, target: string, timedOut: boolean): void {
+  const key = `${b.uri}\u0001${target}`.toLowerCase();
+  const now = Date.now();
+  if (lastMissing.key === key && now - lastMissing.at < 3000) return;
+  lastMissing = { key, at: now };
+  b.definitionMissing?.(target, timedOut);
+}
+
+/** "Open definition (DDL)" (Alt+F12): the object tab of whatever is under the cursor, tables and views included. */
+export async function openDefinitionDdl(b: ModelBinding): Promise<void> {
+  const ed = b.editor, model = ed.getModel(), pos = ed.getPosition();
+  if (!model || !pos) return;
+  const version = model.getVersionId();
+  const out = await resolveDefinition(b, model.getOffsetAt(pos), {
+    isCancelled: () => model.isDisposed() || model.getVersionId() !== version,
+    onPending: (p) => showEditorMessage(ed, `Loading ${p.loading}…`, pos),
+  });
+  if (out.kind === 'cancelled') return;
+  if (out.kind === 'none') {
+    if (out.waited) reportMissing(b, out.waited.target, out.timedOut);
+    else showEditorMessage(ed, 'No definition found', pos);
+    return;
+  }
+  const d = out.def;
+  if (d.kind === 'local') {
+    const a = model.getPositionAt(d.range[0]);
+    ed.setPosition(a);
+    ed.revealPositionInCenterIfOutsideViewport(a);
+    return;
+  }
+  (b.openObjectDdl ?? b.openObject)(d.ref, d.column);
 }
 
 /** Same markers as actions.formatDocument: one warning per statement the formatter left verbatim. */

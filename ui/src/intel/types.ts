@@ -142,3 +142,11 @@ export interface IntelOptions {
 }
 
 export type { CatalogObjectType };
+
+/** Go-to-definition found nothing yet, but the name's schema or database is still loading (see `Intel.pendingDefinition`). */
+export interface PendingDefinition {
+  /** What is loading: `Sales`, `Staging`, `Staging.dbo`. */
+  loading: string;
+  /** The dotted name under the cursor (`Sales.Customers`). */
+  target: string;
+}

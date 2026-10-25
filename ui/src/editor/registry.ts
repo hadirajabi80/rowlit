@@ -10,7 +10,14 @@ export interface ModelBinding {
   editor: monaco.editor.IStandaloneCodeEditor;
   connectionId: () => string;
   database: () => string | null;
+  /** F12 / Ctrl+click on an object: a table, view or synonym opens its data, the rest their definition. */
   openObject: (ref: ObjectRef, column?: string) => void;
+  /** "Open definition (DDL)": the object tab of any object. */
+  openObjectDdl?: (ref: ObjectRef, column?: string) => void;
+  /** Go-to-definition waited for a schema / database to load and the name was not there (or the wait timed out). */
+  definitionMissing?: (target: string, timedOut: boolean) => void;
+  /** Woken when the editor hands the intel a new catalog (go-to-definition waiting for a schema to load). */
+  catalogWaiters?: Set<() => void>;
   /** Called after a completion item was accepted (usage ranking). */
   accepted: (usageKey: string) => void;
   /** WP-H: dialect of the model, formatter options and user snippets (props, else the app-wide editor config). */
