@@ -20,6 +20,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Codegen.Smoke/Codegen.Smoke.csproj" />
     <Project Path="tests/DbStudio.Core.Tests/DbStudio.Core.Tests.csproj" />
+    <Project Path="tests/DbStudio.Import.Tests/DbStudio.Import.Tests.csproj" />
     <Project Path="tests/DbStudio.Logs.Tests/DbStudio.Logs.Tests.csproj" />
     <Project Path="tests/DbStudio.Providers.Cassandra.Tests/DbStudio.Providers.Cassandra.Tests.csproj" />
     <Project Path="tests/DbStudio.Providers.ClickHouse.Tests/DbStudio.Providers.ClickHouse.Tests.csproj" />
