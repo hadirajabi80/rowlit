@@ -170,3 +170,32 @@ public sealed class OracleSeedScriptTests
         Assert.All(statements, s => Assert.Equal(s.Sql.Split('\n')[0], lines[s.Line - 1]));
     }
 }
+
+public sealed class OracleUnreadableValueTests
+{
+    private const string Ora50071 =
+        "ORA-50071: Custom type mapping for 'dataSource='(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=LOCALHOST)(PORT=1521)))' schemaName='SHOP' typeName='OBJ_T'' is not specified or is invalid";
+
+    [Fact]
+    public void ObjectTypeColumn_Ora50071_IsAnUnreadableCell_NotAFailedQuery()
+    {
+        // GetValue of a user-defined type column throws this InvalidOperationException; it must degrade to a placeholder.
+        Assert.True(OracleSession.IsUnreadableValue(new InvalidOperationException(Ora50071)));
+    }
+
+    [Fact]
+    public void OtherErrors_StillFailTheQuery()
+    {
+        Assert.False(OracleSession.IsUnreadableValue(new InvalidOperationException("Operation is not valid due to the current state of the object.")));
+        Assert.False(OracleSession.IsUnreadableValue(new InvalidCastException(Ora50071)));
+        Assert.False(OracleSession.IsUnreadableValue(new TimeoutException("ORA-50071")));
+    }
+
+    [Fact]
+    public void Placeholder_NamesTheType()
+    {
+        Assert.Equal("(Object)", OracleSession.UnreadableValueText("Object"));
+        Assert.Equal("(unsupported type)", OracleSession.UnreadableValueText(null));
+        Assert.Equal("(unsupported type)", OracleSession.UnreadableValueText(" "));
+    }
+}

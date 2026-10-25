@@ -7,7 +7,7 @@ import { errorMessage } from '../../api/client';
 import { objectsApi } from '../../api/objectsClient';
 import type { CatalogObjectType, Dialect, ObjectRef } from '../../api/types';
 import type { DependencyGraph, ObjectDependency } from '../../api/types.objects';
-import { openObject } from '../../app/actions';
+import { openObjectDefault } from '../../app/actions';
 import type { ObjectTarget } from '../../commands/types';
 import { commandView, useCommandsVersion } from '../../commands/useCommands';
 import { OBJECT_TYPE_SINGULAR } from '../../lib/sql';
@@ -98,7 +98,7 @@ export function DependenciesPanel({ cacheId, connectionId, database, objectRef: 
 
   const chips = summaryChips(graph);
   const empty = graph.uses.length + graph.usedBy.length === 0;
-  const open = (d: ObjectDependency) => openObject(connectionId, d.object.database ?? database, { ...d.object, database: d.object.database ?? database });
+  const open = (d: ObjectDependency) => openObjectDefault(connectionId, d.object.database ?? database, { ...d.object, database: d.object.database ?? database });
   const menu = (d: ObjectDependency, e: { clientX: number; clientY: number; preventDefault?: () => void }) => {
     const items = contextMenu(menuIdOf(d.object.type), { kind: 'object', connectionId, database, ref: { ...d.object, database: d.object.database ?? database } });
     if (items.length) showContextMenu(e, items);

@@ -1,6 +1,6 @@
 import { Command as CommandIcon, Database, FileCode2, LoaderCircle, Search, SquareChevronRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { activateObject, insertIntoActiveEditor, openObject, preloadCatalog, selectTop } from '../../app/actions';
+import { insertIntoActiveEditor, openObject, openObjectDefault, preloadCatalog, selectTop } from '../../app/actions';
 import { isMac } from '../../commands/keys';
 import { advertisedShortcuts, getCommand, hasCommand, isEnabled, listCommands, runCommand } from '../../commands/registry';
 import type { ObjectTarget, SavedQueryTarget } from '../../commands/types';
@@ -120,7 +120,7 @@ export function runObjectHit(e: IndexEntry, how: 'open' | 'data' | 'insert' | 'r
   }
   const t = targetOf(e);
   if (how === 'data') {
-    if (!isTabular(e.ref.type)) return openObject(e.connectionId, e.database, e.ref, e.column);
+    if (!isTabular(e.ref.type, dialectOf(e.connectionId))) return openObject(e.connectionId, e.database, e.ref, e.column);
     if (hasCommand('data.open') && runCommand('data.open', t)) return;
     selectTop(e.connectionId, e.database, e.ref, 1000);
   } else if (how === 'insert') {
@@ -140,7 +140,7 @@ export function runObjectHit(e: IndexEntry, how: 'open' | 'data' | 'insert' | 'r
   } else if (how === 'reveal') {
     useUi.getState().showDock('explorer');
     useExplorer.getState().reveal(t);
-  } else activateObject(e.connectionId, e.database, e.ref, e.column);
+  } else openObjectDefault(e.connectionId, e.database, e.ref, e.column); // Enter: a table's data, a routine's editor / structure
 }
 
 /** Ctrl+Shift+P commands; Ctrl+P (or "@" in the command box) goes to any loaded object across connections. */

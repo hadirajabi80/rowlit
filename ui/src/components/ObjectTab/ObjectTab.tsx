@@ -1,4 +1,4 @@
-import { Code2, Copy, KeyRound, LoaderCircle, PencilRuler, Play, RefreshCw, SquareTerminal } from 'lucide-react';
+import { Code2, Copy, KeyRound, LoaderCircle, PencilRuler, Play, RefreshCw, SquareTerminal, Table2 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../../api/client';
 import type { DdlResponse, ObjectDetails } from '../../api/types';
@@ -126,7 +126,12 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
           </div>
         </div>
         <div className="flex-1" />
-        {isTabular(ref.type) && (
+        {isTabular(ref.type, dialect) && (
+          <button className="btn btn-xs" onClick={() => runCommand('data.open', target)} title="Open the rows in the Data tab">
+            <Table2 size={12} /> Open data
+          </button>
+        )}
+        {isTabular(ref.type, dialect) && (
           <button className="btn btn-xs" onClick={() => selectTop(tab.connectionId, tab.database, ref, 1000)}>
             <Play size={12} /> Select top 1000
           </button>

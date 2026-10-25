@@ -5,7 +5,7 @@ import { resolveParams } from '../components/ParamsDialog/ParamsDialog';
 import { findDestructive } from '../lib/classify';
 import { serializeRows, type CopyFormat } from '../lib/serialize';
 import { computeView } from '../lib/filter';
-import { qualifiedName, selectTopSql } from '../lib/sql';
+import { isTabular, qualifiedName, selectTopSql } from '../lib/sql';
 import { getPlatform } from '../platform';
 import { effectiveViewportHeight } from './zoom';
 import { dbKey, useCatalog } from '../store/catalog';
@@ -30,7 +30,7 @@ import { EDIT_RUN_STOP_REASON, useDesignerUi, type EditSession } from '../design
 import { existingObjectNamed, newObjectRef } from '../designer/newObject';
 import { getEditor } from './editors';
 import { interceptRoutineRun, routineEditOf } from '../components/ExecuteRoutine/intercept';
-import { runCommand } from '../commands/registry';
+import { hasCommand, runCommand } from '../commands/registry';
 
 let localSeq = 0;
 
@@ -460,6 +460,23 @@ export function activateObject(connectionId: string, database: string | null, re
     if (runCommand('designer.edit', { kind: 'object', connectionId, database, ref })) return;
   }
   openObject(connectionId, database, ref, column);
+}
+
+/**
+ * What a click (double-click / Enter) on an object does, from every list that shows objects (explorer, Objects tab,
+ * Find in database, Ctrl+P, dependencies): a table, view, materialized view, synonym or ClickHouse dictionary opens its
+ * DATA (the Data tab), never its structure; routines and the rest keep the default open of `activateObject`. With a
+ * `column` (a column row, a column search hit) the object tab opens on that column.
+ */
+export function openObjectDefault(connectionId: string, database: string | null, ref: ObjectRef, column?: string | null): void {
+  // A table function is a routine: `SELECT * FROM fn` needs its arguments, so it opens like one (editor / structure).
+  if (!column && ref.type !== 'tablefunc' && isTabular(ref.type, dialectOf(connectionId))) {
+    const target = { kind: 'object' as const, connectionId, database, ref };
+    if (hasCommand('data.open') && runCommand('data.open', target)) return;
+    // The data view could not start (never silently): say so, and fall back to the object's structure.
+    toast('error', `Could not open the data of ${ref.name}`, 'The table data view is not available; showing its structure instead.');
+  }
+  activateObject(connectionId, database, ref, column);
 }
 
 export function reopenSql(sql: string, connectionId: string | null, database: string | null): void {
