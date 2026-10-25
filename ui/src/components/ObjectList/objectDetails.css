@@ -1,0 +1,151 @@
+/* Details side panel of the Objects tab (dependencies of the selected object). Tokens only. */
+/* the panel (layout of its slot: objectList.css) */
+.od {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.od-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.od-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--ol-tint) 14%, transparent);
+  flex-shrink: 0;
+}
+.od-title {
+  flex: 1;
+  min-width: 0;
+}
+.od-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs);
+  font-weight: var(--weight-strong);
+}
+.od-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.od-schema {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+.od-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.od-execute:not(:disabled) {
+  color: var(--accent);
+}
+.od-key {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.od-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.od-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 0 14px;
+}
+.od-chips {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.od-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 12px 14px;
+}
+/* the shared dependency column, compact: no subtitle, tighter rows */
+.od .deps-col-sub {
+  display: none;
+}
+.od .deps-col-head {
+  padding: 8px 10px;
+}
+.od .deps-row {
+  min-height: 32px;
+  gap: 8px;
+}
+.od .deps-icon {
+  width: 24px;
+  height: 24px;
+}
+.od .empty-state {
+  padding: 28px 16px;
+}
+
+/* loading skeleton */
+.od-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+}
+.od-skel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+}
+.od-skel-icon,
+.od-skel-bar {
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-sunken), var(--bg-hover), var(--bg-sunken));
+  background-size: 200% 100%;
+  animation: ol-shimmer 1.4s var(--ease) infinite;
+}
+.od-skel-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius);
+}
+@media (prefers-reduced-motion: reduce) {
+  .od-skel-icon,
+  .od-skel-bar {
+    animation: none;
+  }
+}
+.od-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}

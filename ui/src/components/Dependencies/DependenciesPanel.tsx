@@ -173,7 +173,7 @@ export function DependenciesPanel({ cacheId, connectionId, database, objectRef: 
   );
 }
 
-interface ColumnProps {
+export interface ColumnProps {
   title: string;
   subtitle: string;
   direction: 'uses' | 'used';
@@ -184,7 +184,7 @@ interface ColumnProps {
   onMenu(d: ObjectDependency, e: { clientX: number; clientY: number; preventDefault?: () => void }): void;
 }
 
-function DepColumn({ title, subtitle, direction, items, emptyText, rootSchema, onOpen, onMenu }: ColumnProps) {
+export function DepColumn({ title, subtitle, direction, items, emptyText, rootSchema, onOpen, onMenu }: ColumnProps) {
   const groups = groupDependencies(items);
   return (
     <section className={`deps-col ${direction}`} aria-label={title}>

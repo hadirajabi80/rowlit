@@ -5,6 +5,7 @@ import { isConnectionTarget, isContainerTarget, isObjectTarget, isSavedQueryTarg
 import { dbKey, useCatalog } from '../../store/catalog';
 import { getConnection, providerKind } from '../../store/connections';
 import { useTabs, type ViewTab } from '../../store/tabs';
+import type { DetailsState } from './detailsModel';
 import { DEFAULT_SORT, groupForType, OBJECTS_VIEW, objectsTitle, QUERIES_GROUP, type GroupFilter, type SortSpec } from './model';
 
 export interface ObjectsState {
@@ -14,6 +15,8 @@ export interface ObjectsState {
   group: GroupFilter;
   layout: ObjectsLayout;
   sort: SortSpec;
+  /** The details side panel (dependencies of the selected object); absent = the default (open). */
+  details?: DetailsState;
 }
 
 /** list = sortable table; grid = cards with stats; compact = small icon + name tiles, many per row. */

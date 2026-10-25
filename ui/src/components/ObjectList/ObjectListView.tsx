@@ -2,14 +2,14 @@
 // counts, sizes and dates, a live filter, type groups with counts, a list (sortable, virtualized) and a card grid.
 // Enter / double-click opens an object like the explorer does; the context menu is the explorer's.
 import {
-  ArrowDown, ArrowUp, ChevronDown, Database, FileInput, FolderOpen, Grid3x3, LayoutGrid, List, LoaderCircle, PencilRuler, Play, Plus, RefreshCw, Search, SearchX,
-  Trash2, TriangleAlert, X,
+  ArrowDown, ArrowUp, ChevronDown, Database, FileInput, FolderOpen, Grid3x3, LayoutGrid, List, LoaderCircle, PanelRight, PanelRightClose, PencilRuler, Play, Plus, RefreshCw,
+  Search, SearchX, Trash2, TriangleAlert, X,
 } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
 import { errorMessage } from '../../api/client';
 import { objectsApi } from '../../api/objectsClient';
 import type { CatalogObjectType, ObjectRef } from '../../api/types';
-import type { ObjectListItem } from '../../api/types.objects';
+import type { ObjectDependency, ObjectListItem } from '../../api/types.objects';
 import { catalogDatabase, openObjectDefault } from '../../app/actions';
 import type { ContextEntry } from '../../commands/menuModel';
 import { runCommand } from '../../commands/registry';
@@ -25,6 +25,9 @@ import { EmptyState } from '../EmptyState/EmptyState';
 import { commandMenuItems, contextMenu } from '../layout/commandMenu';
 import type { TabViewProps } from '../layout/tabViews';
 import {
+  clampDetailsWidth, DETAILS_DEFAULT_W, DETAILS_MIN_W, DETAILS_NARROW_BELOW, detailsOf, onDetailsToggle,
+} from './detailsModel';
+import {
   countByGroup, filterObjects, formatModified, formatRowsShort, formatSize, fromCatalog, GROUPS, groupOf, itemKey, itemTypeLabel, nextSort, sortObjects, uniqueObjects,
   type GroupFilter, type SortKey,
 } from './model';
@@ -33,6 +36,9 @@ import { SavedQueryList } from '../SavedQueries/SavedQueryList';
 import { queriesIn, useSavedQueries } from '../../store/savedQueries';
 import { QUERIES_GROUP } from './model';
 import './objectList.css';
+
+// The details side panel (dependencies of the selected object) is a chunk of its own, loaded the first time it shows.
+const ObjectDetailsPanel = lazy(() => import('./ObjectDetailsPanel'));
 
 const ROW_H = 32;
 const CARD_H = 72;
@@ -100,7 +106,7 @@ export function ObjectListView({ tab, visible }: TabViewProps) {
     const cur = useTabs.getState().tabs.find((t) => t.id === tab.id);
     if (cur?.kind === 'view') useTabs.getState().updateView(tab.id, { state: { ...(cur.state as ObjectsState), ...p } });
   }, [tab.id]);
-  return <ObjectList state={state} patch={patch} visible={visible} />;
+  return <ObjectList state={state} patch={patch} visible={visible} tabId={tab.id} />;
 }
 
 export interface ObjectListProps {
@@ -112,10 +118,12 @@ export interface ObjectListProps {
   highlight?: Pick<ObjectListItem, 'schema' | 'name' | 'type'> | null;
   /** Shown before the toolbar (the Objects tab's breadcrumb). */
   header?: ReactNode;
+  /** The tab showing the list: the "Show / hide details panel" command addresses it by this id. */
+  tabId?: string;
 }
 
 /** The object list of one connection / database / schema: toolbar, type groups, virtualized list or cards, status. */
-export function ObjectList({ state, patch, visible, highlight, header }: ObjectListProps) {
+export function ObjectList({ state, patch, visible, highlight, header, tabId }: ObjectListProps) {
   useCommandsVersion(); // enablement of the toolbar commands (registry changes only; this view does not follow executions)
   const { connectionId: cid, database, schema } = state;
   const conn = useConnection(cid);
@@ -222,6 +230,72 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
       if (top < el.scrollTop || top + lineH > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, top - Math.floor(el.clientHeight / 3));
     }
   }, [highlightKey, shown, cols, lineH]);
+
+  // ---------------------------------------------------------------- details side panel
+  const details = detailsOf(state.details);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const splitSize = useSize(splitRef);
+  const narrow = splitSize.width < DETAILS_NARROW_BELOW;
+  // Narrow tab: the persisted choice is left alone; the toggle floats the panel over the list for this visit.
+  const [overlay, setOverlay] = useState(false);
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const panelOn = narrow ? overlay : details.open;
+  const panelWidth = clampDetailsWidth(liveWidth ?? details.width, splitSize.width);
+
+  const toggleDetails = useCallback(() => {
+    if (narrow) setOverlay((o) => !o);
+    else patch({ details: { ...details, open: !details.open } });
+  }, [narrow, details, patch]);
+  const closeDetails = useCallback(() => {
+    if (narrow) setOverlay(false);
+    else patch({ details: { ...details, open: false } });
+    bodyRef.current?.focus();
+  }, [narrow, details, patch]);
+  useEffect(() => {
+    if (!visible || !tabId) return;
+    return onDetailsToggle((id) => {
+      if (id === tabId) toggleDetails();
+    });
+  }, [visible, tabId, toggleDetails]);
+
+  // A dependency of the panel: selected here when it is in this scope (its type group and the filter are adjusted so the
+  // row is there), else opened like the explorer does.
+  const pendingReveal = useRef<string | null>(null);
+  const [revealTick, setRevealTick] = useState(0);
+  const pickDependency = useCallback((d: ObjectDependency) => {
+    const o = d.object;
+    const same = (it: ObjectListItem, ci: boolean) =>
+      (it.schema ?? '') === (o.schema ?? '') && groupOf(it.type) === groupOf(o.type) && (ci ? it.name.toLowerCase() === o.name.toLowerCase() : it.name === o.name);
+    const hit = source?.find((it) => same(it, false)) ?? source?.find((it) => same(it, true));
+    if (!hit) {
+      openObjectDefault(cid, o.database ?? database, { ...o, database: o.database ?? database });
+      return;
+    }
+    if (group !== 'all' && groupOf(hit.type) !== group) patch({ group: groupOf(hit.type) });
+    setQuery('');
+    pendingReveal.current = itemKey(hit);
+    setSelected(itemKey(hit));
+    setRevealTick((n) => n + 1);
+    bodyRef.current?.focus();
+  }, [source, group, patch, cid, database]);
+  useEffect(() => {
+    const k = pendingReveal.current;
+    if (!k) return;
+    const i = shown.findIndex((it) => itemKey(it) === k);
+    if (i < 0) return;
+    pendingReveal.current = null;
+    const el = bodyRef.current;
+    if (!el) return;
+    const top = Math.floor(i / cols) * lineH;
+    if (top < el.scrollTop || top + lineH > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, top - Math.floor(el.clientHeight / 3));
+  }, [shown, revealTick, cols, lineH]);
+  const dependencyMenu = useCallback((d: ObjectDependency, e: { clientX: number; clientY: number; preventDefault?: () => void }) => {
+    const ref = { ...d.object, database: d.object.database ?? database };
+    const items = contextMenu(menuIdOf(d.object.type), { kind: 'object', connectionId: cid, database, ref });
+    if (items.length) showContextMenu(e, items);
+    else e.preventDefault?.();
+  }, [cid, database]);
 
   const menuAt = (it: ObjectListItem, pos: { clientX: number; clientY: number; preventDefault?: () => void }) => {
     setSelected(itemKey(it));
@@ -569,13 +643,24 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
             <Grid3x3 size={14} />
           </button>
         </div>
-        <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={() => setReload((n) => n + 1)}>
+        <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={() => { setReload((n) => n + 1); setRefreshTick((n) => n + 1); }}>
           {loading ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
+        </button>
+        <span className="ol-sep" aria-hidden="true" />
+        <button
+          className="btn btn-xs ol-details-toggle"
+          aria-pressed={panelOn}
+          onClick={toggleDetails}
+          title={`${panelOn ? 'Hide' : 'Show'} the details panel: dependencies of the selected object`}
+        >
+          {panelOn ? <PanelRightClose size={13} /> : <PanelRight size={13} />} Details
         </button>
       </div>
 
       {groupTabs}
 
+      <div className="ol-split" ref={splitRef}>
+      <div className="ol-main">
       {layout === 'list' && source && shown.length > 0 && (
         <div className="ol-head" role="row" style={{ gridTemplateColumns: template }}>
           {columns.map((c) => {
@@ -609,6 +694,39 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
       >
         {body}
       </div>
+      </div>
+
+      {panelOn && (
+        <>
+          {!narrow && (
+            <DetailsHandle
+              width={panelWidth}
+              max={clampDetailsWidth(Number.MAX_SAFE_INTEGER, splitSize.width)}
+              onLive={setLiveWidth}
+              onCommit={(w) => {
+                setLiveWidth(null);
+                patch({ details: { ...details, width: w } });
+              }}
+            />
+          )}
+          <div className={`ol-details-slot${narrow ? ' floating' : ''}`} style={{ width: panelWidth }}>
+            <Suspense fallback={<div className="ol-details-skel" role="status"><LoaderCircle size={16} className="spin" /> Loading…</div>}>
+              <ObjectDetailsPanel
+                connectionId={cid}
+                database={database}
+                item={current}
+                version={catVersion}
+                refreshNonce={refreshTick}
+                onClose={closeDetails}
+                onOpen={() => current && open(current)}
+                onPick={pickDependency}
+                onMenu={dependencyMenu}
+              />
+            </Suspense>
+          </div>
+        </>
+      )}
+      </div>
 
       <div className="ol-status">
         <span>
@@ -624,5 +742,55 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
         {current && <span className="ol-muted mono">{current.schema ? `${current.schema}.` : ''}{current.name}</span>}
       </div>
     </div>
+  );
+}
+
+const KEY_STEP = 16;
+
+/** The panel's resize handle: drag, or focus it and use the arrows (Shift = bigger steps), Home / End, double-click resets. */
+function DetailsHandle({ width, max, onLive, onCommit }: { width: number; max: number; onLive(w: number): void; onCommit(w: number): void }) {
+  const drag = useRef<{ x: number; w: number; last: number } | null>(null);
+  const apply = (w: number) => onCommit(Math.max(DETAILS_MIN_W, Math.min(max, w)));
+  return (
+    <div
+      className="ol-details-split"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize details panel"
+      aria-valuemin={DETAILS_MIN_W}
+      aria-valuemax={max}
+      aria-valuenow={width}
+      tabIndex={0}
+      onDoubleClick={() => apply(DETAILS_DEFAULT_W)}
+      onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        drag.current = { x: e.clientX, w: width, last: width };
+        document.body.classList.add('resizing-col');
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d) return;
+        d.last = Math.max(DETAILS_MIN_W, Math.min(max, d.w - (e.clientX - d.x)));
+        onLive(d.last);
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current;
+        if (!d) return;
+        drag.current = null;
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+        document.body.classList.remove('resizing-col');
+        onCommit(d.last);
+      }}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? KEY_STEP * 4 : KEY_STEP;
+        if (e.key === 'ArrowLeft') apply(width + step);
+        else if (e.key === 'ArrowRight') apply(width - step);
+        else if (e.key === 'Home') apply(DETAILS_MIN_W);
+        else if (e.key === 'End') apply(max);
+        else return;
+        e.preventDefault();
+      }}
+    />
   );
 }
