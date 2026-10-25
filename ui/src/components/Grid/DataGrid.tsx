@@ -14,7 +14,7 @@ import { compileFilter, computeView } from '../../filter/evaluate';
 import { appendAnd, type FilterGroup, type GridViewModel, type SortKey } from '../../filter/model';
 import { base64ToHex, formatCell, isBinary, isNumericKind, isPartial, isTruncated, rawText } from '../../lib/format';
 import { COPY_FORMAT_LABELS, serializeComplete, type CellFetcher, type CellLocator, type CopyFormat } from '../../lib/serialize';
-import { editedValue, sameValue, useEditBuffer, useEdits, type CellEdit, type PendingInsert } from '../../store/edits';
+import { editedValue, sameValue, useEditBuffer, useEdits, type CellEdit } from '../../store/edits';
 import { useSettings } from '../../store/settings';
 import { toast } from '../../store/ui';
 import { makeGridTheme } from '../../theme/gridTheme';
@@ -37,18 +37,9 @@ import { attachOverlayEditorSupport, commitOpenEditor, hasOpenEditor } from './o
 import { hiddenPredicate, overlayRows } from './overlay';
 import { cellEqualsCondition, quickFilterOptions } from './quickFilter';
 import './grid.css';
+import { rowValue, type GridSelectionInfo, type RowRef } from './gridTypes';
 
-/** A row of the grid: a source row (base or appended) or a pending insert. */
-export type RowRef = { src: number; ins?: undefined } | { ins: PendingInsert; src?: undefined };
-
-export interface GridSelectionInfo {
-  /** Source row (null for a pending insert). */
-  sourceRow: number | null;
-  insertId: string | null;
-  col: number;
-  /** Visible row index. */
-  row: number;
-}
+export { rowValue, type GridSelectionInfo, type RowRef };
 
 export interface DataGridProps {
   gridKey: string;
@@ -1046,14 +1037,6 @@ export function DataGrid(p: DataGridProps) {
       />
     </div>
   );
-}
-
-/** Value of a row ref for consumers outside the grid (record view, viewer). */
-export function rowValue(overlay: { get(i: number): readonly CellValue[] | undefined }, pendingUpdates: Record<number, Record<number, CellValue>>, r: RowRef, col: number): CellValue {
-  if (r.ins) return r.ins.values[col] ?? null;
-  const e = pendingUpdates[r.src];
-  if (e && col in e) return e[col];
-  return overlay.get(r.src)?.[col] ?? null;
 }
 
 export { hasOpenEditor, sameValue };

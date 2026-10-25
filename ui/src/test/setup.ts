@@ -1,10 +1,13 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, beforeAll } from 'vitest';
 import { loadBrandLogos } from '../theme/brand/ProviderLogo';
+import { loadDataGrid } from '../components/Grid/LazyDataGrid';
 
 // the logo artwork is a lazy chunk in the app; tests render it synchronously
 await loadBrandLogos();
+// the data grid is a lazy chunk too. Loaded once the test file is collected, so a file's vi.mock of Grid/DataGrid applies
+beforeAll(() => loadDataGrid());
 
 afterEach(() => cleanup());
 

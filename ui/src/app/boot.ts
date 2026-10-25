@@ -2,6 +2,7 @@ import { API_PREFIX, configureClient, errorMessage, getClientConfig } from '../a
 import type { SessionInfo } from '../api/types';
 import { engineSocket } from '../api/ws';
 import { hasCommand, runCommand } from '../commands/registry';
+import { preloadDataGrid } from '../components/Grid/LazyDataGrid';
 import { pluralize } from '../components/common/text';
 import { getPlatform } from '../platform';
 import { isDetachedWindow } from '../platform/windows';
@@ -256,6 +257,7 @@ export async function boot(): Promise<void> {
   releaseSessionsOnPageHide();
   startWorkspaceAutosave();
   // History loads when its panel mounts (and after each run); no request here.
+  preloadDataGrid();
 }
 
 /**
@@ -271,4 +273,5 @@ export async function bootDetached(): Promise<void> {
   await bootDetachedTabs();
   preloadTabCatalogs();
   releaseSessionsOnPageHide();
+  preloadDataGrid();
 }
