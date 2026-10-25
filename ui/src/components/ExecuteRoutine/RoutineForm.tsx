@@ -1,13 +1,14 @@
 // Execute routine building blocks shared by the dialog and the result page (WP3): the parameter inputs state, the
-// parameter form (typed editors, NULL / Default toggles, inline validation), the routine header and the live call
-// preview. The SQL itself comes from routineSql.ts (pure, tested).
-import { ArrowLeftFromLine, Check, Copy, TextCursorInput } from 'lucide-react';
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+// compact parameter form (one ~36px row per input parameter, typed editors, NULL / Default toggles, inline validation,
+// a single "Outputs" line for the OUT-only parameters), the routine header and the call preview (a one-line summary that
+// expands into the SQL). The SQL itself comes from routineSql.ts (pure, tested).
+import { ArrowLeftFromLine, Check, ChevronRight, Copy, Rows3, TextCursorInput } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { copyText } from '../../app/actions';
 import { ObjectIcon } from '../common/icons';
 import {
-  bareParamName, buildRoutineCall, initialInput, isOutputOnly, paramKindOf, routineLabel, routineNoun, valueEditorOf, type ParamInput, type RoutineCall,
-  type RoutineParam, type RoutineSpec,
+  bareParamName, buildRoutineCall, initialInput, isOutputOnly, paramKindOf, routineLabel, routineName, routineNoun, valueEditorOf, type ParamInput,
+  type RoutineCall, type RoutineParam, type RoutineSpec, type ValueEditor,
 } from './routineSql';
 import type { RememberedParam } from './store';
 
@@ -51,16 +52,16 @@ export function kindBadge(spec: Pick<RoutineSpec, 'kind' | 'packageName'>): stri
   return spec.packageName ? 'package function' : 'function';
 }
 
-/** Icon tile, eyebrow ("Execute procedure"), `schema.name` and the kind badge. */
-export function RoutineHeading({ spec, fallbackName, eyebrow, trailing }: { spec: RoutineSpec | null; fallbackName: string; eyebrow: string; trailing?: ReactNode }) {
+/** Icon tile, `schema.name` and the kind badge (plus an optional eyebrow line above the name). */
+export function RoutineHeading({ spec, fallbackName, eyebrow, trailing }: { spec: RoutineSpec | null; fallbackName: string; eyebrow?: string; trailing?: ReactNode }) {
   const type = spec?.kind ?? 'proc';
   return (
     <span className="er-heading">
       <span className={`er-tile kind-${type === 'proc' ? 'proc' : 'func'}`} aria-hidden="true">
-        <ObjectIcon type={type} size={18} />
+        <ObjectIcon type={type} size={16} />
       </span>
       <span className="er-heading-text">
-        <span className="er-eyebrow">{eyebrow}</span>
+        {eyebrow && <span className="er-eyebrow">{eyebrow}</span>}
         <span className="er-heading-name mono" title={spec ? routineLabel(spec) : fallbackName}>{spec ? routineLabel(spec) : fallbackName}</span>
       </span>
       {spec && <span className="er-kind">{kindBadge(spec)}</span>}
@@ -71,11 +72,17 @@ export function RoutineHeading({ spec, fallbackName, eyebrow, trailing }: { spec
 
 // ---------------------------------------------------------------------------------------------- form
 
-function directionOf(p: RoutineParam): 'in' | 'out' | 'inout' {
-  return p.direction;
+const DIRECTION_LABEL = { in: 'IN', out: 'OUT', inout: 'IN OUT' } as const;
+
+/** Output-only parameters (and Oracle REF CURSORs) take no value: they are listed on the "Outputs" line instead. */
+export function isOutputRow(p: RoutineParam, spec: Pick<RoutineSpec, 'dialect'>): boolean {
+  return isOutputOnly(p) || (paramKindOf(p.type, spec.dialect) === 'refcursor' && spec.dialect === 'plsql');
 }
 
-const DIRECTION_LABEL = { in: 'IN', out: 'OUT', inout: 'IN OUT' } as const;
+/** How an argument is written: `@name` in T-SQL, the bare name elsewhere. */
+export function bindPrefix(spec: Pick<RoutineSpec, 'dialect'>): string {
+  return spec.dialect === 'tsql' ? '@' : '';
+}
 
 interface FormProps {
   spec: RoutineSpec;
@@ -86,13 +93,15 @@ interface FormProps {
   onSubmit(): void;
   /** Id prefix (the dialog and the result page can both be mounted). */
   idPrefix?: string;
+  /** Narrow window: name and toggles on one line, the field on its own line below. */
+  stacked?: boolean;
 }
 
 /**
  * The parameter rows. Enter in a single-line field moves to the next field (on the last one it runs), Ctrl+Enter
  * runs from anywhere.
  */
-export function RoutineParamsForm({ spec, state, memory, onSubmit, idPrefix = 'er' }: FormProps) {
+export function RoutineParamsForm({ spec, state, memory, onSubmit, idPrefix = 'er', stacked = false }: FormProps) {
   const noun = routineNoun(spec.kind);
   if (!spec.params.length) {
     return <p className="er-muted er-noparams">This {noun} has no parameters.</p>;
@@ -114,22 +123,42 @@ export function RoutineParamsForm({ spec, state, memory, onSubmit, idPrefix = 'e
     if (next) next.focus();
     else onSubmit();
   };
+  const rows = spec.params.map((p, i) => ({ p, i })).filter(({ p }) => !isOutputRow(p, spec));
+  const outputs = spec.params.map((p, i) => ({ p, i })).filter(({ p }) => isOutputRow(p, spec));
+  const anyDefault = rows.some(({ p }) => p.hasDefault);
   return (
-    <div className="er-params" role="table" aria-label="Parameters" onKeyDown={onKeyDown}>
-      {spec.params.map((p, i) => (
-        <ParamRow
-          key={`${spec.packageName ?? ''}.${spec.name}#${spec.overload ?? ''}-${i}`}
-          id={`${idPrefix}-value-${i}`}
-          index={i}
-          param={p}
-          spec={spec}
-          input={state.inputs[i] ?? initialInput(p)}
-          error={state.showErrors || (state.inputs[i]?.value ?? '') !== '' ? state.call?.errors[i] ?? null : null}
-          mru={memory?.[bareParamName(p).toLowerCase()]?.values ?? []}
-          onValue={(v) => state.set(i, { value: v, mode: 'value' })}
-          onMode={(mode) => state.set(i, { mode })}
-        />
-      ))}
+    <div className={`er-form${stacked ? ' er-stacked' : ''}`}>
+      {rows.length > 0 && (
+        <div className={`er-params${anyDefault ? ' has-defaults' : ''}`} role="group" aria-label="Parameters" onKeyDown={onKeyDown}>
+          {rows.map(({ p, i }) => (
+            <ParamRow
+              key={`${spec.packageName ?? ''}.${spec.name}#${spec.overload ?? ''}-${i}`}
+              id={`${idPrefix}-value-${i}`}
+              index={i}
+              param={p}
+              spec={spec}
+              input={state.inputs[i] ?? initialInput(p)}
+              error={state.showErrors || (state.inputs[i]?.value ?? '') !== '' ? state.call?.errors[i] ?? null : null}
+              mru={memory?.[bareParamName(p).toLowerCase()]?.values ?? []}
+              onValue={(v) => state.set(i, { value: v, mode: 'value' })}
+              onMode={(mode) => state.set(i, { mode })}
+            />
+          ))}
+        </div>
+      )}
+      {outputs.length > 0 && (
+        <p className="er-outputs" role="note" aria-label="Output parameters" title="Written by the routine; shown with the results">
+          <ArrowLeftFromLine size={13} aria-hidden="true" />
+          <span className="er-outputs-label">Outputs:</span>
+          {outputs.map(({ p, i }, k) => (
+            <span key={i} className="er-out">
+              <span className="mono er-out-name">{bindPrefix(spec)}{bareParamName(p) || `$${i + 1}`}</span> <span className="mono er-type">{p.type || 'any'}</span>
+              {k < outputs.length - 1 ? ',' : ''}
+            </span>
+          ))}
+          <span className="er-outputs-note">(returned after the run)</span>
+        </p>
+      )}
     </div>
   );
 }
@@ -148,14 +177,23 @@ interface RowProps {
 
 function ParamRow({ id, index, param: p, spec, input, error, mru, onValue, onMode }: RowProps) {
   const [raw, setRaw] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const refocus = useRef(false);
   const name = bareParamName(p) || `$${index + 1}`;
-  const dir = directionOf(p);
+  const dir = p.direction;
   const kind = paramKindOf(p.type, spec.dialect);
-  const outputOnly = isOutputOnly(p) || (kind === 'refcursor' && spec.dialect === 'plsql');
-  const editor = valueEditorOf(p.type, kind);
+  const editor: ValueEditor = valueEditorOf(p.type, kind);
   const listId = `${id}-mru`;
   const passive = input.mode !== 'value';
   const placeholder = input.mode === 'null' ? 'NULL' : input.mode === 'default' ? 'default' : kind === 'string' ? 'empty string' : '';
+  const shown = input.mode === 'value' ? input.value : '';
+  const area = editor === 'multiline' && (expanded || shown.includes('\n'));
+  // Switching between the line and the text area replaces the element: keep the keyboard where it was.
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    document.getElementById(id)?.focus();
+  }, [area, id]);
   const common = {
     id,
     'data-er-value': true,
@@ -164,21 +202,14 @@ function ParamRow({ id, index, param: p, spec, input, error, mru, onValue, onMod
     'aria-describedby': error ? `${id}-err` : undefined,
     spellCheck: false,
   } as const;
-  const shown = input.mode === 'value' ? input.value : '';
-  const cls = (extra = '') => `input sm mono er-input${passive ? ' er-passive' : ''}${error ? ' invalid' : ''}${extra}`;
+  const cls = (extra = '') => `input mono er-input${passive ? ' er-passive' : ''}${error ? ' invalid' : ''}${extra}`;
   const dateLike = editor === 'date' || editor === 'datetime' || editor === 'time';
 
   let field: ReactNode;
-  if (outputOnly) {
-    field = (
-      <span className="er-output" title="Written by the routine; shown with the results">
-        <ArrowLeftFromLine size={13} aria-hidden="true" /> Returned after the run
-      </span>
-    );
-  } else if (editor === 'bool') {
+  if (editor === 'bool') {
     const v = input.mode === 'value' ? input.value : '';
     field = (
-      <span className={`er-bool${passive ? ' er-passive' : ''}`} role="radiogroup" aria-label={`Value of ${name}`}>
+      <span className={`er-bool${passive ? ' er-passive' : ''}${error ? ' invalid' : ''}`} role="radiogroup" aria-label={`Value of ${name}`}>
         {['true', 'false'].map((b) => (
           <button
             key={b}
@@ -195,8 +226,8 @@ function ParamRow({ id, index, param: p, spec, input, error, mru, onValue, onMod
         {passive && <span className="er-bool-state">{input.mode === 'null' ? 'NULL' : 'default'}</span>}
       </span>
     );
-  } else if (editor === 'multiline') {
-    field = <textarea {...common} className={cls(' er-text')} rows={3} value={shown} placeholder={placeholder} onChange={(e) => onValue(e.target.value)} />;
+  } else if (area) {
+    field = <textarea {...common} className={cls(' er-text')} rows={4} value={shown} placeholder={placeholder} onChange={(e) => onValue(e.target.value)} />;
   } else {
     const type = raw || !dateLike ? 'text' : editor === 'date' ? 'date' : editor === 'datetime' ? 'datetime-local' : 'time';
     field = (
@@ -234,31 +265,47 @@ function ParamRow({ id, index, param: p, spec, input, error, mru, onValue, onMod
   }
 
   return (
-    <div className={`er-row${error ? ' has-error' : ''}`} role="row" data-er-row={index}>
-      <span className="er-name-cell" role="cell">
-        <label className="er-name mono" htmlFor={outputOnly || editor === 'bool' ? undefined : id} title={p.name}>{name}</label>
+    <div className={`er-row ed-${editor}${error ? ' has-error' : ''}`} data-er-row={index}>
+      <span className="er-name-cell">
+        <label className="er-name mono" htmlFor={editor === 'bool' ? undefined : id} title={p.name}>{name}</label>
         <span className="er-meta">
           <span className="er-type mono" title={p.type}>{p.type || 'any'}</span>
           {dir !== 'in' && <span className={`er-dir dir-${dir}`}>{DIRECTION_LABEL[dir]}</span>}
         </span>
       </span>
-      <span className="er-value" role="cell">
-        {field}
+      <span className="er-value">
+        <span className="er-value-line">
+          {field}
+          {editor === 'multiline' && (
+            <button
+              type="button"
+              className={`er-raw${area ? ' on' : ''}`}
+              aria-pressed={area}
+              aria-label={`${area ? 'Collapse' : 'Expand'} ${name} to a text area`}
+              title={area ? 'Back to a single line' : 'Edit as multi-line text'}
+              disabled={area && shown.includes('\n')}
+              onClick={() => {
+                refocus.current = true;
+                setExpanded(!area);
+              }}
+            >
+              <Rows3 size={13} />
+            </button>
+          )}
+        </span>
         {error && <span id={`${id}-err`} className="er-field-error" role="alert">{error}</span>}
       </span>
-      <span className="er-opts" role="cell">
-        {!outputOnly && (
-          <button
-            type="button"
-            className={`er-toggle${input.mode === 'null' ? ' on' : ''}`}
-            aria-pressed={input.mode === 'null'}
-            title={`Pass NULL for ${name}`}
-            onClick={() => onMode(input.mode === 'null' ? 'value' : 'null')}
-          >
-            NULL
-          </button>
-        )}
-        {!outputOnly && p.hasDefault && (
+      <span className="er-opts">
+        <button
+          type="button"
+          className={`er-toggle${input.mode === 'null' ? ' on' : ''}`}
+          aria-pressed={input.mode === 'null'}
+          title={`Pass NULL for ${name}`}
+          onClick={() => onMode(input.mode === 'null' ? 'value' : 'null')}
+        >
+          NULL
+        </button>
+        {p.hasDefault && (
           <button
             type="button"
             className={`er-toggle${input.mode === 'default' ? ' on' : ''}`}
@@ -276,7 +323,7 @@ function ParamRow({ id, index, param: p, spec, input, error, mru, onValue, onMod
 
 // ---------------------------------------------------------------------------------------------- preview
 
-const KEYWORDS = /^(?:DECLARE|EXEC|EXECUTE|SELECT|FROM|AS|OUTPUT|BEGIN|END|CALL|NULL|DEFAULT|TABLE|INT|VARIADIC)$/i;
+const KEYWORDS = /^(?:DECLARE|EXEC|EXECUTE|SELECT|FROM|AS|OUTPUT|OUT|BEGIN|END|CALL|NULL|DEFAULT|TABLE|INT|VARIADIC)$/i;
 const TOKEN = /('(?:[^']|'')*')|(\[[^\]]*\]|"[^"]*")|([@:]\w+|\$\d+)|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_][\w$#]*\b)|(\s+|.)/g;
 
 /** Light syntax colouring of the generated call (the text content stays exactly the SQL). */
@@ -304,49 +351,66 @@ export function highlightCall(sql: string): ReactNode[] {
   return out;
 }
 
-const PREVIEW_VALUE_MAX = 60;
+const SUMMARY_VALUE_MAX = 40;
 
-function previewValue(v: unknown): string {
-  if (v === null || v === undefined) return 'NULL';
-  const s = typeof v === 'string' ? `'${v}'` : String(v);
-  return s.length > PREVIEW_VALUE_MAX ? `${s.slice(0, PREVIEW_VALUE_MAX - 1)}…` : s;
+function clip(s: string): string {
+  return s.length > SUMMARY_VALUE_MAX ? `${s.slice(0, SUMMARY_VALUE_MAX - 1)}…` : s;
 }
 
-export function bindPrefix(spec: RoutineSpec): string {
-  return spec.dialect === 'tsql' ? '@' : spec.dialect === 'plsql' ? ':' : '$';
+/**
+ * One line that reads like the call with its values filled in: `EXEC [dbo].[Report] @Year = 2024, @Total OUT`.
+ * (The SQL that runs holds bind placeholders; this is the human summary, the expanded view shows the real text.)
+ */
+export function callSummary(spec: RoutineSpec, inputs: readonly ParamInput[], call: RoutineCall): string {
+  const pre = bindPrefix(spec);
+  const args = argumentSummary(spec, inputs);
+  const parts: string[] = [];
+  const positional = spec.kind !== 'proc' && spec.dialect === 'tsql';
+  spec.params.forEach((p, i) => {
+    const a = args[i];
+    const nm = `${pre}${a.name}`;
+    const val = call.errors[i] ? '?' : clip(a.text);
+    if (a.mode === 'output') parts.push(`${nm} OUT`);
+    else if (positional) parts.push(a.mode === 'default' ? 'DEFAULT' : val);
+    else if (a.mode === 'default') return; // omitted from the call
+    else parts.push(`${nm} ${spec.dialect === 'tsql' ? '=' : '=>'} ${val}${p.direction === 'inout' ? ' OUT' : ''}`);
+  });
+  const name = routineName(spec);
+  if (spec.kind === 'proc') {
+    if (spec.dialect === 'tsql') return `EXEC ${name}${parts.length ? ` ${parts.join(', ')}` : ''}`;
+    return `CALL ${name}(${parts.join(', ')})`;
+  }
+  return `SELECT ${name}(${parts.join(', ')})`;
 }
 
-/** The call SQL (coloured), its bind values and a Copy button. */
-export function CallPreview({ spec, call }: { spec: RoutineSpec; call: RoutineCall }) {
+/**
+ * The call: a one-line summary bar ("EXEC [dbo].[Report] @Year = 2024") with Show SQL and Copy, expanding into a
+ * scrollable, coloured block holding the SQL that runs.
+ */
+export function CallPreview({ spec, call, inputs, defaultOpen = false }: { spec: RoutineSpec; call: RoutineCall; inputs: readonly ParamInput[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
+  const bodyId = useId();
+  const summary = useMemo(() => callSummary(spec, inputs, call), [spec, inputs, call]);
   const copy = () => {
     void copyText(call.sql, 'Call copied');
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
   return (
-    <div className="er-preview-wrap">
-      <div className="er-preview-head">
-        <span className="er-section-label">Call</span>
-        <div className="flex-1" />
+    <div className={`er-preview-wrap${open ? ' open' : ''}`}>
+      <div className="er-preview-bar">
+        <button type="button" className="er-expander" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)} title={open ? 'Hide the SQL' : 'Show the SQL that runs'}>
+          <ChevronRight size={13} aria-hidden="true" />
+          {open ? 'Hide SQL' : 'Show SQL'}
+        </button>
+        <code className="er-summary mono" aria-label="Call summary" title={summary}>{highlightCall(summary)}</code>
         <button type="button" className="er-copy" onClick={copy} title="Copy the call SQL" aria-label="Copy the call SQL">
           {copied ? <Check size={13} /> : <Copy size={13} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="er-preview mono" aria-label="Generated SQL" aria-live="polite">{highlightCall(call.sql)}</pre>
-      {call.params.length > 0 && (
-        <div className="er-binds mono" aria-label="Bind values">
-          {call.params.map((b) => (
-            <span key={b.name} className={`er-bind${call.invalid.includes(b.name) ? ' missing' : ''}`}>
-              {bindPrefix(spec)}{b.name}
-              <span className="er-bind-eq">
-                {b.direction === 'out' ? '→ output' : call.invalid.includes(b.name) ? '= ?' : `= ${previewValue(b.value)}`}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
+      {open && <pre id={bodyId} className="er-preview mono" aria-label="Generated SQL">{highlightCall(call.sql)}</pre>}
     </div>
   );
 }

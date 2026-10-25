@@ -494,6 +494,10 @@ export const EXTRA_OBJECTS: Record<'sqlite' | 'sqlserver' | 'oracle' | 'postgres
   sqlite: [{ t: 'trigger', n: 'trg_orders_audit', cm: null }],
   sqlserver: [
     { t: 'proc', n: 'GetCustomer', p: [['@Id', 'int', 'in', 0]] },
+    {
+      t: 'proc', n: 'GetActiveSessionByUniqueId',
+      p: [['@uniqueId', 'nvarchar(64)', 'in', 0], ['@tenantId', 'bigint', 'in', 0], ['@includeExpired', 'bit', 'in', 1], ['@since', 'datetime2', 'in', 1], ['@note', 'nvarchar(max)', 'in', 1], ['@retries', 'int', 'inout', 1], ['@actionId', 'int', 'out', 0], ['@errorCode', 'int', 'out', 0]],
+    },
     { t: 'proc', n: 'MonthlyReport', p: [['@Year', 'int', 'in', 0], ['@Month', 'int', 'in', 1]] },
     { t: 'func', n: 'fnTax', p: [['@amount', 'decimal(12,2)', 'in', 0], ['', 'decimal(12,2)', 'return', 0]] },
     { t: 'synonym', n: 'Cust', target: { s: 'dbo', n: 'customers', t: 'table' } },
