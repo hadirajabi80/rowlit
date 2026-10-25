@@ -1,7 +1,9 @@
 // Opening Data tabs (PLAN-M1.5 A1): a `view` tab registered as 'data' (components/layout/tabViews).
-import type { CatalogObjectType, CellValue } from '../../api/types';
+import type { CatalogObjectType, CellValue, Dialect } from '../../api/types';
 import { newCondition, newGroup, type FilterGroup } from '../../filter/model';
-import { useTabs } from '../../store/tabs';
+import { dbKey, useCatalog } from '../../store/catalog';
+import { dialectOrNull } from '../../store/connections';
+import { useTabs, type Tab, type ViewTab } from '../../store/tabs';
 import { focusIsLost } from '../common/focus';
 import { focusGrid } from '../Grid/controller';
 
@@ -19,6 +21,8 @@ export interface DataTabState {
   /** Server ORDER BY by column name (persisted). */
   sort?: SortByName[];
   nonce?: number;
+  /** Set on every explicit open of the table: a tab whose load failed loads again (it does not stay on the old error). */
+  retry?: number;
 }
 
 /** A sort key stored by column name (column positions can change between sessions). */
@@ -37,9 +41,22 @@ export interface OpenDataTabOptions {
   filter?: { column: string; value: CellValue }[] | FilterGroup | null;
 }
 
-export function dataTabKey(connectionId: string, database: string | null, schema: string | null, name: string): string {
-  return `${connectionId}|${database ?? ''}|${schema ?? ''}.${name}`.toLowerCase();
+/** SQL Server / SQLite match object names case-insensitively; the other servers keep `Orders` and `orders` apart. */
+const caseInsensitive = (dialect: Dialect | null): boolean => dialect === 'tsql' || dialect === 'sqlite';
+
+/**
+ * Identity of the Data tab of one object. Each part is separated by a control character (a schema `a` with the table
+ * `b.c` is not the schema `a.b` with the table `c`), and names are only case-folded where the server does (PostgreSQL's
+ * `"Orders"` and `orders` are two tables and must not share a tab).
+ */
+export function dataTabKey(connectionId: string, database: string | null, schema: string | null, name: string, dialect: Dialect | null = dialectOrNull(connectionId)): string {
+  const k = `data\u0001${connectionId}\u0001${database ?? ''}\u0001${schema ?? ''}\u0001${name}`;
+  return caseInsensitive(dialect) ? k.toLowerCase() : k;
 }
+
+/** The key tabs were given before `dataTabKey` was exact (still in restored workspaces). */
+const legacyDataTabKey = (connectionId: string, database: string | null, schema: string | null, name: string): string =>
+  `${connectionId}|${database ?? ''}|${schema ?? ''}.${name}`.toLowerCase();
 
 export function pairsToFilter(pairs: { column: string; value: CellValue }[]): FilterGroup {
   return newGroup('and', pairs.map((p) => {
@@ -51,14 +68,34 @@ export function pairsToFilter(pairs: { column: string; value: CellValue }[]): Fi
 
 export function openDataTab(o: OpenDataTabOptions): string {
   const filter = !o.filter ? null : Array.isArray(o.filter) ? pairsToFilter(o.filter) : o.filter;
-  const state: DataTabState = { schema: o.schema, name: o.name, type: o.type, filter, nonce: Date.now() };
+  const dialect = dialectOrNull(o.connectionId);
+  // The same table opened from a list that omits the default schema and from one that names it is one tab.
+  const schemaForKey = o.schema ?? useCatalog.getState().dbs[dbKey(o.connectionId, o.database)]?.defaultSchema ?? null;
+  const key = dataTabKey(o.connectionId, o.database, schemaForKey, o.name, dialect);
+  const tabs = useTabs.getState();
+  const isDataTab = (t: Tab): t is ViewTab => t.kind === 'view' && t.view === DATA_VIEW;
+  const sameObject = (t: ViewTab) => {
+    const s = (t.state ?? {}) as Partial<DataTabState>;
+    return s.name === o.name && (s.schema ?? null) === (o.schema ?? null);
+  };
+  // A tab restored from an older workspace carries the old key: adopt the new one so that it is found.
+  const legacy = legacyDataTabKey(o.connectionId, o.database, o.schema, o.name);
+  const stale = tabs.tabs.find((t): t is ViewTab => isDataTab(t) && t.key === legacy && t.key !== key && sameObject(t));
+  if (stale) tabs.updateView(stale.id, { key });
+  const existing = useTabs.getState().tabs.find((t): t is ViewTab => isDataTab(t) && t.key === key);
+  const cur = (existing?.state ?? {}) as Partial<DataTabState>;
+  // Opening a table that is already open shows that tab as it is (its filter, search and sort stay); only a filter that
+  // was asked for (FK navigation, a search hit) replaces the filter. `retry` makes a tab whose load failed load again.
+  const state: DataTabState = existing && !filter
+    ? { ...cur, schema: o.schema, name: o.name, type: o.type ?? cur.type, retry: Date.now() }
+    : { ...cur, schema: o.schema, name: o.name, type: o.type, filter, nonce: Date.now(), retry: Date.now() };
   return useTabs.getState().openView({
     view: DATA_VIEW,
     title: `${o.schema ? `${o.schema}.` : ''}${o.name}`,
     connectionId: o.connectionId,
     database: o.database,
     state,
-    key: dataTabKey(o.connectionId, o.database, o.schema, o.name),
+    key,
   });
 }
 

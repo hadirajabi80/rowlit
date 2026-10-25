@@ -4,12 +4,12 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { CatalogObjectType, ConnectionProfile } from '../../api/types';
-import { activateObject, connectAndOpen, newConsole } from '../../app/actions';
+import { activateObject, connectAndOpen, newConsole, openObjectDefault } from '../../app/actions';
 import { displayShortcut } from '../../commands/keys';
 import { hasCommand, runCommand } from '../../commands/registry';
 import type { CommandTarget } from '../../commands/types';
 import { useCommandContext } from '../../commands/useCommands';
-import { isTabular, qualifiedName } from '../../lib/sql';
+import { qualifiedName } from '../../lib/sql';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { getSourceModule, useSourceModules } from '../../lib/sources';
 import { dialectOf, kindOf, providerKind, useConnections } from '../../store/connections';
@@ -162,8 +162,10 @@ function activateRow(r: TreeRow, toggle: (r: TreeRow, open?: boolean) => void) {
   if (r.kind === 'object' || r.kind === 'column') {
     const t = targetOfRow(r);
     if (!t || t.kind !== 'object') return;
-    if (r.kind === 'object' && isTabular(t.ref.type, dialectOf(t.connectionId)) && hasCommand('data.open') && runCommand('data.open', t)) return;
-    activateObject(t.connectionId, t.database, t.ref, r.kind === 'column' ? r.column?.name : null);
+    // A table / view / synonym / dictionary opens its data, a routine its editor or structure (openObjectDefault);
+    // a column row opens its table's structure on that column.
+    if (r.kind === 'column') activateObject(t.connectionId, t.database, t.ref, r.column?.name ?? null);
+    else openObjectDefault(t.connectionId, t.database, t.ref);
   } else if ((r.kind === 'database' || r.kind === 'schema' || r.kind === 'folder' || r.kind === 'qfolder') && hasCommand('objects.open') && runCommand('objects.open', targetOfRow(r))) {
     if (!r.expanded) toggle(r, true); // WP3: Enter / double-click shows the Objects tab of the node (and expands it)
   } else toggle(r);

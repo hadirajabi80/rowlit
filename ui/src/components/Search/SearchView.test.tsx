@@ -179,10 +179,11 @@ describe('Search tab', () => {
     expect(objectTab).toMatchObject({ kind: 'object', ref: { name: 'GetCustomer', type: 'proc' }, database: 'Shop' });
     expect(useObjectSectionRequests.getState().requests[objectTab!.id]).toMatchObject({ section: 'ddl', reveal: { text: 'customer', line: 5 } });
 
-    // Double-click on an object row opens it (the object tab of the table).
+    // Double-click on an object row opens the table's data (not its structure).
     const customers = items().find((i) => i.querySelector('.sx-name')?.textContent === 'customers')!;
     fireEvent.doubleClick(customers);
-    expect(useTabs.getState().tabs.some((t) => t.kind === 'object' && t.ref.name === 'customers')).toBe(true);
+    expect(useTabs.getState().tabs.some((t) => t.kind === 'view' && t.view === 'data' && (t.state as { name?: string })?.name === 'customers')).toBe(true);
+    expect(useTabs.getState().tabs.some((t) => t.kind === 'object' && t.ref.name === 'customers')).toBe(false);
   });
 
   it('data search opens the table filtered on the row; Esc cancels a running search', async () => {

@@ -10,14 +10,14 @@ import { errorMessage } from '../../api/client';
 import { objectsApi } from '../../api/objectsClient';
 import type { CatalogObjectType, ObjectRef } from '../../api/types';
 import type { ObjectListItem } from '../../api/types.objects';
-import { activateObject, catalogDatabase } from '../../app/actions';
+import { catalogDatabase, openObjectDefault } from '../../app/actions';
 import type { ContextEntry } from '../../commands/menuModel';
-import { hasCommand, runCommand } from '../../commands/registry';
+import { runCommand } from '../../commands/registry';
 import type { ContainerTarget, ObjectTarget } from '../../commands/types';
 import { commandView, useCommandsVersion } from '../../commands/useCommands';
-import { isTabular, OBJECT_TYPE_SINGULAR } from '../../lib/sql';
+import { OBJECT_TYPE_SINGULAR } from '../../lib/sql';
 import { dbKey, useCatalog } from '../../store/catalog';
-import { dialectOf, useConnection } from '../../store/connections';
+import { useConnection } from '../../store/connections';
 import { useTabs } from '../../store/tabs';
 import { ObjectIcon } from '../common/icons';
 import { showContextMenu, showMenuBelow } from '../common/Menu';
@@ -171,10 +171,8 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
   const target = current ? targetOf(current) : null;
 
   const open = useCallback((it: ObjectListItem) => {
-    const t = targetOf(it);
-    if (isTabular(it.type, dialectOf(cid)) && hasCommand('data.open') && runCommand('data.open', t)) return;
-    activateObject(cid, database, t.ref);
-  }, [cid, database, targetOf]);
+    openObjectDefault(cid, database, refOf(it));
+  }, [cid, database, refOf]);
 
   // ---------------------------------------------------------------- layout math (virtualization)
   const tiled = layout !== 'list';

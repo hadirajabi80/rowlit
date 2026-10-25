@@ -53,6 +53,7 @@ import type { ExecutedQuery } from '../ResultsPane/executedQuery';
 import { GRID_EXPORT_MENU } from '../ResultsPane/toolbarModel';
 import { consumeGridFocus, dataGridKey, hasPendingGridFocus, openDataTab, type DataTabState, type SortByName } from './open';
 import { getSqlRunner } from './runner';
+import { registerDataTabActivity, releaseIdleDataSession } from './sessionLimit';
 import './datatab.css';
 
 const DEFAULT_PAGE = 1000;
@@ -163,6 +164,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     return next;
   }, []);
   const lastNonce = useRef(state.nonce);
+  const lastRetry = useRef(state.retry);
+  /** A page was read at least once: later failures (a bad filter, a lost connection) are not "could not open". */
+  const everRead = useRef(false);
 
   const session = useSessions((s) => s.sessions[s.byTab[tab.id]]);
   /** Oracle: unqualified names resolve in the tab session's CURRENT_SCHEMA (the tab's schema), not the login schema. */
@@ -226,9 +230,20 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     return () => clearTimeout(t);
   }, [filter, quick, sortNames, tab.id]);
 
-  const ensureSession = useCallback(
-    () => useSessions.getState().ensure(tab.id, connectionId, database, 'auto'),
-    [tab.id, connectionId, database],
+  const ensureSession = useCallback(async () => {
+    const open = () => useSessions.getState().ensure(tab.id, connectionId, database, 'auto');
+    try {
+      return await open();
+    } catch (e) {
+      // The connection is at its session limit: give up the session of the least recently used idle Data tab (it opens a
+      // new one when it loads again) instead of failing to open this table.
+      if (isApiError(e, 'SESSION_LIMIT') && (await releaseIdleDataSession(connectionId, tab.id))) return open();
+      throw e;
+    }
+  }, [tab.id, connectionId, database]);
+  useEffect(
+    () => registerDataTabActivity(tab.id, { busy: () => busy.current > 0, lastUse: () => lastUse.current }),
+    [tab.id], // busy / lastUse are refs
   );
 
   const predicate = useMemo(
@@ -361,6 +376,15 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     return uniqueKey.current;
   };
 
+  /**
+   * The table the user just opened could not be read: say so in a toast too (the tab shows the error, but it may be out
+   * of sight). Tabs in the background (a restored workspace) stay quiet.
+   */
+  const notifyOpenFailure = (message: string) => {
+    if (everRead.current || useTabs.getState().activeId !== tab.id) return;
+    toast('error', `Could not open ${tab.title}`, message);
+  };
+
   const loadNow = async (req: 0 | 'next') => {
     if (req === 'next' && !hasMoreRef.current) return;
     const offset = req === 'next' ? rowsRef.current.length : 0;
@@ -374,7 +398,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       let cols = colsRef.current;
       if (!cols) {
         const probe = await run(s.sessionId, describeSql(target, dialect), [], { label: 'data', maxRows: 1, source, skipHistory: true });
-        if (probe.error || !probe.resultSets[0]) throw Object.assign(new Error(probe.error?.message ?? 'Could not read the columns'), { code: probe.error?.code ?? null });
+        if (probe.error || !probe.resultSets[0]) {
+          throw Object.assign(new Error(probe.error?.message ?? `${state.name} returned no columns: it has none, or the server cannot describe it.`), { code: probe.error?.code ?? null });
+        }
         cols = probe.resultSets[0].columns;
       }
       // The hidden ROWID column of an earlier page is neither searched nor sorted.
@@ -431,7 +457,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       }
       if (res.error || res.status !== 'ok') {
         colsRef.current = cols;
-        setData((d) => ({ ...d, columns: cols, loading: false, error: res.error?.message ?? `Query ${res.status}`, errorCode: res.error?.code ?? null }));
+        const message = res.error?.message ?? `Query ${res.status}`;
+        if (req === 0 && res.status !== 'cancelled') notifyOpenFailure(message);
+        setData((d) => ({ ...d, columns: cols, loading: false, error: message, errorCode: res.error?.code ?? null }));
         return;
       }
       const set = res.resultSets[0];
@@ -452,6 +480,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         columns: colsRef.current, rows: rowsRef.current, hasMore: hasMoreRef.current, pageable: page.pageable, loading: false, error: null, errorCode: null,
         elapsedMs: res.elapsedMs, where: pred.where, sql: page.sql, params: pred.params, unordered, applied: pred,
       };
+      everRead.current = true;
       setData((d) => ({ ...next, rev: d.rev + 1 }));
       if (req === 0) {
         if (fetched.length < limit) setCount({ value: fetched.length, loading: false, error: null });
@@ -461,6 +490,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       if (seq !== loadSeq.current) return;
       const code = isApiError(e) ? e.code : ((e as { code?: string | null }).code ?? null);
       if (code === 'SESSION_LIMIT') offerCloseIdle(connectionId, () => void load(0));
+      else if (req === 0) notifyOpenFailure(e instanceof Error ? e.message : String(e));
       setData((d) => ({ ...d, loading: false, error: e instanceof Error ? e.message : String(e), errorCode: code }));
     }
   };
@@ -488,6 +518,13 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     }, 350);
     return () => clearTimeout(t);
   }, [sigNow, connectionId, anyPending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The table was opened again (explorer, Ctrl+P, a list…) while its last load had failed: load it again.
+  useEffect(() => {
+    if (state.retry === lastRetry.current) return;
+    lastRetry.current = state.retry;
+    if (started.current && data.error && !data.loading) void load(0);
+  }, [state.retry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Release the session when idle (auto mode, nothing pending); the next load opens a new one.
   useEffect(() => {

@@ -210,7 +210,27 @@ public sealed class OracleSession : AdoSessionBase
             // e.g. NUMBER outside System.Decimal: the provider-specific value keeps full precision.
             return ValueConverter.Text(r.GetProviderSpecificValue(ordinal)?.ToString() ?? "");
         }
+        catch (Exception ex) when (IsUnreadableValue(ex))
+        {
+            // A column of a user-defined type (object, collection, SDO_GEOMETRY...): ODP.NET has no type mapping for it and
+            // raises ORA-50071 for the cell. That must not fail the whole query (the table would not open): the cell shows
+            // the type as a placeholder, the other columns stay readable.
+            return ValueConverter.Text(UnreadableValueText(column.DbType));
+        }
     }
+
+    /// <summary>
+    /// ORA-50071 "Custom type mapping ... is not specified or is invalid": a value ODP.NET cannot materialise. ODP.NET raises it
+    /// as an OracleException or (GetValue of an object column) as an InvalidOperationException carrying the ORA text.
+    /// </summary>
+    public static bool IsUnreadableValue(Exception ex) =>
+        ex is OracleException { Number: UnmappedCustomTypeError }
+        || (ex is InvalidOperationException && ex.Message.Contains("ORA-" + UnmappedCustomTypeError, StringComparison.Ordinal));
+
+    public const int UnmappedCustomTypeError = 50071;
+
+    /// <summary>Placeholder text of a cell that cannot be read, e.g. "(OBJ_T)".</summary>
+    public static string UnreadableValueText(string? dbType) => string.IsNullOrWhiteSpace(dbType) ? "(unsupported type)" : "(" + dbType + ")";
 
     protected override async Task CommitAfterBatchAsync(BatchContext context, CancellationToken ct)
     {

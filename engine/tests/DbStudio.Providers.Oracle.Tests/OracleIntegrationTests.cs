@@ -54,6 +54,34 @@ public sealed class OracleIntegrationTests(OracleFixture fixture) : IClassFixtur
     }
 
     [SkippableFact]
+    public async Task Table_with_a_user_defined_type_column_still_opens_and_the_other_columns_are_readable()
+    {
+        // ODP.NET raises ORA-50071 for an object-type column (UDT, SDO_GEOMETRY...); that used to fail the whole query, so
+        // the table could not be opened at all. The cell shows the type as a placeholder instead.
+        RequireAvailable();
+        await using var session = await fixture.OpenSessionAsync();
+        try
+        {
+            var (setup, _) = await RunAsync(session, false,
+                new SqlBatch("CREATE TYPE QA_UDT_T AS OBJECT (a NUMBER, b VARCHAR2(10))", 1, 1),
+                new SqlBatch("CREATE TABLE QA_UDT_TAB (id NUMBER, o QA_UDT_T, name VARCHAR2(20))", 2, 1),
+                new SqlBatch("INSERT INTO QA_UDT_TAB VALUES (1, QA_UDT_T(7, 'x'), 'alpha')", 3, 1));
+            Assert.Equal(ExecutionStatus.Ok, setup.Status);
+            var (summary, sink) = await RunAsync(session, false, new SqlBatch("SELECT * FROM QA_UDT_TAB", 1, 1));
+            Assert.Equal(ExecutionStatus.Ok, summary.Status);
+            var rs = Assert.Single(sink.ResultSets);
+            var row = Assert.Single(rs.Rows);
+            Assert.Equal("1", row[0]?.ToString());
+            Assert.StartsWith("(", row[1]?.ToString());
+            Assert.Equal("alpha", row[2]?.ToString());
+        }
+        finally
+        {
+            await RunAsync(session, false, new SqlBatch("DROP TABLE QA_UDT_TAB PURGE", 1, 1), new SqlBatch("DROP TYPE QA_UDT_T FORCE", 2, 1));
+        }
+    }
+
+    [SkippableFact]
     public async Task DbmsOutput_FromProcedure_ViaExecRewrite()
     {
         RequireAvailable();

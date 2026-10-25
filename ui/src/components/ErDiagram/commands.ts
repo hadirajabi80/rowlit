@@ -7,7 +7,7 @@
 //   diagram · Enter opens data · F4 design · Tab / Shift+Tab next / previous card · Shift+F10 card menu · Esc deselect
 // The view itself is lazy (./views.tsx), so this module stays small.
 import { errorMessage } from '../../api/client';
-import { copyText } from '../../app/actions';
+import { copyText, openObjectDefault } from '../../app/actions';
 import { objectTargetOf } from '../../commands/core';
 import { registerCommands, runCommand, type Command } from '../../commands/registry';
 import { getPlatform } from '../../platform';
@@ -156,7 +156,10 @@ export const ER_COMMANDS: Command<never>[] = [
   view('er.exportSvg', 'Export diagram as SVG…', 'Download', (c) => void exportDiagram(c, 'svg'), { when: ready, keywords: 'vector image save' }),
 
   // ---- cards (args: ErCardArgs from the card menu / details pane; else the focused card of the active diagram)
-  card('er.openData', 'Open data', 'Table2', (c, key) => runCommand('data.open', objectArgs(c, key)), { shortcut: 'Enter', scope: 'er-canvas' }),
+  card('er.openData', 'Open data', 'Table2', (c, key) => {
+    const a = objectArgs(c, key);
+    if (a) openObjectDefault(a.connectionId, a.database, a.ref); // never silent: a failure to start the data view is reported
+  }, { shortcut: 'Enter', scope: 'er-canvas' }),
   card('er.design', 'Design table', 'PencilRuler', (c, key) => runCommand('designer.edit', objectArgs(c, key)), {
     shortcut: 'F4', scope: 'er-canvas',
     when: (args?: unknown) => {

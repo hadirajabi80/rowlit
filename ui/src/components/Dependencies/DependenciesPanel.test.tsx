@@ -70,8 +70,10 @@ describe('Dependencies panel', () => {
     expect(screen.getByText(/2 foreign keys · 2 views/)).toBeInTheDocument();
 
     fireEvent.click(within(usedBy).getByRole('listitem', { name: /order_lines/ }));
-    const opened = useTabs.getState().tabs.find((t) => t.kind === 'object');
-    expect(opened && opened.kind === 'object' && opened.ref).toMatchObject({ schema: 'public', name: 'order_lines', type: 'table' });
+    // A table link opens the table's DATA (the Data tab), not its structure.
+    expect(useTabs.getState().tabs.some((t) => t.kind === 'object')).toBe(false);
+    const opened = useTabs.getState().tabs.find((t) => t.kind === 'view' && t.view === 'data');
+    expect(opened && opened.kind === 'view' && opened.state).toMatchObject({ schema: 'public', name: 'order_lines', type: 'table' });
 
     // Re-mounting the same tab's section uses the cache (no second request).
     const before = mock.hits('/catalog/dependencies').length;

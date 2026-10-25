@@ -1,12 +1,12 @@
 // Opening Find in database (Ctrl+Shift+F: the dialog; "Open in tab": the Search tab) and the objects its results
 // point at.
 import type { SearchHitItem } from '../../api/types.search';
-import { activateObject } from '../../app/actions';
+import { openObjectDefault } from '../../app/actions';
 import { getEditor } from '../../app/editors';
 import type { CommandTarget, ObjectTarget } from '../../commands/types';
 import { newCondition, newGroup } from '../../filter/model';
 import { isTabular } from '../../lib/sql';
-import { getConnection, providerKind } from '../../store/connections';
+import { dialectOf, getConnection, providerKind } from '../../store/connections';
 import { useTabs } from '../../store/tabs';
 import { openDataTab, pairsToFilter } from '../DataTab/open';
 import { useExplorer } from '../Explorer/explorerStore';
@@ -110,10 +110,10 @@ export function targetOfObject(o: Pick<ObjectGroup, 'connectionId' | 'database' 
   return objectTarget(o);
 }
 
-/** Enter / double-click on a result object: the explorer's default open (object tab, or a routine's edit console). */
+/** Enter / double-click on a result object: the explorer's default open (a table's data, a routine's edit console / object tab). */
 export function openObjectOf(o: Pick<ObjectGroup, 'connectionId' | 'database' | 'schema' | 'name' | 'type'>): void {
   const t = objectTarget(o);
-  activateObject(t.connectionId, t.database, t.ref);
+  openObjectDefault(t.connectionId, t.database, t.ref);
 }
 
 /**
@@ -138,7 +138,7 @@ export function openHit(h: SearchHitItem, opts: { matchCase: boolean }): void {
       return;
     }
     case 'data': {
-      if (!isTabular(h.object.type)) return;
+      if (!isTabular(h.object.type, dialectOf(h.connectionId))) return;
       const filter = h.key?.length
         ? pairsToFilter(h.key)
         : newGroup('and', [newCondition(h.column ?? '', 'contains', [matchedText(h) ?? h.text])]);
