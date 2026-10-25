@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Import Wizard engine: streaming CSV / XLSX / JSON readers, type inference, per-dialect load paths, import job.
+       References the provider projects for their driver packages (SqlBulkCopy, Npgsql, ODP.NET array binding ...). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbStudio.Core\DbStudio.Core.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Sqlite\DbStudio.Providers.Sqlite.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.SqlServer\DbStudio.Providers.SqlServer.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Oracle\DbStudio.Providers.Oracle.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.PostgreSql\DbStudio.Providers.PostgreSql.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.MySql\DbStudio.Providers.MySql.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.ClickHouse\DbStudio.Providers.ClickHouse.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Snowflake\DbStudio.Providers.Snowflake.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbStudio.Import.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -27,5 +27,6 @@ public static class ModuleAssemblies
         typeof(Providers.Snowflake.SnowflakeModule).Assembly,         // WP-SF
         typeof(Providers.Cassandra.CassandraModule).Assembly,         // WP-CS
         typeof(Sources.Elasticsearch.ElasticsearchModule).Assembly,   // WP-ES
+        typeof(Import.ImportModule).Assembly,                         // Import Wizard
     ];
 }

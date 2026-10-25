@@ -33,6 +33,7 @@
     <ProjectReference Include="..\DbStudio.Providers.Snowflake\DbStudio.Providers.Snowflake.csproj" />
     <ProjectReference Include="..\DbStudio.Providers.Cassandra\DbStudio.Providers.Cassandra.csproj" />
     <ProjectReference Include="..\DbStudio.Sources.Elasticsearch\DbStudio.Sources.Elasticsearch.csproj" />
+    <ProjectReference Include="..\DbStudio.Import\DbStudio.Import.csproj" />
   </ItemGroup>
 
   <ItemGroup>
