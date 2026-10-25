@@ -48,27 +48,56 @@ import { analyzeSelect } from '../../filter/rewrite';
 import type { QueryCodegenArgs } from '../CodegenPanel/commands';
 import { OverflowToolbar, type OverflowItem } from '../layout/OverflowToolbar';
 import type { ObjectTarget } from '../../commands/types';
+import { DockButton } from './DockMenu';
 import { ExecutedQueryLine } from './ExecutedQueryLine';
 import { resultStatement, type ExecutedQuery } from './executedQuery';
 import { applyServerFilter, originalBatch, originatingSelect, previewServerSql, serverFilterAvailability } from './serverFilter';
 import { GRID_EXPORT_MENU, RESULTS_CODE_ENTRY } from './toolbarModel';
 import './results.css';
+import './dock.css';
 
 interface Props {
   tabId: string;
   dialect: Dialect;
   theme: EffectiveTheme;
+  /** Docked in the console: shows the hide (×) and maximize buttons. */
   onClose?: () => void;
+  /** The pane is the page of a `results` tab (ResultsTabView): the dock menu offers to dock it back, no × and no maximize. */
+  inTab?: boolean;
 }
 
-export function ResultsPane({ tabId, dialect, theme, onClose }: Props) {
+/** Dock menu, maximize and close (×) of the pane header; in a results tab only the dock menu. */
+function HeaderControls({ tabId, onClose, inTab }: { tabId: string; onClose?: () => void; inTab: boolean }) {
+  if (!onClose && !inTab) return null;
+  return (
+    <>
+      <DockButton tabId={tabId} inTab={inTab} />
+      {!inTab && <MaximizeToggle />}
+      {!inTab && onClose && (
+        <button className="icon-btn sm" title={commandView('view.toggleResults', undefined, 'Hide results').tooltip} aria-label="Hide results" onClick={onClose}>
+          <X size={14} />
+        </button>
+      )}
+    </>
+  );
+}
+
+export function ResultsPane({ tabId, dialect, theme, onClose, inTab = false }: Props) {
   const exec = useTabExecution(tabId);
   const active = useResults((s) => s.activeView[tabId]) ?? 'messages';
   const setActive = useResults((s) => s.setActiveView);
 
   if (!exec) {
+    const controls = onClose || inTab;
     return (
-      <div className="results empty">
+      <div className={`results empty${controls ? ' with-head' : ''}`}>
+        {controls && (
+          <div className="results-tabs" role="tablist" aria-label="Results">
+            <span className="results-head-end">
+              <HeaderControls tabId={tabId} onClose={onClose} inTab={inTab} />
+            </span>
+          </div>
+        )}
         <div className="results-empty">
           <Table2 size={26} />
           <div>
@@ -109,14 +138,10 @@ export function ResultsPane({ tabId, dialect, theme, onClose }: Props) {
           Messages
           {errors > 0 ? <span className="badge badge-error">{errors}</span> : exec.messages.length > 0 && <span className="results-tab-count">{exec.messages.length}</span>}
         </button>
-        <div className="flex-1" />
-        <ExecStatus exec={exec} />
-        {onClose && <MaximizeToggle />}
-        {onClose && (
-          <button className="icon-btn sm" title={commandView('view.toggleResults', undefined, 'Hide results').tooltip} aria-label="Hide results" onClick={onClose}>
-            <X size={14} />
-          </button>
-        )}
+        <span className="results-head-end">
+          <ExecStatus exec={exec} />
+          <HeaderControls tabId={tabId} onClose={onClose} inTab={inTab} />
+        </span>
       </div>
       {view ? <ResultSetView key={viewKey(exec.localId, view.id)} exec={exec} rs={view} dialect={dialect} theme={theme} /> : <MessagesPane exec={exec} />}
     </div>

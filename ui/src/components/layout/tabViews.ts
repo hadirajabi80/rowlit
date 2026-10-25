@@ -25,6 +25,11 @@ export interface TabViewDef {
    * marked dirty.
    */
   beforeClose?: (tab: ViewTab) => boolean | Promise<boolean>;
+  /**
+   * false: the tab cannot move to another window (it shows live state of this window, e.g. the results of a console);
+   * it can still sit in any editor group of this window.
+   */
+  detachable?: boolean;
   /** Called after the tab closed (release sessions, caches). */
   onClosed?: (tab: ViewTab) => void;
   /**

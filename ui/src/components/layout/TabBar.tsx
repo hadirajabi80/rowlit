@@ -13,6 +13,8 @@ import { OBJECTS_TAB_SETTING, useSettings } from '../../store/settings';
 import { groupTabs, isDirty, isPinnedTab, useTabs, type Tab } from '../../store/tabs';
 import { useUi } from '../../store/ui';
 import { connColorCss, connColorName } from '../../theme/connColors';
+import { scopeColorLabel } from '../../lib/scopeColors';
+import { useTabScopeColor } from '../../lib/tabScope';
 import { showContextMenu } from '../common/Menu';
 import { ObjectIcon } from '../common/icons';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
@@ -202,11 +204,14 @@ function TabItem({ tab, groupId, active, showConn, dropSide }: {
   const dragging = useTabDrag((s) => s.tabId === tab.id);
   const dirty = isDirty(tab);
   const t = useTabs.getState();
+  const scopeHex = useTabScopeColor(tab);
   if (isPinnedTab(tab)) return <PinnedTabItem tab={tab} active={active} />;
-  const color = connColorCss(conn?.color);
+  // The colour bar is the schema's (else database's) colour when one is set, else the connection's.
+  const color = connColorCss(scopeHex ?? conn?.color);
   const tooltip = [
     tab.title,
     conn ? `${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}${conn.readOnly ? ' · read-only' : ''}` : null,
+    scopeHex ? scopeColorLabel(scopeHex, 'schema') : null,
     tab.kind === 'console' && tab.filePath ? tab.filePath : null,
     tab.kind === 'console' && tab.savedQuery
       ? `Saved query in ${[tab.savedQuery.database, tab.savedQuery.schema].filter((x, i, a) => x && a.indexOf(x) === i).join('.') || 'the connection'}`

@@ -21,6 +21,12 @@ export function canReattachTabs(): boolean {
   return canDetachTabs() && isDetachedWindow();
 }
 
+/** False for tabs that show live state of this window (the results of a console) and cannot be handed to another one. */
+export function isDetachable(tabId: string | null | undefined): boolean {
+  const tab = useTabs.getState().tabs.find((t) => t.id === tabId);
+  return !(tab?.kind === 'view' && getTabView(tab.view)?.detachable === false);
+}
+
 /** A deep copy of the tab as plain JSON (what the workspace file stores). */
 function serializeTab(tab: Tab): Tab {
   return JSON.parse(JSON.stringify(tab)) as Tab;
@@ -69,7 +75,7 @@ async function cleanupAfterMove(tab: Tab): Promise<void> {
 export async function detachTab(tabId: string, position?: { x: number; y: number }): Promise<boolean> {
   const api = windowsApi();
   const tab = useTabs.getState().tabs.find((t) => t.id === tabId);
-  if (!api || !tab || isPinnedTab(tab)) return false; // the Objects tab stays in the main window
+  if (!api || !tab || isPinnedTab(tab) || !isDetachable(tabId)) return false; // the Objects tab stays in the main window
   if (!(await releaseTab(tab, 'to a new window'))) return false;
   let ok = false;
   try {

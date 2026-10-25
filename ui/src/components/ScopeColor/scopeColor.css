@@ -1,0 +1,17 @@
+/* Set colour… dialog: the connection dialog's swatches, a little larger for pointing. Tokens only. */
+.sc-hint {
+  margin: 0 0 var(--space-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+.sc-swatches {
+  gap: var(--space-3);
+}
+.sc-swatches .swatch {
+  width: 28px;
+  height: 28px;
+}
+.sc-swatches .swatch:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}

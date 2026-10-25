@@ -179,7 +179,25 @@ describe('a console bound to a saved query', () => {
       useTabs.getState().bindSavedQuery('t1', null);
       runCommand('file.save');
       expect(spy).toHaveBeenCalledTimes(1);
-      await waitFor(() => expect(file).toHaveBeenCalledTimes(1)); // an ordinary console saves a .sql file
+      // an ordinary console with no file now opens "Save query to schema…" instead of a .sql file
+      expect(useSavedQueryDialog.getState().request).toMatchObject({ mode: 'save', tabId: 't1' });
+      expect(file).not.toHaveBeenCalled();
+      // a console opened from / saved to a .sql file keeps writing that file
+      useSavedQueryDialog.setState({ request: null });
+      useTabs.setState({ tabs: [consoleOn({ filePath: 'C:/q/a.sql', savedText: 'x', title: 'a.sql' })] });
+      runCommand('file.save');
+      expect(useSavedQueryDialog.getState().request).toBeNull();
+      await waitFor(() => expect(file).toHaveBeenCalledTimes(1));
+      // an ordinary console without a SQL connection has no schema to save into: falls back to the file
+      useTabs.setState({ tabs: [consoleOn({ connectionId: null })] });
+      runCommand('file.save');
+      expect(useSavedQueryDialog.getState().request).toBeNull();
+      await waitFor(() => expect(file).toHaveBeenCalledTimes(2));
+      // Save as… always writes a file
+      useTabs.setState({ tabs: [consoleOn()] });
+      runCommand('file.saveAs');
+      await waitFor(() => expect(file).toHaveBeenCalledTimes(3));
+      expect(useSavedQueryDialog.getState().request).toBeNull();
     } finally {
       qs.run = orig;
       file.mockRestore();

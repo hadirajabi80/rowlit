@@ -12,9 +12,10 @@ import { useConnections } from '../store/connections';
 import { useResults } from '../store/results';
 import { applyEvents, createExecution, isRunning, type ExecutionState } from '../store/resultsReducer';
 import { useTabs } from '../store/tabs';
-import { toast, useUi } from '../store/ui';
+import { toast } from '../store/ui';
 import { pluralize } from '../components/common/text';
 import { splitForApply } from './ddl';
+import { revealResultsForRun } from '../components/ResultsPane/dock';
 import { editSessionOf, rememberEdit } from './editSession';
 import { existingObjectNamed, newObjectRef } from './newObject';
 import { useDesignerUi } from './store';
@@ -77,7 +78,7 @@ export async function runEditTab(tabId: string): Promise<boolean> {
   const localId = `edit${++seq}`;
   const base = createExecution({ localId, tabId, connectionId: edit.connectionId, sessionId: null, label: 'script', batches, maxRows: 0 });
   useResults.getState().begin(base);
-  if (!useUi.getState().resultsVisible) useUi.getState().toggle('resultsVisible');
+  revealResultsForRun(tabId, localId, true); // the toasts below say what happened; a failure opens the pane
   const name = edit.ref.name;
   const started = Date.now();
   useDesignerUi.getState().setEditRunInFlight(tabId, true);
