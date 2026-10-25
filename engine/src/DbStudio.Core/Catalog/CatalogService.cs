@@ -252,6 +252,13 @@ public sealed class CatalogService
         return await reader.GetCompileErrorsAsync(obj, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<SystemTypeInfo>> ListSystemTypesAsync(string connectionId, string? database, CancellationToken ct)
+    {
+        var (provider, profile, password) = Resolve(connectionId);
+        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
+        return await reader.ListSystemTypesAsync(database, ct).ConfigureAwait(false);
+    }
+
     public async Task<CatalogObject?> ResolvePublicSynonymAsync(string connectionId, string name, CancellationToken ct)
     {
         var (provider, profile, password) = Resolve(connectionId);

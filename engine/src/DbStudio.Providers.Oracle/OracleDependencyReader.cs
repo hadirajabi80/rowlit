@@ -110,11 +110,20 @@ public sealed class OracleDependencyReader(OracleConnection connection) : IDepen
             Name: OracleDb.Str(r, 0)!, Type: OracleDb.Str(r, 1), Created: r.IsDBNull(2) ? null : r.GetValue(2), Modified: r.IsDBNull(3) ? null : r.GetValue(3),
             Rows: OracleDb.Long(r, 4), Bytes: OracleDb.Long(r, 5), Comment: OracleDb.Str(r, 6)), ct, ("owner", owner)).ConfigureAwait(false);
         var list = new List<ObjectListItem>(rows.Count);
+        Dictionary<string, string>? kinds = null;
         foreach (var o in rows)
         {
             var t = MapType(o.Type);
             if (t is null || (type is not null && t != type)) continue;
-            list.Add(new ObjectListItem(t, owner, o.Name, o.Rows, o.Bytes, Dto(o.Modified), Dto(o.Created), o.Comment));
+            string? kind = null;
+            if (t == ObjectTypes.Type)
+            {
+                kinds ??= (await OracleDb.QueryAsync(connection, OracleDependencyQueries.TypeKindList,
+                        r => (Name: r.GetString(0), Kind: OracleCatalogReader.TypeKindOf(OracleDb.Str(r, 1), OracleDb.Str(r, 2))), ct, ("owner", owner)).ConfigureAwait(false))
+                    .GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.First().Kind, StringComparer.Ordinal);
+                kind = kinds.GetValueOrDefault(o.Name);
+            }
+            list.Add(new ObjectListItem(t, owner, o.Name, o.Rows, o.Bytes, Dto(o.Modified), Dto(o.Created), o.Comment) { Kind = kind });
         }
         list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
         return list;

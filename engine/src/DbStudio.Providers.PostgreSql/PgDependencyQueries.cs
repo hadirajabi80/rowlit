@@ -57,7 +57,13 @@ public static class PgDependencyQueries
     public const string TypeUsedBy =
         "SELECT DISTINCT c.relkind::text, n.nspname::text, c.relname::text, a.attname::text FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid " +
         "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE a.atttypid = $1 AND a.attnum > 0 AND NOT a.attisdropped " +
-        "AND c.relkind IN ('r','p','v','m','f') AND NOT c.relispartition";
+        "AND c.relkind IN ('r','p','v','m','f','c') AND NOT c.relispartition";
+
+    /// <summary>Routines with an argument or a result of type $1: kind, set-returning, schema, name, whether it is the result.</summary>
+    public const string TypeUsedByRoutines =
+        "SELECT p.prokind::text, p.proretset, n.nspname::text, p.proname::text, p.prorettype = $1 AS is_result, " +
+        "pg_get_function_identity_arguments(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace " +
+        "WHERE ($1 = ANY (p.proargtypes::oid[]) OR $1 = ANY (COALESCE(p.proallargtypes, ARRAY[]::oid[])) OR p.prorettype = $1) AND " + UserSchema;
 
     /// <summary>Relations a SQL-standard routine body (BEGIN ATOMIC, PostgreSQL 14+) depends on; $1 = routine oid.</summary>
     public const string RoutineDependsOnRelations =
@@ -101,7 +107,7 @@ public static class PgDependencyQueries
         "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
 
     public const string ListTypes =
-        "SELECT n.nspname::text, t.typname::text, obj_description(t.oid, 'pg_type') FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace " +
+        "SELECT n.nspname::text, t.typname::text, obj_description(t.oid, 'pg_type'), t.typtype::text FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace " +
         "LEFT JOIN pg_class c ON c.oid = t.typrelid WHERE t.typtype IN ('e','d','c','r') AND t.typcategory <> 'A' AND (t.typtype <> 'c' OR c.relkind = 'c') " +
         "AND ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
 
@@ -114,7 +120,7 @@ public static class PgDependencyQueries
     {
         [nameof(FindTrigger)] = FindTrigger, [nameof(ViewUsesRelations)] = ViewUsesRelations, [nameof(ViewUsesRoutines)] = ViewUsesRoutines,
         [nameof(ViewsUsing)] = ViewsUsing, [nameof(RelationTriggers)] = RelationTriggers, [nameof(TriggersCalling)] = TriggersCalling,
-        [nameof(SequenceUsedBy)] = SequenceUsedBy, [nameof(TypeUsedBy)] = TypeUsedBy, [nameof(RoutineDependsOnRelations)] = RoutineDependsOnRelations,
+        [nameof(SequenceUsedBy)] = SequenceUsedBy, [nameof(TypeUsedBy)] = TypeUsedBy, [nameof(TypeUsedByRoutines)] = TypeUsedByRoutines, [nameof(RoutineDependsOnRelations)] = RoutineDependsOnRelations,
         [nameof(RoutineSource)] = RoutineSource, [nameof(RoutinesMentioning)] = RoutinesMentioning, [nameof(RelationsNamed)] = RelationsNamed,
         [nameof(RoutinesNamed)] = RoutinesNamed, [nameof(ListRelations)] = ListRelations, [nameof(ListRoutines)] = ListRoutines,
         [nameof(ListTypes)] = ListTypes, [nameof(ListTriggers)] = ListTriggers,

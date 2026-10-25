@@ -11,7 +11,7 @@ namespace DbStudio.Providers.PostgreSql;
 /// lazily and disposed with the reader (docs/PLAN-PG.md 2.5). pg_catalog / information_schema are never listed;
 /// partitions are hidden (their partitioned parent is the table), foreign and partitioned tables are tables.
 /// </summary>
-public sealed class PgCatalogReader : ICatalogReader
+public sealed partial class PgCatalogReader : ICatalogReader
 {
     private readonly ConnectionProfile _profile;
     private readonly string? _password;
@@ -181,7 +181,14 @@ public sealed class PgCatalogReader : ICatalogReader
                 _ => (null, typeColsByType.GetValueOrDefault(t.Oid) ?? []),
             };
             var comment = prefix is null ? t.Comment : string.IsNullOrWhiteSpace(t.Comment) ? prefix : $"{prefix}: {t.Comment}";
-            objects.Add(new CatalogObject { Type = ObjectTypes.Type, Name = t.Name, Schema = schemaName, Comment = comment, Columns = cols });
+            var baseType = t.Kind switch
+            {
+                "e" => $"{cols.Count} label{(cols.Count == 1 ? "" : "s")}",
+                "d" => t.Base,
+                "r" => t.Subtype,
+                _ => $"{cols.Count} attribute{(cols.Count == 1 ? "" : "s")}",
+            };
+            objects.Add(new CatalogObject { Type = ObjectTypes.Type, Name = t.Name, Schema = schemaName, Comment = comment, Columns = cols, Kind = TypeKind(t.Kind), BaseType = baseType });
         }
 
         foreach (var tr in triggers)
@@ -322,19 +329,7 @@ public sealed class PgCatalogReader : ICatalogReader
             return new ObjectDetails(obj with { Schema = schema }, [], [], [], [], [], parameters, null, null, null);
         }
 
-        if (obj.Type == ObjectTypes.Type)
-        {
-            var t = (await PgDb.QueryAsync(conn, PgCatalogQueries.FindType, r => (Oid: PgDb.Oid(r, 0), Kind: r.GetString(1)), ct, schema, obj.Name).ConfigureAwait(false)).FirstOrDefault();
-            if (t.Oid == 0) throw EngineException.NotFound($"Type {schema}.{obj.Name}");
-            var detail = (await PgDb.QueryAsync(conn, PgCatalogQueries.TypeDetail, r => (Labels: PgDb.Strings(r, 3), Rel: PgDb.Oid(r, 7)), ct, t.Oid).ConfigureAwait(false)).FirstOrDefault();
-            var cols = new List<ColumnDetail>();
-            if (t.Kind == "e")
-                cols.AddRange(detail.Labels.Select((l, i) => new ColumnDetail(l, "enum label", false, null, false, false, false, null, i + 1)));
-            else if (detail.Rel != 0)
-                cols.AddRange((await PgDb.QueryAsync(conn, PgCatalogQueries.CompositeAttributes, r => (Name: r.GetString(0), Type: PgTypes.ShortTypeName(r.GetString(1))), ct, detail.Rel).ConfigureAwait(false))
-                    .Select((c, i) => new ColumnDetail(c.Name, c.Type, true, null, false, false, false, null, i + 1)));
-            return new ObjectDetails(obj with { Schema = schema }, cols, [], [], [], [], [], null, null, null);
-        }
+        if (obj.Type == ObjectTypes.Type) return await GetTypeDetailsAsync(conn, obj, schema, ct).ConfigureAwait(false);
 
         if (obj.Type == ObjectTypes.Trigger)
         {

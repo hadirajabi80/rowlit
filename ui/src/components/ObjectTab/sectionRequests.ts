@@ -2,7 +2,9 @@
 // The object tab consumes the request; `seq` makes a repeated request for the same section distinct.
 import { create } from 'zustand';
 
-export type ObjectSectionId = 'ddl' | 'columns' | 'indexes' | 'fks' | 'refs' | 'params' | 'deps';
+export type ObjectSectionId = 'ddl' | 'columns' | 'indexes' | 'fks' | 'refs' | 'params' | 'deps'
+  /** Type objects: the overview (kind, base type...), the named items (constraints, methods, namespaces) and the objects using the type. */
+  | 'overview' | 'members' | 'usedby';
 
 /** Find in database: put the cursor on this text in the DDL, on the occurrence nearest to `line`. */
 export interface DdlReveal {

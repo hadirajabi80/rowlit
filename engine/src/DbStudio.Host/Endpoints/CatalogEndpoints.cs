@@ -52,6 +52,10 @@ public static class CatalogEndpoints
         g.MapGet("/errors", (string id, string? database, string? schema, string? name, string? type, CatalogService catalog, CancellationToken ct) =>
             catalog.GetCompileErrorsAsync(id, Ref(database, schema, name, type), ct));
 
+        // SQL Server "System Data Types": the built-in types of the database (empty for other providers).
+        g.MapGet("/systemtypes", (string id, string? database, CatalogService catalog, CancellationToken ct) =>
+            catalog.ListSystemTypesAsync(id, Blank(database), ct));
+
         // Oracle PUBLIC synonym on-demand resolution (sql-intel lazy hook): a wire CatalogObject with "target", or 404.
         g.MapGet("/synonym", async (string id, string? name, CatalogService catalog, CancellationToken ct) =>
         {

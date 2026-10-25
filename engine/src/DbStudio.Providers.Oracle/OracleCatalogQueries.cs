@@ -170,6 +170,31 @@ public static class OracleCatalogQueries
 
     public const string GetDdl = "SELECT DBMS_METADATA.GET_DDL(:type,:name,:owner) FROM dual";
 
+    /// <summary>Object and collection types of :owner: typecode OBJECT | COLLECTION, collection kind and element type.</summary>
+    public const string Types =
+        "SELECT t.type_name, t.typecode, t.attributes, t.methods, c.coll_type, c.upper_bound, c.elem_type_owner, c.elem_type_name, c.length, c.precision, c.scale, c.char_used " +
+        "FROM all_types t LEFT JOIN all_coll_types c ON c.owner=t.owner AND c.type_name=t.type_name WHERE t.owner=:owner";
+
+    /// <summary>Attributes of every object type of :owner.</summary>
+    public const string TypeAttributes =
+        "SELECT type_name, attr_name, attr_type_owner, attr_type_name, length, precision, scale, char_used, attr_no " +
+        "FROM all_type_attrs WHERE owner=:owner ORDER BY type_name, attr_no";
+
+    /// <summary>One type (:owner, :name): flags, supertype, collection definition.</summary>
+    public const string TypeDetail =
+        "SELECT t.typecode, t.final, t.instantiable, t.supertype_owner, t.supertype_name, t.incomplete, " +
+        "c.coll_type, c.upper_bound, c.elem_type_owner, c.elem_type_name, c.length, c.precision, c.scale, c.char_used " +
+        "FROM all_types t LEFT JOIN all_coll_types c ON c.owner=t.owner AND c.type_name=t.type_name WHERE t.owner=:owner AND t.type_name=:name";
+
+    public const string TypeAttributesOf =
+        "SELECT attr_name, attr_type_owner, attr_type_name, length, precision, scale, char_used, attr_no " +
+        "FROM all_type_attrs WHERE owner=:owner AND type_name=:name ORDER BY attr_no";
+
+    public const string TypeMethods =
+        "SELECT method_name, method_type, params, results, final, instantiable, overriding " +
+        "FROM all_type_methods WHERE owner=:owner AND type_name=:name ORDER BY method_no";
+
+
     /// <summary>Every catalog query, for the owner-bind unit test.</summary>
     public static IReadOnlyDictionary<string, string> All => new Dictionary<string, string>
     {
@@ -185,5 +210,7 @@ public static class OracleCatalogQueries
         [nameof(DetailTriggers)] = DetailTriggers, [nameof(DetailRowCount)] = DetailRowCount, [nameof(DetailArguments)] = DetailArguments,
         [nameof(Source)] = Source, [nameof(ViewText)] = ViewText, [nameof(SynonymByName)] = SynonymByName, [nameof(Errors)] = Errors,
         [nameof(ErrorsAnyType)] = ErrorsAnyType, [nameof(DdlTransforms)] = DdlTransforms, [nameof(GetDdl)] = GetDdl,
+        [nameof(Types)] = Types, [nameof(TypeAttributes)] = TypeAttributes, [nameof(TypeDetail)] = TypeDetail, [nameof(TypeAttributesOf)] = TypeAttributesOf,
+        [nameof(TypeMethods)] = TypeMethods,
     };
 }

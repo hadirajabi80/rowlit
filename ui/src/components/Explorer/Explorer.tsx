@@ -14,6 +14,7 @@ import { dbKey, useCatalog } from '../../store/catalog';
 import { getSourceModule, useSourceModules } from '../../lib/sources';
 import { dialectOf, kindOf, providerKind, useConnections } from '../../store/connections';
 import { useSavedQueries } from '../../store/savedQueries';
+import { useSystemTypes } from '../../store/systemTypes';
 import { useSourceClients } from '../../store/sourceClients';
 import { connectionActivity, useSessions, type ConnectionActivity } from '../../store/sessions';
 import { connColorCss, connColorName } from '../../theme/connColors';
@@ -25,7 +26,7 @@ import { EmptyState } from '../EmptyState/EmptyState';
 import { contextMenu } from '../layout/commandMenu';
 import { savedQueryTooltip } from '../SavedQueries/model';
 import { activeChips, ALL_CONNECTIONS, chipsFor, TYPE_CHIPS, useExplorer } from './explorerStore';
-import { buildTree, databasesOf, isSourceConnection, nodeId, queriesShown, refOf, singleSchema, typesOfChips, type TreeRow } from './tree';
+import { buildTree, databasesOf, isSourceConnection, nodeId, parseSystemTypesId, queriesShown, refOf, singleSchema, typesOfChips, type TreeRow } from './tree';
 
 export { useExplorer } from './explorerStore';
 
@@ -110,7 +111,10 @@ export function targetOfRow(r: TreeRow): CommandTarget | null {
     return ref ? { kind: 'object', connectionId: r.connectionId, database: r.database ?? null, ref } : null;
   }
   if (r.kind === 'database' || r.kind === 'schema' || r.kind === 'folder') {
-    return { kind: 'container', connectionId: r.connectionId, database: r.database ?? null, schema: r.schema ?? null, objectType: r.kind === 'folder' ? r.objectType : undefined };
+    return {
+      kind: 'container', connectionId: r.connectionId, database: r.database ?? null, schema: r.schema ?? null, objectType: r.kind === 'folder' ? r.objectType : undefined,
+      ...(r.kind === 'folder' && r.typeKind ? { typeKind: r.typeKind } : {}),
+    };
   }
   if (r.kind === 'qfolder') return { kind: 'container', connectionId: r.connectionId, database: r.database ?? null, schema: r.schema ?? null, queries: true };
   if (r.kind === 'query' && r.savedQuery) {
@@ -134,6 +138,7 @@ export function contextMenuIdOf(r: TreeRow): string | null {
     if (t === 'table') return 'explorer.table';
     if (t === 'view' || t === 'mview') return 'explorer.view';
     if (t && ROUTINES.has(t)) return 'explorer.routine';
+    if (t === 'type' && r.typeKind) return 'explorer.type';
     return 'explorer.object';
   }
   return null;
@@ -190,6 +195,14 @@ export function Explorer() {
   const sourceClients = useSourceClients((s) => s.clients);
   const savedQueries = useSavedQueries((s) => s.byConn);
   useLazyLoads(connections);
+  const systemTypes = useSystemTypes((s) => s.byDb);
+  // SQL Server's System Data Types group loads its built-in types when first expanded.
+  useEffect(() => {
+    for (const id of expanded) {
+      const p = parseSystemTypesId(id);
+      if (p) void useSystemTypes.getState().load(p.connectionId, p.database);
+    }
+  }, [expanded]);
 
   const chips = activeChips({ chips: chipsMap, chipScope });
   const typesFor = useMemo(() => {
@@ -202,10 +215,10 @@ export function Explorer() {
   const queriesFor = useMemo(() => (cid: string) => queriesShown(chipsFor({ chips: chipsMap, chipScope }, cid)), [chipsMap, chipScope]);
 
   const rows = useMemo(
-    () => buildTree({ connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, savedQueries, queriesFor }),
+    () => buildTree({ connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, savedQueries, queriesFor, systemTypes }),
     // sourceVersion: source modules re-render their subtrees through notifySourceTreeChanged().
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, sourceVersion, savedQueries, queriesFor],
+    [connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, sourceVersion, savedQueries, queriesFor, systemTypes],
   );
   // One definition of "connected" (shared with the status bar): an open session or a loaded catalog.
   const activityOf = useMemo(() => {
@@ -515,9 +528,10 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   else if (r.kind === 'cfolder') icon = <Folder size={16} strokeWidth={1.5} className="obj-icon obj-folder" />;
   else if (r.kind === 'database') icon = <DatabaseIcon />;
   else if (r.kind === 'schema') icon = <span className="schema-glyph" aria-hidden="true">S</span>;
-  else if (r.kind === 'folder' || r.kind === 'qfolder') icon = <Folder size={16} strokeWidth={1.5} className="obj-icon obj-folder" />;
+  else if (r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'sfolder') icon = <Folder size={16} strokeWidth={1.5} className="obj-icon obj-folder" />;
   else if (r.kind === 'query') icon = <FileCode2 size={16} strokeWidth={1.5} className="obj-icon obj-query" aria-hidden="true" />;
-  else if (r.kind === 'object' && r.objectType) icon = <ObjectIcon type={r.objectType} />;
+  else if (r.kind === 'object' && r.objectType) icon = <ObjectIcon type={r.objectType} kind={r.typeKind} />;
+  else if (r.kind === 'sysType') icon = <ObjectIcon type="type" kind="alias" />;
   else if (r.kind === 'column') icon = <ColumnIcon pk={r.column?.pk} fk={r.column?.fk} />;
   else if (r.kind === 'source') {
     const custom = r.source ? getSourceModule(r.source.providerId)?.icon?.(r) : undefined;
@@ -568,7 +582,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       onMouseDown={() => onSelect()}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('.tree-twisty, .tree-row-actions')) return;
-        if (r.kind === 'cfolder' || r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'database' || r.kind === 'schema' || (r.kind === 'source' && r.expandable)) onToggle();
+        if (r.kind === 'cfolder' || r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'sfolder' || r.kind === 'database' || r.kind === 'schema' || (r.kind === 'source' && r.expandable)) onToggle();
         if (r.kind === 'status' && r.status === 'load') onActivate();
       }}
       onDoubleClick={(e) => {

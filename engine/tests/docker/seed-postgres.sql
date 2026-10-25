@@ -8,14 +8,21 @@ DROP MATERIALIZED VIEW IF EXISTS public.customer_totals;
 DROP VIEW IF EXISTS public.customer_orders;
 DROP TABLE IF EXISTS public.extra_types, public.order_lines, public.orders, public.products, public.customers, public.countries CASCADE;
 DROP FUNCTION IF EXISTS public.fn_tax(numeric), public.fn_tax(numeric, numeric), public.orders_of(integer), public.orders_check();
+DROP FUNCTION IF EXISTS public.format_address(public.address), public.price_span(numeric, numeric);
 DROP PROCEDURE IF EXISTS public.add_order_line(integer, integer, integer, integer), public.get_customer_report(integer);
 DROP TYPE IF EXISTS public.order_status;
 DROP DOMAIN IF EXISTS public.email_address;
+DROP DOMAIN IF EXISTS public.positive_int;
+DROP TYPE IF EXISTS public.price_range;
+DROP TYPE IF EXISTS public.address;
 DROP SEQUENCE IF EXISTS public.order_numbers;
 
 CREATE SCHEMA sales;
 CREATE TYPE public.order_status AS ENUM ('new', 'paid', 'shipped', 'cancelled');
 CREATE DOMAIN public.email_address AS text CHECK (VALUE ~ '@');
+CREATE DOMAIN public.positive_int AS integer NOT NULL DEFAULT 1 CONSTRAINT positive_int_check CHECK (VALUE > 0);
+CREATE TYPE public.address AS (street text, city text, zip varchar(10));
+CREATE TYPE public.price_range AS RANGE (SUBTYPE = numeric);
 CREATE SEQUENCE public.order_numbers START WITH 1000;
 
 CREATE TABLE public.countries (id integer PRIMARY KEY, name text NOT NULL);
@@ -72,6 +79,9 @@ CREATE FUNCTION public.fn_tax(amount numeric) RETURNS numeric LANGUAGE sql IMMUT
 CREATE FUNCTION public.fn_tax(amount numeric, rate numeric) RETURNS numeric LANGUAGE sql IMMUTABLE AS $$ SELECT amount * rate $$;
 CREATE FUNCTION public.orders_of(p_customer integer) RETURNS TABLE (id integer, order_date timestamptz, total numeric)
 LANGUAGE sql STABLE AS $$ SELECT o.id, o.order_date, o.total FROM public.orders o WHERE o.customer_id = p_customer ORDER BY o.id $$;
+CREATE FUNCTION public.format_address(a public.address) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT a.street || ', ' || a.zip || ' ' || a.city $$;
+CREATE FUNCTION public.price_span(low numeric, high numeric) RETURNS public.price_range LANGUAGE sql IMMUTABLE AS $$ SELECT public.price_range(low, high) $$;
+COMMENT ON TYPE public.address IS 'Postal address';
 CREATE PROCEDURE public.add_order_line(p_order integer, p_product integer, p_qty integer, INOUT inserted integer) LANGUAGE plpgsql AS $$
 BEGIN
   INSERT INTO public.order_lines (order_id, product_id, qty) VALUES (p_order, p_product, p_qty);

@@ -161,6 +161,9 @@ export interface CatalogObject {
   target?: { d?: string | null; s: string | null; n: string; t: CatalogObjectType | null };
   members?: CatalogPackageMember[];
   st?: 'VALID' | 'INVALID' | null;
+  /** Type objects: the kind (see lib/typeKinds.ts) and a one-line definition summary. */
+  k?: string;
+  bt?: string;
 }
 export interface CatalogSchema { name: string; version: number; objects: CatalogObject[] }
 export interface CatalogSnapshot {
@@ -195,6 +198,27 @@ export interface ObjectDetails {
   rowCountEstimate: number | null;
   created: string | null;
   modified: string | null;
+  /** Type objects only: kind-specific overview and the objects that use the type. */
+  typeInfo?: TypeDetails | null;
+}
+/** Overview of a type object (GET /catalog/object on a `type`): property list, named items, and who uses it. */
+export interface TypeDetails {
+  kind: string;
+  properties: { name: string; value: string }[];
+  /** Title of `items` ("Check constraints", "Methods", "Target namespaces"). */
+  itemsTitle: string | null;
+  items: { name: string; detail: string }[];
+  usedBy: { schema: string | null; name: string; type: CatalogObjectType; usage: string }[];
+}
+/** A built-in data type (GET /catalog/systemtypes, SQL Server's "System Data Types"). */
+export interface SystemTypeInfo {
+  name: string;
+  category: string;
+  maxLength: number | null;
+  precision: number | null;
+  scale: number | null;
+  collation: string | null;
+  nullable: boolean;
 }
 export interface DdlResponse { ddl: string; source: 'generated' | 'stored' }
 export interface ObjectError { line: number; col: number; message: string; severity: 'error' | 'warning' }

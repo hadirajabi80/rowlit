@@ -4,6 +4,7 @@
 import { api, errorMessage } from '../api/client';
 import type { CatalogColumnTuple, CatalogObjectType, Dialect, ObjectRef } from '../api/types';
 import { qualifiedName, quoteIdent } from '../lib/sql';
+import { dropTypeSql, typeKindOf } from '../lib/typeKinds';
 import { dbKey, useCatalog } from '../store/catalog';
 import { dialectOf, getConnection } from '../store/connections';
 import { getActiveConsole } from '../store/tabs';
@@ -21,12 +22,21 @@ const DROP_KEYWORD: Partial<Record<CatalogObjectType, string>> = {
 export function canDrop(type: CatalogObjectType, dialect: Dialect): boolean {
   if (!DROP_KEYWORD[type]) return false;
   if (dialect === 'sqlite') return type === 'table' || type === 'view' || type === 'trigger';
-  if (dialect === 'tsql') return type !== 'package' && type !== 'mview' && type !== 'type';
+  if (dialect === 'tsql') return type !== 'package' && type !== 'mview';
   return true;
 }
 
-/** The statement Drop… runs. */
-export function dropSql(ref: Pick<ObjectRef, 'schema' | 'name' | 'type'>, dialect: Dialect): string {
+/** The kind (lib/typeKinds.ts) of a type object of the loaded catalog; null when its schema is not loaded or the provider reports none. */
+export function catalogTypeKind(connectionId: string, database: string | null, ref: Pick<ObjectRef, 'schema' | 'name' | 'type'>): string | null {
+  if (ref.type !== 'type') return null;
+  const d = useCatalog.getState().dbs[dbKey(connectionId, catalogDatabase(connectionId, database))];
+  const schema = d?.loaded[ref.schema ?? d?.defaultSchema ?? ''];
+  return typeKindOf(schema?.objects.find((x) => x.t === 'type' && x.n === ref.name));
+}
+
+/** The statement Drop… runs (`kind`: the kind of a type object: DROP TYPE / DROP DOMAIN / DROP XML SCHEMA COLLECTION). */
+export function dropSql(ref: Pick<ObjectRef, 'schema' | 'name' | 'type'>, dialect: Dialect, kind?: string | null): string {
+  if (ref.type === 'type' && kind) return dropTypeSql(ref, kind, dialect);
   const kw = DROP_KEYWORD[ref.type] ?? ref.type.toUpperCase();
   const name = qualifiedName(ref, dialect, { always: dialect !== 'sqlite' });
   const tail = dialect === 'plsql' && ref.type === 'table' ? ' PURGE' : '';
@@ -119,16 +129,44 @@ async function applyStatement(connectionId: string, database: string | null, ref
 export async function dropObject(connectionId: string, database: string | null, ref: ObjectRef): Promise<void> {
   if (refusedReadOnly(connectionId, 'Drop')) return;
   const dialect = dialectOf(connectionId);
-  const sql = dropSql(ref, dialect);
+  const sql = dropSql(ref, dialect, catalogTypeKind(connectionId, database, ref));
   const conn = getConnection(connectionId);
+  const users = ref.type === 'type' ? await typeUsers(connectionId, database, ref) : '';
   const ok = await useUi.getState().askConfirm({
     title: `Drop ${ref.name}?`,
-    message: `This permanently removes the ${ref.type === 'mview' ? 'materialized view' : ref.type} from “${conn?.name ?? 'the connection'}”. It cannot be undone. The statement:`,
+    message: `This permanently removes the ${ref.type === 'mview' ? 'materialized view' : ref.type} from “${conn?.name ?? 'the connection'}”. It cannot be undone.${users} The statement:`,
     items: [sql],
     confirmLabel: 'Drop',
     danger: true,
   });
   if (ok) await applyStatement(connectionId, database, ref, sql, `Dropped ${ref.name}`);
+}
+
+/**
+ * " It is used by 3 objects (dbo.Customers, dbo.SavePhones, …): the drop fails while they use it." for a type that is still
+ * in use (from the object details); empty when it is unused or the usage cannot be read.
+ */
+async function typeUsers(connectionId: string, database: string | null, ref: ObjectRef): Promise<string> {
+  try {
+    const d = await api.objectDetails(connectionId, catalogDatabase(connectionId, database), ref);
+    const used = d.typeInfo?.usedBy ?? [];
+    if (!used.length) return '';
+    const names = used.slice(0, 5).map((u) => (u.schema ? `${u.schema}.${u.name}` : u.name));
+    const more = used.length > names.length ? `, and ${used.length - names.length} more` : '';
+    return ` ⚠ It is still used by ${used.length} object${used.length === 1 ? '' : 's'} (${names.join(', ')}${more}): the drop fails until they stop using it.`;
+  } catch {
+    return '';
+  }
+}
+
+/** Script as CREATE: the type's (or any object's) generated or stored definition in a new console. */
+export async function scriptCreate(connectionId: string, database: string | null, ref: ObjectRef): Promise<void> {
+  try {
+    const r = await api.ddl(connectionId, catalogDatabase(connectionId, database), ref);
+    newConsole(connectionId, database, r.ddl);
+  } catch (e) {
+    toast('error', `Could not load the definition of ${ref.name}`, errorMessage(e));
+  }
 }
 
 /** Truncate…: removes every row of a table after an explicit confirmation. */

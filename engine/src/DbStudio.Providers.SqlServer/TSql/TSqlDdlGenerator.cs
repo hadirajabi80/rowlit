@@ -124,7 +124,7 @@ public sealed class TSqlDdlGenerator : IDdlGenerator
         return outSb.ToString();
     }
 
-    private static string ColumnLine(SqlServerColumnDefinition c)
+    internal static string ColumnLine(SqlServerColumnDefinition c, bool named = true)
     {
         var sb = new StringBuilder(SqlServerNames.Quote(c.Name));
         if (c.ComputedDefinition is not null)
@@ -140,7 +140,7 @@ public sealed class TSqlDdlGenerator : IDdlGenerator
         sb.Append(c.Nullable ? " NULL" : " NOT NULL");
         if (c.DefaultDefinition is not null)
         {
-            if (!string.IsNullOrEmpty(c.DefaultName)) sb.Append(" CONSTRAINT ").Append(SqlServerNames.Quote(c.DefaultName));
+            if (named && !string.IsNullOrEmpty(c.DefaultName)) sb.Append(" CONSTRAINT ").Append(SqlServerNames.Quote(c.DefaultName));
             sb.Append(" DEFAULT ").Append(c.DefaultDefinition);
         }
         return sb.ToString();
@@ -173,14 +173,14 @@ public sealed class TSqlDdlGenerator : IDdlGenerator
         return sb.Append(';').ToString();
     }
 
-    private static string Clustering(string typeDesc) => typeDesc.ToUpperInvariant() switch
+    internal static string Clustering(string typeDesc) => typeDesc.ToUpperInvariant() switch
     {
         "CLUSTERED" => "CLUSTERED ",
         "NONCLUSTERED" => "NONCLUSTERED ",
         _ => "",
     };
 
-    private static string KeyList(IReadOnlyList<SqlServerIndexColumn> cols) =>
+    internal static string KeyList(IReadOnlyList<SqlServerIndexColumn> cols) =>
         string.Join(", ", cols.Select(k => SqlServerNames.Quote(k.Name) + (k.Descending ? " DESC" : " ASC")));
 
     private static string? Action(string desc) => desc.ToUpperInvariant() switch

@@ -21,6 +21,7 @@ public sealed class PgDependencyReader(PgCatalogReader catalog) : IDependencyRea
     {
         "v" => ObjectTypes.View,
         "m" => ObjectTypes.MView,
+        "c" => ObjectTypes.Type,
         "S" => ObjectTypes.Sequence,
         _ => ObjectTypes.Table,
     };
@@ -83,6 +84,8 @@ public sealed class PgDependencyReader(PgCatalogReader catalog) : IDependencyRea
                 if (found.Name is null) throw EngineException.NotFound($"Type {schema}.{obj.Name}");
                 foreach (var c in await PgDb.QueryAsync(conn, PgDependencyQueries.TypeUsedBy, ReadRelColumn, ct, found.Oid).ConfigureAwait(false))
                     usedBy.Add(new ObjectDependency(DependencyKinds.UsedBy, Rel(c.Kind, c.Schema, c.Name), $"column {c.Column}", true));
+                foreach (var f in await PgDb.QueryAsync(conn, PgDependencyQueries.TypeUsedByRoutines, ReadTypeRoutine, ct, found.Oid).ConfigureAwait(false))
+                    usedBy.Add(new ObjectDependency(DependencyKinds.UsedBy, new ObjectRef(db, f.Schema, f.Name, RoutineType(f.Kind, f.RetSet)), f.IsResult ? "return type" : "parameter", true));
                 return DependencyGraphs.Build(new ObjectRef(db, found.Schema, found.Name, ObjectTypes.Type), uses, usedBy);
             }
         }
@@ -135,6 +138,10 @@ public sealed class PgDependencyReader(PgCatalogReader catalog) : IDependencyRea
 
     private sealed record RelRow(string Kind, string Schema, string Name);
     private static RelRow ReadRel(NpgsqlDataReader r) => new(PgDb.Char(r, 0), r.GetString(1), r.GetString(2));
+
+    internal sealed record TypeRoutineRow(string Kind, bool RetSet, string Schema, string Name, bool IsResult, string Arguments);
+    internal static TypeRoutineRow ReadTypeRoutine(NpgsqlDataReader r) =>
+        new(PgDb.Char(r, 0), PgDb.Bool(r, 1), r.GetString(2), r.GetString(3), PgDb.Bool(r, 4), PgDb.Str(r, 5) ?? "");
 
     private sealed record RelColumnRow(string Kind, string Schema, string Name, string Column);
     private static RelColumnRow ReadRelColumn(NpgsqlDataReader r) => new(PgDb.Char(r, 0), r.GetString(1), r.GetString(2), r.GetString(3));
@@ -225,8 +232,9 @@ public sealed class PgDependencyReader(PgCatalogReader catalog) : IDependencyRea
         }
         if (Want(ObjectTypes.Type))
         {
-            foreach (var r in await PgDb.QueryAsync(conn, PgDependencyQueries.ListTypes, r => (Schema: r.GetString(0), Name: r.GetString(1), Comment: PgDb.Str(r, 2)), ct, schema).ConfigureAwait(false))
-                list.Add(new ObjectListItem(ObjectTypes.Type, r.Schema, r.Name, null, null, null, null, r.Comment));
+            foreach (var r in await PgDb.QueryAsync(conn, PgDependencyQueries.ListTypes,
+                         r => (Schema: r.GetString(0), Name: r.GetString(1), Comment: PgDb.Str(r, 2), Kind: PgCatalogReader.TypeKind(r.GetString(3))), ct, schema).ConfigureAwait(false))
+                list.Add(new ObjectListItem(ObjectTypes.Type, r.Schema, r.Name, null, null, null, null, r.Comment) { Kind = r.Kind });
         }
         if (Want(ObjectTypes.Trigger))
         {

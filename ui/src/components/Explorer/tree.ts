@@ -1,16 +1,20 @@
-import type { CatalogObject, CatalogObjectType, ConnectionProfile, ObjectRef, ProviderId } from '../../api/types';
+import type { CatalogObject, CatalogObjectType, ConnectionProfile, ObjectRef, ProviderId, SystemTypeInfo } from '../../api/types';
 import { fuzzyMatchLower } from '../../lib/fuzzy';
 import { getSourceModule, sourceNodeId } from '../../lib/sources';
 import { dialectOf, hasDatabaseLevel, providerKind } from '../../store/connections';
 import { isTabular, objectTypeLabel, OBJECT_TYPE_ORDER } from '../../lib/sql';
 import { dbKey, type ConnCatalog, type DbCatalog } from '../../store/catalog';
 import type { ConnQueries, SavedQuery } from '../../store/savedQueries';
+import type { SystemTypesEntry } from '../../store/systemTypes';
+import { compareSystemCategories, compareTypeKinds, systemTypeDetail, typeKindInfo, typeKindOf } from '../../lib/typeKinds';
 import type { TypeChip } from './explorerStore';
 
 /** M2: `source` rows belong to a source module (Redis/MongoDB/Kafka, see lib/sources.ts). */
 export type NodeKind = 'cfolder' | 'connection' | 'database' | 'schema' | 'folder' | 'object' | 'column' | 'status' | 'source'
   /** A schema's "Queries" folder and the queries saved into it (components/SavedQueries). */
-  | 'qfolder' | 'query';
+  | 'qfolder' | 'query'
+  /** SQL Server's read-only "System Data Types" group, its category sub-folders (sfolder) and the built-in types (sysType). */
+  | 'sfolder' | 'sysType';
 
 export interface TreeRow {
   id: string;
@@ -38,6 +42,10 @@ export interface TreeRow {
   source?: { providerId: ProviderId; nodeType: string; path: string[]; meta?: unknown };
   /** kind 'query': the saved query. */
   savedQuery?: SavedQuery;
+  /** Type objects and the sub-folders of the Types folder: the kind (lib/typeKinds.ts: alias, table, enum, ...). */
+  typeKind?: string;
+  /** kind 'sysType': the built-in type. */
+  sysType?: SystemTypeInfo;
 }
 
 export const nodeId = {
@@ -52,7 +60,22 @@ export const nodeId = {
   /** A schema's "Queries" folder. */
   queries: (cid: string, db: string | null, s: string) => `q:${cid}:${db ?? ''}:${s}`,
   savedQuery: (cid: string, id: string) => `sq:${cid}:${id}`,
+  /** A kind sub-folder of a schema's Types folder ("User-Defined Table Types"). */
+  typeKind: (folderId: string, kind: string) => `${folderId}#${kind}`,
+  /** A database's "System Data Types" group and its category sub-folders. */
+  systemTypes: (cid: string, db: string | null) => `sty:${cid}:${db ?? ''}`,
+  systemCategory: (groupId: string, category: string) => `${groupId}#${category}`,
 };
+
+/** `sty:<connection>:<database>` → its parts (the Explorer loads the built-in types of expanded groups). */
+export function parseSystemTypesId(id: string): { connectionId: string; database: string | null } | null {
+  if (!id.startsWith('sty:') || id.includes('#')) return null;
+  const rest = id.slice(4);
+  const at = rest.indexOf(':');
+  if (at < 0) return null;
+  const database = rest.slice(at + 1);
+  return { connectionId: rest.slice(0, at), database: database === '' ? null : database };
+}
 
 /** M2: whether a connection is rendered by a source module instead of the SQL catalog. */
 export function isSourceConnection(c: ConnectionProfile): boolean {
@@ -111,6 +134,8 @@ export interface TreeInput {
   savedQueries?: Record<string, ConnQueries | undefined>;
   /** Whether the type chips show the Queries folders of a connection (default: yes). */
   queriesFor?: (connectionId: string) => boolean;
+  /** SQL Server: the built-in data types per database (store/systemTypes.ts, keyed by dbKey); absent = no "System Data Types" group. */
+  systemTypes?: Record<string, SystemTypesEntry | undefined>;
 }
 
 /**
@@ -230,6 +255,7 @@ function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, db: string |
   const single = singleSchema(d);
   if (single) {
     addFolders(rows, input, cid, db, single, depth, parent);
+    addSystemTypes(rows, input, cid, db, depth);
     return;
   }
   const def = d.schemasResp?.defaultSchema;
@@ -242,6 +268,46 @@ function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, db: string |
       detail: s.name === def ? 'default' : undefined, count: d.loaded[s.name]?.objects.length ?? s.objectCount ?? undefined,
     });
     if (open) addFolders(rows, input, cid, db, s.name, depth + 1, sid);
+  }
+  addSystemTypes(rows, input, cid, db, depth);
+}
+
+/** SQL Server (SSMS: Programmability › Types › System Data Types): the built-in types grouped by category, read-only. */
+function addSystemTypes(rows: TreeRow[], input: TreeInput, cid: string, db: string | null, depth: number) {
+  if (!input.systemTypes || dialectOf(cid) !== 'tsql') return;
+  const types = input.typesFor?.(cid) ?? null;
+  if (types && !types.has('type')) return;
+  const id = nodeId.systemTypes(cid, db);
+  const open = input.expanded.has(id);
+  const entry = input.systemTypes[dbKey(cid, db)];
+  rows.push({
+    id, kind: 'sfolder', depth, label: 'System Data Types', expandable: true, expanded: open, connectionId: cid, database: db, objectType: 'type',
+    typeKind: 'system', count: entry?.status === 'ready' ? entry.types.length : undefined,
+  });
+  if (!open) return;
+  if (!entry || entry.status === 'loading') return status(rows, id, depth + 1, 'loading', 'Loading data types…');
+  if (entry.status === 'error') return status(rows, id, depth + 1, 'error', entry.error ?? 'Failed to load the data types');
+  const byCategory = new Map<string, SystemTypeInfo[]>();
+  for (const t of entry.types) {
+    let l = byCategory.get(t.category);
+    if (!l) byCategory.set(t.category, (l = []));
+    l.push(t);
+  }
+  for (const category of [...byCategory.keys()].sort(compareSystemCategories)) {
+    const list = byCategory.get(category)!;
+    const cid2 = nodeId.systemCategory(id, category);
+    const catOpen = input.expanded.has(cid2);
+    rows.push({
+      id: cid2, kind: 'sfolder', depth: depth + 1, label: category, expandable: true, expanded: catOpen, connectionId: cid, database: db, objectType: 'type',
+      typeKind: 'system', count: list.length,
+    });
+    if (!catOpen) continue;
+    for (const t of list) {
+      rows.push({
+        id: `${cid2}:${t.name}`, kind: 'sysType', depth: depth + 2, label: t.name, detail: systemTypeDetail(t) || undefined, expandable: false,
+        expanded: false, connectionId: cid, database: db, objectType: 'type', sysType: t,
+      });
+    }
   }
 }
 
@@ -268,9 +334,44 @@ function addFolders(rows: TreeRow[], input: TreeInput, cid: string, db: string |
       schema, objectType: t, count: objs.length,
     });
     if (!open) continue;
-    for (const o of objs) addObject(rows, input, cid, db, schema, o, depth + 1);
+    if (t === 'type') addTypeObjects(rows, input, cid, db, schema, objs, fid, depth + 1);
+    else for (const o of objs) addObject(rows, input, cid, db, schema, o, depth + 1);
   }
   if (withQueries) addQueries(rows, input, cid, db, schema, depth);
+}
+
+/**
+ * The objects of a schema's Types folder. When they are of two or more kinds (SQL Server: user-defined data types, table
+ * types, CLR types, XML schema collections; PostgreSQL: enums, domains, ...) they sit in one sub-folder per kind like
+ * SSMS; a single kind, or a provider that reports none (ClickHouse dictionaries), stays flat.
+ */
+function addTypeObjects(rows: TreeRow[], input: TreeInput, cid: string, db: string | null, schema: string, objs: CatalogObject[], fid: string, depth: number) {
+  const byKind = new Map<string, CatalogObject[]>();
+  const plain: CatalogObject[] = [];
+  for (const o of objs) {
+    const k = typeKindOf(o);
+    if (!k) plain.push(o);
+    else {
+      let l = byKind.get(k);
+      if (!l) byKind.set(k, (l = []));
+      l.push(o);
+    }
+  }
+  if (byKind.size < 2) {
+    for (const o of objs) addObject(rows, input, cid, db, schema, o, depth);
+    return;
+  }
+  for (const kind of [...byKind.keys()].sort(compareTypeKinds)) {
+    const list = byKind.get(kind)!;
+    const id = nodeId.typeKind(fid, kind);
+    const open = input.expanded.has(id);
+    rows.push({
+      id, kind: 'folder', depth, label: typeKindInfo(kind)?.plural ?? kind, expandable: true, expanded: open, connectionId: cid, database: db, schema,
+      objectType: 'type', typeKind: kind, count: list.length,
+    });
+    if (open) for (const o of list) addObject(rows, input, cid, db, schema, o, depth + 1);
+  }
+  for (const o of plain) addObject(rows, input, cid, db, schema, o, depth);
 }
 
 /** The schema's "Queries" folder (Navicat): the queries saved into it, by name. */
@@ -314,8 +415,8 @@ function addObject(
   const open = hasCols && (opts.forceOpen || input.expanded.has(oid));
   rows.push({
     id: oid, kind: 'object', depth, label: o.n, expandable: hasCols, expanded: open, connectionId: cid, database: db, schema,
-    objectType: o.t, object: o, match,
-    detail: o.t === 'synonym' && o.target ? `→ ${o.target.s ? `${o.target.s}.` : ''}${o.target.n}` : o.st === 'INVALID' ? 'invalid' : undefined,
+    objectType: o.t, object: o, match, typeKind: typeKindOf(o) ?? undefined,
+    detail: o.t === 'synonym' && o.target ? `→ ${o.target.s ? `${o.target.s}.` : ''}${o.target.n}` : o.st === 'INVALID' ? 'invalid' : o.t === 'type' ? o.bt : undefined,
   });
   if (!open) return;
   const fks = fkColumns(o);

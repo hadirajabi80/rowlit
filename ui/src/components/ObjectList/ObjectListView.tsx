@@ -25,7 +25,7 @@ import { EmptyState } from '../EmptyState/EmptyState';
 import { commandMenuItems, contextMenu } from '../layout/commandMenu';
 import type { TabViewProps } from '../layout/tabViews';
 import {
-  countByGroup, filterObjects, formatModified, formatRowsShort, formatSize, fromCatalog, GROUPS, groupOf, itemKey, nextSort, sortObjects, uniqueObjects,
+  countByGroup, filterObjects, formatModified, formatRowsShort, formatSize, fromCatalog, GROUPS, groupOf, itemKey, itemTypeLabel, nextSort, sortObjects, uniqueObjects,
   type GroupFilter, type SortKey,
 } from './model';
 import type { ObjectsState } from './open';
@@ -48,10 +48,11 @@ const ROUTINES = new Set<CatalogObjectType>(['proc', 'func', 'tablefunc', 'packa
 const DESIGNABLE = new Set<CatalogObjectType>(['table', 'view', 'mview', 'proc', 'func', 'tablefunc', 'package', 'trigger', 'type']);
 
 /** The explorer's context menu of an object of this type. */
-function menuIdOf(t: CatalogObjectType): string {
+function menuIdOf(t: CatalogObjectType, kind?: string | null): string {
   if (t === 'table') return 'explorer.table';
   if (t === 'view' || t === 'mview') return 'explorer.view';
   if (ROUTINES.has(t) || t === 'trigger') return 'explorer.routine';
+  if (t === 'type' && kind) return 'explorer.type';
   return 'explorer.object';
 }
 
@@ -62,6 +63,8 @@ const NEW_ENTRIES: ContextEntry[] = [
   { command: 'designer.newFunction', optional: true, hideDisabled: true },
   { command: 'designer.newPackage', optional: true, hideDisabled: true },
   { command: 'designer.newTrigger', optional: true, hideDisabled: true },
+  { command: 'designer.newType', optional: true, hideDisabled: true },
+  { command: 'designer.newTableType', optional: true, hideDisabled: true },
   'separator',
   { command: 'queries.new', optional: true, hideDisabled: true },
 ];
@@ -224,7 +227,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
 
   const menuAt = (it: ObjectListItem, pos: { clientX: number; clientY: number; preventDefault?: () => void }) => {
     setSelected(itemKey(it));
-    const items = contextMenu(menuIdOf(it.type), targetOf(it));
+    const items = contextMenu(menuIdOf(it.type, it.kind), targetOf(it));
     if (items.length) showContextMenu(pos, items);
     else pos.preventDefault?.();
   };
@@ -327,13 +330,13 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
       key: 'name', label: 'Name', width: 'minmax(200px, 2.2fr)',
       render: (it) => (
         <span className="ol-name">
-          <ObjectIcon type={it.type} size={15} />
+          <ObjectIcon type={it.type} kind={it.kind} size={15} />
           <span className="ol-name-text" title={`${it.schema ? `${it.schema}.` : ''}${it.name}`}>{it.name}</span>
         </span>
       ),
     },
     ...(multiSchema ? [{ key: 'schema' as const, label: 'Schema', width: 'minmax(90px, 0.7fr)', render: (it: ObjectListItem) => <span className="ol-muted">{it.schema}</span> }] : []),
-    ...(group === 'all' ? [{ key: 'type' as const, label: 'Type', width: 'minmax(96px, 0.7fr)', render: (it: ObjectListItem) => <span className="ol-muted">{OBJECT_TYPE_SINGULAR[it.type]}</span> }] : []),
+    ...(group === 'all' || (group === 'type' && inGroup.some((it) => it.kind)) ? [{ key: 'type' as const, label: 'Type', width: 'minmax(96px, 0.7fr)', render: (it: ObjectListItem) => <span className="ol-muted">{itemTypeLabel(it)}</span> }] : []),
     ...(anyRows ? [{ key: 'rows' as const, label: 'Rows', width: '96px', numeric: true, render: (it: ObjectListItem) => (it.rowCount === null ? <span className="ol-faint">{it.type === 'table' || it.type === 'mview' ? '—' : ''}</span> : it.rowCount.toLocaleString('en-US')) }] : []),
     ...(anySize ? [{ key: 'size' as const, label: 'Size', width: '88px', numeric: true, render: (it: ObjectListItem) => formatSize(it.sizeBytes) }] : []),
     ...(anyModified ? [{ key: 'modified' as const, label: 'Modified', width: '138px', render: (it: ObjectListItem) => <span className="ol-muted">{formatModified(it.modified)}</span> }] : []),
@@ -391,7 +394,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
         );
       }
       const g = GROUPS.find((x) => x.id === group);
-      const create = g?.id === 'table' || group === 'all' ? 'designer.newTable' : g?.id === 'view' ? 'designer.newView' : g?.id === 'proc' ? 'designer.newProcedure' : g?.id === 'func' ? 'designer.newFunction' : null;
+      const create = g?.id === 'table' || group === 'all' ? 'designer.newTable' : g?.id === 'view' ? 'designer.newView' : g?.id === 'proc' ? 'designer.newProcedure' : g?.id === 'func' ? 'designer.newFunction' : g?.id === 'type' ? 'designer.newType' : null;
       return (
         <EmptyState
           icon={<Database size={28} strokeWidth={1.5} />}
@@ -409,7 +412,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
         const k = itemKey(it);
         const row = Math.floor(i / cols);
         const col = i % cols;
-        const meta = [OBJECT_TYPE_SINGULAR[it.type], it.rowCount !== null ? `${formatRowsShort(it.rowCount)} rows` : null, it.sizeBytes !== null ? formatSize(it.sizeBytes) : null]
+        const meta = [itemTypeLabel(it), it.rowCount !== null ? `${formatRowsShort(it.rowCount)} rows` : null, it.sizeBytes !== null ? formatSize(it.sizeBytes) : null]
           .filter(Boolean).join(' · ');
         tiles.push(
           <div
@@ -425,7 +428,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
             title={`${it.schema ? `${it.schema}.` : ''}${it.name}\n${meta}${it.comment ? `\n${it.comment}` : ''}`}
           >
             <span className={`ol-mini-icon ol-tint-${groupOf(it.type)}`}>
-              <ObjectIcon type={it.type} size={14} />
+              <ObjectIcon type={it.type} kind={it.kind} size={14} />
             </span>
             <span className="ol-mini-name">
               {multiSchema && it.schema ? <span className="ol-mini-schema">{it.schema}.</span> : null}
@@ -444,7 +447,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
         const row = Math.floor(i / cols);
         const col = i % cols;
         const meta = [it.rowCount !== null ? `${formatRowsShort(it.rowCount)} rows` : null, it.sizeBytes !== null ? formatSize(it.sizeBytes) : null]
-          .filter(Boolean).join(' · ') || (it.comment ?? OBJECT_TYPE_SINGULAR[it.type]);
+          .filter(Boolean).join(' · ') || [it.kind ? itemTypeLabel(it) : null, it.comment ?? (it.kind ? null : OBJECT_TYPE_SINGULAR[it.type])].filter(Boolean).join(' · ');
         cards.push(
           <div
             key={k}
@@ -459,7 +462,7 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
             title={`${it.schema ? `${it.schema}.` : ''}${it.name}${it.comment ? `\n${it.comment}` : ''}`}
           >
             <span className={`ol-tile ol-tint-${groupOf(it.type)}`}>
-              <ObjectIcon type={it.type} size={18} />
+              <ObjectIcon type={it.type} kind={it.kind} size={18} />
             </span>
             <span className="ol-card-text">
               <span className="ol-card-name">{it.name}</span>

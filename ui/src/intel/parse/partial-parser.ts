@@ -1571,6 +1571,7 @@ class Parser {
           if (this.at('AS')) this.i++;
           this.mark(c, 'ddl', this.prevEnd(), { ddl: { what: 'dataType' } });
           const type = this.readType();
+          if (type) this.mark(c, 'ddl', this.prevEnd(), { ddl: { what: 'paramTail', objectType: type } });
           const v: VarDef = { name: t.text, kind: 'param', type, range: [t.start, t.end], direction: 'in' };
           while (!this.eof() && !this.atP(',') && !this.atP(')') && !this.at('AS') && !this.at('RETURNS') && !this.at('WITH')) {
             if (this.at('OUT') || this.at('OUTPUT')) v.direction = 'out';

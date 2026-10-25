@@ -8,6 +8,7 @@ import type { Binder, ResolvedSource, VisibleSource } from '../catalog/binder';
 import { objectTypeLabel } from '../catalog/binder';
 import type { ColumnDef, NamePart, Scope, TableRef, VarDef } from '../parse/statement-model';
 import { formatIdent, formatObjectName, kwCase, snippetEscape, type FormatEnv } from './format';
+import { typeKindInfo, typeKindOf } from '../../lib/typeKinds';
 import { matchScore, sortTextFor, type UsageStore } from './ranker';
 
 export interface CompleteEnv {
@@ -528,6 +529,7 @@ function clauseItems(items: Items, c: CursorContext, env: CompleteEnv): boolean 
     case 'declare': {
       if (c.marker?.data?.expectType) {
         dataTypeItems(items, c, env, 9);
+        if (spec.id === 'tsql' || spec.id === 'plsql') userTypeItems(items, c, env, 8);
         if (spec.id === 'plsql') { tableItems(items, c, env, 6); }
         if (spec.id === 'tsql') { items.add({ label: kwCase('TABLE', opts), kind: 'keyword', group: 8 }); items.add({ label: kwCase('CURSOR', opts), kind: 'keyword', group: 7 }); }
       } else if (spec.id === 'plsql') {
@@ -1137,7 +1139,8 @@ function ddlItems(items: Items, c: CursorContext, env: CompleteEnv): void {
   const { index } = env;
   const fe = fenv(c, env);
   switch (d.what) {
-    case 'dataType': dataTypeItems(items, c, env, 9); if (env.spec.id === 'pgsql') userTypeItems(items, c, env, 8); return;
+    case 'dataType': dataTypeItems(items, c, env, 9); if (hasUserTypes(env.spec.id)) userTypeItems(items, c, env, 8); return;
+    case 'paramTail': paramTailItems(items, c, env, d.objectType ?? ''); return;
     case 'newName': case 'columnName': return;
     case 'columnOf': {
       if (!d.table) return;
@@ -1277,7 +1280,22 @@ export type { VisibleSource, TableRef };
 
 // ------------------------------------------------------------ PostgreSQL
 
-/** Catalog types (enums, domains, composites): unqualified on the search_path, qualified elsewhere. */
+/** Dialects whose catalog has user-defined types offered in type positions (PostgreSQL enums/domains, SQL Server alias and table types, Oracle object/collection types). */
+function hasUserTypes(dialect: string): boolean {
+  return dialect === 'pgsql' || dialect === 'tsql' || dialect === 'plsql';
+}
+
+/** `@p dbo.PhoneList |` → READONLY (a table-valued parameter); any other parameter type → OUTPUT. */
+function paramTailItems(items: Items, c: CursorContext, env: CompleteEnv, typeText: string): void {
+  if (env.spec.id !== 'tsql') return;
+  const parts = typeText.split('.').map((p) => ({ text: p.replace(/^\[|\]$/g, '').replace(/^"|"$/g, ''), quoted: false })).filter((p) => p.text);
+  const e = parts.length && parts.length <= 2 ? env.index.resolve(parts, (x) => x.type === 'type') : null;
+  if (e && typeKindOf(e.obj) === 'table') items.add({ label: kwCase('READONLY', env.opts), kind: 'keyword', group: 10, detail: 'table-valued parameter' });
+  else items.add({ label: kwCase('OUTPUT', env.opts), kind: 'keyword', group: 9 });
+  void c;
+}
+
+/** Catalog types (enums, domains, composites; T-SQL alias and table types; Oracle object and collection types): unqualified on the default schema / search_path, qualified elsewhere. */
 function userTypeItems(items: Items, c: CursorContext, env: CompleteEnv, group: number): void {
   const { index } = env;
   const fe = fenv(c, env);
@@ -1285,6 +1303,7 @@ function userTypeItems(items: Items, c: CursorContext, env: CompleteEnv, group: 
     const isDef = index.isDefaultSchema(sc.name);
     for (const e of sc.objects) {
       if (e.type !== 'type') continue;
+      if (typeKindOf(e.obj) === 'xmlschema') continue; // used as xml(<collection>), not as a type name
       items.add({
         label: isDef ? e.name : `${sc.name}.${e.name}`, kind: 'type', group: isDef ? group : group - 1, matchText: e.name,
         insertText: formatObjectName(sc.name, e.name, isDef, fe), detail: typeDetail(e), documentation: e.obj.cm ?? undefined,
@@ -1301,6 +1320,8 @@ export function typeDetail(e: ObjectEntry): string {
   const cm = e.obj.cm ?? '';
   const dm = /^domain over (.+?)(?:\.|\s*$|\n)/i.exec(cm);
   if (dm) return 'domain over ' + dm[1];
+  const kind = typeKindOf(e.obj);
+  if (kind) return `${typeKindInfo(kind)!.singular}${e.obj.bt ? `: ${e.obj.bt}` : ''}`;
   return cols.length ? 'composite type' : 'type';
 }
 

@@ -1,8 +1,8 @@
 import { Code2, Copy, KeyRound, LoaderCircle, PencilRuler, Play, RefreshCw, SquareTerminal } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../../api/client';
-import type { DdlResponse, ObjectDetails } from '../../api/types';
-import { copyText, newConsole, selectTop } from '../../app/actions';
+import type { DdlResponse, ObjectDetails, TypeDetails } from '../../api/types';
+import { copyText, newConsole, openObject, selectTop } from '../../app/actions';
 import { runCommand } from '../../commands/registry';
 import { commandView } from '../../commands/useCommands';
 import type { ObjectTarget } from '../../commands/types';
@@ -11,6 +11,7 @@ import { useFormattedDdl } from '../../editor/formatted-ddl';
 import { SqlEditor, type SqlEditorHandle } from '../../editor/SqlEditor';
 import { formatCount } from '../../lib/format';
 import { isTabular, OBJECT_TYPE_SINGULAR, qualifiedName } from '../../lib/sql';
+import { supportsTypes, typeKindSingular } from '../../lib/typeKinds';
 import { useConnection, useDialect } from '../../store/connections';
 import { useSettings } from '../../store/settings';
 import type { ObjectTab as ObjectTabT } from '../../store/tabs';
@@ -39,7 +40,10 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
   const [details, setDetails] = useState<ObjectDetails | null>(null);
   const [error, setError] = useState<{ ddl?: string; details?: string }>({});
   const [loading, setLoading] = useState(true);
-  const [section, setSection] = useState<Section>(tab.column ? 'columns' : 'ddl');
+  // Types of a provider with user-defined types (SQL Server, PostgreSQL, Oracle) open on their overview.
+  const [picked, setSection] = useState<Section>(tab.column ? 'columns' : tab.ref.type === 'type' && supportsTypes(dialect) ? 'overview' : 'ddl');
+  // A provider without type details (the overview does not exist for it) shows the DDL instead.
+  const section: Section = picked === 'overview' && details && !details.typeInfo ? 'ddl' : picked;
   const { ref } = tab;
 
   const load = useCallback(async () => {
@@ -101,13 +105,17 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
   const target: ObjectTarget = { kind: 'object', connectionId: tab.connectionId, database: tab.database, ref };
   const designable = DESIGNABLE.has(ref.type);
   const codegenable = CODEGEN_TYPES.has(ref.type);
+  const typeInfo = details?.typeInfo ?? null;
   const sections: { id: Section; label: string; count?: number; show: boolean }[] = [
+    { id: 'overview', label: 'Overview', show: !!typeInfo },
     { id: 'ddl', label: 'DDL', show: true },
-    { id: 'columns', label: 'Columns', count: details?.columns.length, show: !!details?.columns.length },
+    { id: 'columns', label: typeInfo ? columnsLabel(typeInfo.kind) : 'Columns', count: details?.columns.length, show: !!details?.columns.length },
     { id: 'indexes', label: 'Indexes', count: details?.indexes.length, show: !!details?.indexes.length },
     { id: 'fks', label: 'Foreign keys', count: details?.foreignKeys.length, show: !!details?.foreignKeys.length },
     { id: 'refs', label: 'Referenced by', count: details?.referencedBy.length, show: !!details?.referencedBy.length },
     { id: 'params', label: 'Parameters', count: details?.parameters.length, show: !!details?.parameters.length },
+    { id: 'members', label: typeInfo?.itemsTitle ?? 'Items', count: typeInfo?.items.length, show: !!typeInfo?.items.length },
+    { id: 'usedby', label: 'Used by', count: typeInfo?.usedBy.length, show: !!typeInfo },
     { id: 'deps', label: 'Dependencies', count: depCount, show: true },
   ];
   const execute = commandView('routine.execute', target, 'Execute…');
@@ -119,7 +127,7 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
         <div className="object-title">
           <div className="object-name">{qualified}</div>
           <div className="object-sub">
-            {OBJECT_TYPE_SINGULAR[ref.type]} · {conn?.name ?? 'unknown connection'}
+            {typeInfo ? typeKindSingular(typeInfo.kind) : OBJECT_TYPE_SINGULAR[ref.type]} · {conn?.name ?? 'unknown connection'}
             {tab.database ? ` · ${tab.database}` : ''}
             {details?.rowCountEstimate != null && ` · ~${formatCount(details.rowCountEstimate)} rows`}
             {details?.modified && ` · modified ${new Date(details.modified).toLocaleString()}`}
@@ -195,7 +203,7 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
             </div>
           )
         ) : details ? (
-          <DetailsTable section={section} details={details} highlight={tab.column ?? null} />
+          <DetailsTable section={section} details={details} highlight={tab.column ?? null} connectionId={tab.connectionId} database={tab.database} />
         ) : (
           <div className="object-error">{error.details ?? 'Loading…'}</div>
         )}
@@ -204,7 +212,112 @@ export function ObjectTabView({ tab, theme, visible }: { tab: ObjectTabT; theme:
   );
 }
 
-function DetailsTable({ section, details, highlight }: { section: Section; details: ObjectDetails; highlight: string | null }) {
+/** Label of the columns section of a type: enum labels, attributes of composite / object types, columns of table types. */
+function columnsLabel(kind: string): string {
+  if (kind === 'enum') return 'Labels';
+  if (kind === 'composite' || kind === 'object') return 'Attributes';
+  return 'Columns';
+}
+
+/** Overview of a type: its kind and the properties the provider reports (base type, nullability, max length, bindings...). */
+function TypeOverview({ info }: { info: TypeDetails }) {
+  return (
+    <table className="details-table type-overview">
+      <tbody>
+        <tr>
+          <td className="muted">Kind</td>
+          <td>{typeKindSingular(info.kind)}</td>
+        </tr>
+        {info.properties.map((p) => (
+          <tr key={p.name}>
+            <td className="muted">{p.name}</td>
+            <td className="mono">{p.value}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** "Used by": columns, parameters, return types and bodies using the type; a row opens the object. */
+function TypeUsedBy({ info, connectionId, database }: { info: TypeDetails; connectionId: string; database: string | null }) {
+  if (!info.usedBy.length) return <div className="object-empty muted">Nothing uses this type.</div>;
+  return (
+    <table className="details-table">
+      <thead>
+        <tr>
+          <th>Object</th>
+          <th>Type</th>
+          <th>Used as</th>
+        </tr>
+      </thead>
+      <tbody>
+        {info.usedBy.map((u) => (
+          <tr
+            key={`${u.schema}.${u.name}.${u.type}`}
+            className="clickable"
+            title={`Open ${u.name}`}
+            onDoubleClick={() => openObject(connectionId, database, { database, schema: u.schema, name: u.name, type: u.type })}
+          >
+            <td className="mono">
+              <ObjectIcon type={u.type} size={13} /> {u.schema ? `${u.schema}.` : ''}
+              {u.name}
+            </td>
+            <td className="muted">{OBJECT_TYPE_SINGULAR[u.type]}</td>
+            <td className="mono">{u.usage}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DetailsTable({ section, details, highlight, connectionId, database }: {
+  section: Section; details: ObjectDetails; highlight: string | null; connectionId: string; database: string | null;
+}) {
+  const info = details.typeInfo ?? null;
+  if (section === 'overview' && info) return <TypeOverview info={info} />;
+  if (section === 'usedby' && info) return <TypeUsedBy info={info} connectionId={connectionId} database={database} />;
+  if (section === 'members' && info) {
+    return (
+      <table className="details-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {info.items.map((i, n) => (
+            <tr key={`${i.name}${n}`}>
+              <td className="mono">{i.name}</td>
+              <td className="mono muted">{i.detail}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+  if (section === 'columns' && info?.kind === 'enum') {
+    return (
+      <table className="details-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Label</th>
+          </tr>
+        </thead>
+        <tbody>
+          {details.columns.map((c) => (
+            <tr key={c.name}>
+              <td className="muted">{c.ordinal}</td>
+              <td className="mono">{c.name}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
   if (section === 'columns') {
     return (
       <table className="details-table">

@@ -207,7 +207,7 @@ public static class PgCatalogQueries
 
     /// <summary>$1 = domain oid.</summary>
     public const string DomainConstraints =
-        "SELECT con.conname::text, pg_get_constraintdef(con.oid, true) FROM pg_constraint con WHERE con.contypid = $1 ORDER BY con.conname";
+        "SELECT con.conname::text, pg_get_constraintdef(con.oid, true) FROM pg_constraint con WHERE con.contypid = $1 AND con.contype = 'c' ORDER BY con.conname";
 
     /// <summary>$1 = composite relation oid (pg_type.typrelid).</summary>
     public const string CompositeAttributes =

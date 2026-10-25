@@ -57,8 +57,35 @@ public static class OracleDependencyQueries
         "WHERE o.owner=:owner AND o.object_type IN (" + OracleCatalogQueries.ObjectTypeList + ") AND o.object_name NOT LIKE 'BIN$%' AND o.generated='N' " +
         "AND (o.object_type<>'TABLE' OR o.object_name NOT IN (SELECT mview_name FROM all_mviews WHERE owner=:owner))";
 
+    /// <summary>Table and view columns (of any schema) declared with the type :name of :owner.</summary>
+    public const string TypeUsageColumns =
+        "SELECT c.owner, c.table_name, c.column_name, " +
+        "(SELECT MIN(o.object_type) FROM all_objects o WHERE o.owner=c.owner AND o.object_name=c.table_name AND o.object_type IN ('TABLE','VIEW')) AS object_type " +
+        "FROM all_tab_cols c WHERE c.data_type_owner=:owner AND c.data_type=:name AND c.hidden_column='NO'";
+
+    /// <summary>Routine (or type method) arguments and results declared with the type.</summary>
+    public const string TypeUsageArguments =
+        "SELECT a.owner, a.package_name, a.object_name, a.argument_name, a.position, " +
+        "(SELECT MIN(o.object_type) FROM all_objects o WHERE o.owner=a.owner AND o.object_name=NVL(a.package_name, a.object_name) " +
+        "AND o.object_type IN ('PROCEDURE','FUNCTION','PACKAGE','TYPE')) AS object_type " +
+        "FROM all_arguments a WHERE a.type_owner=:owner AND a.type_name=:name";
+
+    /// <summary>Object types with an attribute of the type.</summary>
+    public const string TypeUsageAttributes =
+        "SELECT owner, type_name, attr_name FROM all_type_attrs WHERE attr_type_owner=:owner AND attr_type_name=:name";
+
+    /// <summary>Collection types with the type as element.</summary>
+    public const string TypeUsageCollections =
+        "SELECT owner, type_name FROM all_coll_types WHERE elem_type_owner=:owner AND elem_type_name=:name";
+
+    /// <summary>Objects tab: the kind of every type of :owner (typecode, collection kind).</summary>
+    public const string TypeKindList =
+        "SELECT t.type_name, t.typecode, c.coll_type FROM all_types t LEFT JOIN all_coll_types c ON c.owner=t.owner AND c.type_name=t.type_name WHERE t.owner=:owner";
+
     public static IReadOnlyDictionary<string, string> All { get; } = new Dictionary<string, string>
     {
+        [nameof(TypeUsageColumns)] = TypeUsageColumns, [nameof(TypeUsageArguments)] = TypeUsageArguments, [nameof(TypeUsageAttributes)] = TypeUsageAttributes,
+        [nameof(TypeUsageCollections)] = TypeUsageCollections, [nameof(TypeKindList)] = TypeKindList,
         [nameof(CurrentSchema)] = CurrentSchema, [nameof(FindObject)] = FindObject, [nameof(Uses)] = Uses, [nameof(UsedBy)] = UsedBy,
         [nameof(ForeignKeysOut)] = ForeignKeysOut, [nameof(ForeignKeysIn)] = ForeignKeysIn, [nameof(Triggers)] = Triggers,
         [nameof(TriggerParent)] = TriggerParent, [nameof(ObjectList)] = ObjectList,

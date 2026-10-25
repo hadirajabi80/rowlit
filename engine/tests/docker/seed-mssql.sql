@@ -7,6 +7,8 @@ USE shop;
 GO
 IF OBJECT_ID(N'dbo.Cust', N'SN') IS NOT NULL DROP SYNONYM dbo.Cust;
 IF OBJECT_ID(N'dbo.OrdersOf', N'IF') IS NOT NULL DROP FUNCTION dbo.OrdersOf;
+IF OBJECT_ID(N'dbo.NormalizePhone', N'FN') IS NOT NULL DROP FUNCTION dbo.NormalizePhone;
+IF OBJECT_ID(N'dbo.SavePhones', N'P') IS NOT NULL DROP PROCEDURE dbo.SavePhones;
 IF OBJECT_ID(N'dbo.fnTax', N'FN') IS NOT NULL DROP FUNCTION dbo.fnTax;
 IF OBJECT_ID(N'dbo.GetCustomerReport', N'P') IS NOT NULL DROP PROCEDURE dbo.GetCustomerReport;
 IF OBJECT_ID(N'dbo.AddOrderLines', N'P') IS NOT NULL DROP PROCEDURE dbo.AddOrderLines;
@@ -20,6 +22,9 @@ IF OBJECT_ID(N'dbo.Products', N'U') IS NOT NULL DROP TABLE dbo.Products;
 IF OBJECT_ID(N'dbo.Customers', N'U') IS NOT NULL DROP TABLE dbo.Customers;
 IF OBJECT_ID(N'dbo.Countries', N'U') IS NOT NULL DROP TABLE dbo.Countries;
 IF TYPE_ID(N'dbo.IdList') IS NOT NULL DROP TYPE dbo.IdList;
+IF TYPE_ID(N'dbo.PhoneList') IS NOT NULL DROP TYPE dbo.PhoneList;
+IF TYPE_ID(N'dbo.Phone') IS NOT NULL DROP TYPE dbo.Phone;
+IF EXISTS (SELECT 1 FROM sys.xml_schema_collections WHERE schema_id = SCHEMA_ID(N'dbo') AND name = N'NoteSchema') DROP XML SCHEMA COLLECTION dbo.NoteSchema;
 IF SCHEMA_ID(N'Sales') IS NULL EXEC(N'CREATE SCHEMA Sales');
 GO
 CREATE TABLE dbo.Countries (Id INT NOT NULL CONSTRAINT PK_Countries PRIMARY KEY, Name NVARCHAR(100) NOT NULL);
@@ -46,6 +51,17 @@ CREATE TABLE Sales.Invoices (
 CREATE NONCLUSTERED INDEX IX_Orders_CustomerId ON dbo.Orders (CustomerId) INCLUDE (Total);
 CREATE SEQUENCE dbo.OrderNumbers AS INT START WITH 1000 INCREMENT BY 1;
 CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);
+-- Programmability > Types: an alias type, a table type (default, keys, index, check) that uses it, an XML schema collection.
+CREATE TYPE dbo.Phone FROM NVARCHAR(20) NOT NULL;
+GO
+CREATE TYPE dbo.PhoneList AS TABLE (
+    Ordinal INT NOT NULL,
+    Label NVARCHAR(30) NOT NULL DEFAULT N'mobile',
+    Number dbo.Phone,
+    PRIMARY KEY CLUSTERED (Ordinal),
+    INDEX IX_PhoneList_Number NONCLUSTERED (Number),
+    CHECK (Ordinal > 0));
+CREATE XML SCHEMA COLLECTION dbo.NoteSchema AS N'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="note" type="xs:string"/></xs:schema>';
 INSERT INTO dbo.Countries (Id, Name) VALUES (1, N'Germany'), (2, N'France'), (3, N'Japan');
 INSERT INTO dbo.Customers (Name, Email, CountryId) VALUES
     (N'Alice', N'alice@example.com', 1), (N'Bob', NULL, 2), (N'Chie', N'chie@example.jp', 3),
@@ -87,6 +103,17 @@ CREATE PROCEDURE dbo.AddOrderLines @OrderId INT, @Products dbo.IdList READONLY, 
 BEGIN
     INSERT INTO dbo.OrderLines (OrderId, ProductId, Qty) SELECT @OrderId, p.Id, 1 FROM @Products p;
     SET @Inserted = @@ROWCOUNT;
+END
+GO
+CREATE PROCEDURE dbo.SavePhones @CustomerId INT, @Phones dbo.PhoneList READONLY, @Fallback dbo.Phone = NULL AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT @CustomerId AS CustomerId, p.Ordinal, p.Label, COALESCE(p.Number, @Fallback) AS Number FROM @Phones p;
+END
+GO
+CREATE FUNCTION dbo.NormalizePhone (@raw dbo.Phone) RETURNS dbo.Phone AS
+BEGIN
+    RETURN REPLACE(REPLACE(@raw, N' ', N''), N'-', N'');
 END
 GO
 CREATE FUNCTION dbo.fnTax (@amount DECIMAL(12,2)) RETURNS DECIMAL(12,2) AS

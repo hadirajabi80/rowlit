@@ -10,7 +10,7 @@ namespace DbStudio.Providers.SqlServer;
 /// Catalog reader over a short-lived pooled connection. Cross-database requests switch with USE [db] on this
 /// connection (docs/PLAN.md 2.6); the pool resets the database when the connection is returned.
 /// </summary>
-public sealed class SqlServerCatalogReader : ICatalogReader
+public sealed partial class SqlServerCatalogReader : ICatalogReader
 {
     private readonly SqlConnection _conn;
     private readonly bool _ownsConnection;
@@ -81,7 +81,13 @@ public sealed class SqlServerCatalogReader : ICatalogReader
         // SQL Server 2005 has no table types (sys.table_types / sys.types.is_table_type are 2008+).
         var hasTableTypes = !IsSqlServer2005OrOlder(_conn.ServerVersion);
         var userTypes = await SqlDb.QueryAsync(_conn, hasTableTypes ? SqlServerCatalogQueries.UserTypes : SqlServerCatalogQueries.UserTypes2005, r => (
-            Id: r.GetInt32(0), Name: r.GetString(1), IsTable: SqlDb.Bool(r, 7)), ct, p).ConfigureAwait(false);
+            Id: r.GetInt32(0), Name: r.GetString(1), IsTable: SqlDb.Bool(r, 7), IsClr: SqlDb.Bool(r, 9),
+            BaseText: AliasBaseText(SqlDb.Str(r, 2), r.GetInt16(3), r.GetByte(4), r.GetByte(5)), Nullable: SqlDb.Bool(r, 6)), ct, p).ConfigureAwait(false);
+        var clrTypes = userTypes.Any(t => t.IsClr)
+            ? (await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.ClrTypes, r => (Id: r.GetInt32(0), Text: $"{r.GetString(1)}.{SqlDb.Str(r, 2)}"), ct, p).ConfigureAwait(false))
+                .ToDictionary(x => x.Id, x => x.Text)
+            : new Dictionary<int, string>();
+        var xmlCollections = await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.XmlSchemaCollections, r => r.GetString(1), ct, p).ConfigureAwait(false);
 
         var ttColumns = !hasTableTypes ? [] : await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.TableTypeColumns, r => (
             TypeId: r.GetInt32(0), Col: new CatalogColumn(r.GetString(2),
@@ -138,14 +144,19 @@ public sealed class SqlServerCatalogReader : ICatalogReader
         var ttColsByType = ttColumns.GroupBy(x => x.TypeId).ToDictionary(g => g.Key, g => g.Select(x => x.Col).ToList());
         foreach (var t in userTypes.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase))
         {
+            var ttCols = t.IsTable ? ttColsByType.GetValueOrDefault(t.Id) ?? [] : [];
             result.Add(new CatalogObject
             {
                 Type = ObjectTypes.Type,
                 Name = t.Name,
                 Schema = schema,
-                Columns = t.IsTable ? ttColsByType.GetValueOrDefault(t.Id) ?? [] : [],
+                Columns = ttCols,
+                Kind = t.IsTable ? TypeKinds.Table : t.IsClr ? TypeKinds.Clr : TypeKinds.Alias,
+                BaseType = t.IsTable ? $"table ({ttCols.Count} columns)" : t.IsClr ? clrTypes.GetValueOrDefault(t.Id) : $"{t.BaseText}{(t.Nullable ? "" : " not null")}",
             });
         }
+        foreach (var x in xmlCollections.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            result.Add(new CatalogObject { Type = ObjectTypes.Type, Name = x, Schema = schema, Kind = TypeKinds.XmlSchema, BaseType = "xml schema collection" });
 
         return new SchemaCatalog(_conn.Database, schema, result)
         {
@@ -160,13 +171,7 @@ public sealed class SqlServerCatalogReader : ICatalogReader
         await UseAsync(obj.Database, ct).ConfigureAwait(false);
         var schema = obj.Schema ?? await GetDefaultSchemaAsync(null, ct).ConfigureAwait(false);
 
-        if (obj.Type == ObjectTypes.Type)
-        {
-            var ut = await FindUserTypeAsync(schema, obj.Name, ct).ConfigureAwait(false)
-                ?? throw EngineException.NotFound($"Type {schema}.{obj.Name}");
-            var typeCols = ut.TableObjectId is int ttId ? await ReadDetailColumnsAsync(ttId, ct).ConfigureAwait(false) : [];
-            return new ObjectDetails(obj with { Schema = schema }, typeCols.Select(c => c.Detail).ToList(), [], [], [], [], [], null, null, null);
-        }
+        if (obj.Type == ObjectTypes.Type) return await GetTypeDetailsAsync(obj with { Schema = schema }, ct).ConfigureAwait(false);
 
         var found = await FindObjectAsync(schema, obj.Name, ct).ConfigureAwait(false)
             ?? throw EngineException.NotFound($"Object {schema}.{obj.Name}");
@@ -215,18 +220,7 @@ public sealed class SqlServerCatalogReader : ICatalogReader
         var schema = obj.Schema ?? await GetDefaultSchemaAsync(null, ct).ConfigureAwait(false);
         var full = SqlServerNames.Qualify(schema, obj.Name);
 
-        if (obj.Type == ObjectTypes.Type)
-        {
-            var ut = await FindUserTypeAsync(schema, obj.Name, ct).ConfigureAwait(false)
-                ?? throw EngineException.NotFound($"Type {schema}.{obj.Name}");
-            if (ut.TableObjectId is int ttId)
-            {
-                var cols = await ReadDetailColumnsAsync(ttId, ct).ConfigureAwait(false);
-                var body = string.Join(",\n", cols.Select(c => "    " + SqlServerNames.Quote(c.Def.Name) + " " + c.Def.TypeText + (c.Def.Nullable ? " NULL" : " NOT NULL")));
-                return new DdlResult($"CREATE TYPE {full} AS TABLE (\n{body}\n);\n", "generated");
-            }
-            return new DdlResult($"CREATE TYPE {full} FROM {ut.BaseTypeText}{(ut.Nullable ? " NULL" : " NOT NULL")};\n", "generated");
-        }
+        if (obj.Type == ObjectTypes.Type) return new DdlResult(await GetTypeDdlAsync(schema, obj.Name, full, ct).ConfigureAwait(false), "generated");
 
         var found = await FindObjectAsync(schema, obj.Name, ct).ConfigureAwait(false)
             ?? throw EngineException.NotFound($"Object {schema}.{obj.Name}");
@@ -307,16 +301,6 @@ public sealed class SqlServerCatalogReader : ICatalogReader
         var rows = await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.ObjectIdByName,
             r => new FoundObject(r.GetInt32(0), r.GetString(1).Trim(), r.GetDateTime(2), r.GetDateTime(3)), ct,
             ("@schema", schema), ("@name", name)).ConfigureAwait(false);
-        return rows.FirstOrDefault();
-    }
-
-    private sealed record FoundType(string BaseTypeText, bool Nullable, int? TableObjectId);
-
-    private async Task<FoundType?> FindUserTypeAsync(string schema, string name, CancellationToken ct)
-    {
-        var rows = await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.UserTypeByName, r => new FoundType(
-            r.IsDBNull(1) ? "sql_variant" : SqlServerNames.TypeText(r.GetString(1), r.GetInt16(2), r.GetByte(3), r.GetByte(4)),
-            SqlDb.Bool(r, 5), r.IsDBNull(7) ? null : r.GetInt32(7)), ct, ("@schema", schema), ("@name", name)).ConfigureAwait(false);
         return rows.FirstOrDefault();
     }
 

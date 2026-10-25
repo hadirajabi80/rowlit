@@ -55,6 +55,58 @@ public class CatalogWireTests
     }
 
     [Fact]
+    public void TypeObjects_CarryKindAndSummary_OthersDoNot()
+    {
+        var schema = new SchemaCatalog("Shop", "dbo",
+        [
+            new CatalogObject { Type = ObjectTypes.Type, Name = "Phone", Kind = TypeKinds.Alias, BaseType = "nvarchar(20) not null" },
+            new CatalogObject { Type = ObjectTypes.Type, Name = "Legacy" },
+            new CatalogObject { Type = ObjectTypes.Table, Name = "T" },
+        ]);
+        var json = Encoding.UTF8.GetString(CatalogWire.SerializeSchema(schema, 1));
+        Assert.Equal(
+            """{"name":"dbo","version":1,"objects":[""" +
+            """{"t":"type","n":"Phone","k":"alias","bt":"nvarchar(20) not null"},""" +
+            """{"t":"type","n":"Legacy"},{"t":"table","n":"T"}]}""",
+            json);
+    }
+
+    [Fact]
+    public void ObjectDetails_SerializeTheTypeInfoInCamelCase()
+    {
+        var details = new ObjectDetails(new ObjectRef(null, "dbo", "Phone", ObjectTypes.Type), [], [], [], [], [], [], null, null, null)
+        {
+            TypeInfo = new TypeDetails(TypeKinds.Alias)
+            {
+                Properties = [new("Base type", "nvarchar(20)")],
+                ItemsTitle = "Check constraints",
+                Items = [new("CK", "(1=1)")],
+                UsedBy = [new("dbo", "SavePhones", ObjectTypes.Proc, "parameter @p")],
+            },
+        };
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(details, DbStudio.Core.Services.CoreJson.Options));
+        var info = doc.RootElement.GetProperty("typeInfo");
+        Assert.Equal("alias", info.GetProperty("kind").GetString());
+        Assert.Equal("Base type", info.GetProperty("properties")[0].GetProperty("name").GetString());
+        Assert.Equal("Check constraints", info.GetProperty("itemsTitle").GetString());
+        Assert.Equal("CK", info.GetProperty("items")[0].GetProperty("name").GetString());
+        var used = info.GetProperty("usedBy")[0];
+        Assert.Equal(("dbo", "SavePhones", "proc", "parameter @p"),
+            (used.GetProperty("schema").GetString(), used.GetProperty("name").GetString(), used.GetProperty("type").GetString(), used.GetProperty("usage").GetString()));
+        // other objects have no type info
+        var plain = new ObjectDetails(new ObjectRef(null, "dbo", "T", ObjectTypes.Table), [], [], [], [], [], [], null, null, null);
+        using var doc2 = JsonDocument.Parse(JsonSerializer.Serialize(plain, DbStudio.Core.Services.CoreJson.Options));
+        Assert.Equal(JsonValueKind.Null, doc2.RootElement.GetProperty("typeInfo").ValueKind);
+    }
+
+    [Fact]
+    public void SystemTypes_SerializeInCamelCase()
+    {
+        var json = JsonSerializer.Serialize(new SystemTypeInfo("nvarchar", "Unicode character strings", 8000, 0, 0, "Latin1_General_CI_AS", true), DbStudio.Core.Services.CoreJson.Options);
+        Assert.Equal("""{"name":"nvarchar","category":"Unicode character strings","maxLength":8000,"precision":0,"scale":0,"collation":"Latin1_General_CI_AS","nullable":true}""", json);
+    }
+
+    [Fact]
     public void Snapshot_ComposesPreSerializedSchemas()
     {
         var schema = CatalogWire.SerializeSchema(Sample(), 3);

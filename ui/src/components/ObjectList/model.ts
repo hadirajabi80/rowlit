@@ -2,6 +2,7 @@
 // Pure and unit-tested.
 import type { CatalogObjectType, CatalogSchema } from '../../api/types';
 import type { ObjectListItem } from '../../api/types.objects';
+import { typeKindOf, typeKindSingular } from '../../lib/typeKinds';
 
 export const OBJECTS_VIEW = 'objects';
 
@@ -119,8 +120,15 @@ export function fromCatalog(schemas: readonly CatalogSchema[], schema: string | 
   return uniqueObjects(schemas
     .filter((s) => schema === null || s.name === schema)
     .flatMap((s) => s.objects.map((o) => ({
-      type: o.t, schema: s.name, name: o.n, rowCount: null, sizeBytes: null, modified: null, created: null, comment: o.cm ?? null,
+      type: o.t, schema: s.name, name: o.n, rowCount: null, sizeBytes: null, modified: null, created: null, comment: o.cm ?? o.bt ?? null,
+      ...(typeKindOf(o) ? { kind: typeKindOf(o) } : {}),
     }))));
+}
+
+/** "Table", "view"... or, for a type object, its kind ("user-defined table type", "enum type"). */
+export function itemTypeLabel(it: Pick<ObjectListItem, 'type' | 'kind'>): string {
+  if (it.type === 'type' && it.kind) return typeKindSingular(it.kind);
+  return GROUPS.find((g) => g.types.includes(it.type))?.singular ?? it.type;
 }
 
 /** Stable key of a row. */

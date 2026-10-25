@@ -14,6 +14,8 @@ export interface ObjectListItem {
   modified: string | null;
   created: string | null;
   comment: string | null;
+  /** Type objects: the kind (lib/typeKinds.ts); absent for every other object. */
+  kind?: string | null;
 }
 
 /**
