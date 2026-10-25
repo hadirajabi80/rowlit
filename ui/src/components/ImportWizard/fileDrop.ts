@@ -5,7 +5,7 @@ import type { DragEvent } from 'react';
 import type { CommandTarget } from '../../commands/types';
 import { getPlatform } from '../../platform';
 import { toast } from '../../store/ui';
-import { isImportable } from './files';
+import { isImportable, isLegacyExcel } from './files';
 import { canImportInto, openImportWizard, type ImportContext } from './open';
 
 /** Where a drop on this explorer node would import, null when the node cannot take one. */
@@ -37,17 +37,41 @@ export function pathOfFile(file: File): string | null {
   return legacy || null;
 }
 
-/** Handles a drop of files for an import context; returns true when the wizard was opened. */
-export function handleImportDrop(files: FileList | readonly File[] | null | undefined, ctx: ImportContext): boolean {
-  const file = files?.[0];
-  if (!file) return false;
-  if (!isImportable(file.name)) {
-    toast('info', `Cannot import "${file.name}"`, 'Supported files: CSV, TSV, TXT, XLSX, JSON, NDJSON.');
-    return false;
+/** Wizards opened by one drop (the rest is reported, never silently dropped). */
+export const MAX_DROP_WIZARDS = 5;
+
+export const SUPPORTED_FILES_TEXT = 'Supported files: CSV, TSV, TXT, XLSX, JSON, NDJSON.';
+
+/** Tells the user why files cannot be imported (an .xls gets its own advice). */
+export function toastUnsupported(names: readonly string[]): void {
+  if (names.length === 0) return;
+  if (names.length === 1) {
+    toast('info', `Unsupported file type: "${names[0]}"`, isLegacyExcel(names[0])
+      ? 'Excel 97-2003 (.xls) files are not supported. Save the workbook as .xlsx first.'
+      : SUPPORTED_FILES_TEXT);
+    return;
   }
-  const path = pathOfFile(file);
-  if (!path) toast('info', 'Choose the file in the wizard', 'This browser does not tell the location of dropped files.');
-  openImportWizard(ctx, path);
+  toast('info', `Unsupported file types (${names.length} files)`, `${names.join(', ')}. ${SUPPORTED_FILES_TEXT}`);
+}
+
+/**
+ * Opens one wizard per dropped data file (at most MAX_DROP_WIZARDS) for an import context; returns true when at least
+ * one opened. Files of other types are reported in one toast.
+ */
+export function handleImportDrop(files: FileList | readonly File[] | null | undefined, ctx: ImportContext): boolean {
+  const list = Array.from(files ?? []);
+  if (list.length === 0) return false;
+  toastUnsupported(list.filter((f) => !isImportable(f.name)).map((f) => f.name));
+  const ok = list.filter((f) => isImportable(f.name));
+  if (ok.length === 0) return false;
+  if (ok.length > MAX_DROP_WIZARDS) toast('info', `Opened ${MAX_DROP_WIZARDS} of ${ok.length} files`, 'Drop the remaining files again to import them.');
+  let unknownPath = false;
+  for (const file of ok.slice(0, MAX_DROP_WIZARDS)) {
+    const path = pathOfFile(file);
+    if (!path) unknownPath = true;
+    openImportWizard(ctx, path);
+  }
+  if (unknownPath) toast('info', 'Choose the file in the wizard', 'This browser does not tell the location of dropped files.');
   return true;
 }
 

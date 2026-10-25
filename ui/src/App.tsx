@@ -10,6 +10,7 @@ import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ConnectionDialogHost } from './components/ConnectionDialog/ConnectionDialog';
 import { ConnectionSwitcher } from './components/ConnectionsPanel/ConnectionSwitcher';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
+import { DropOverlay } from './components/DropOverlay/DropOverlay';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { focusFirst, focusIsLost } from './components/common/focus';
 import { MenuHost, useMenu } from './components/common/Menu';
@@ -167,6 +168,9 @@ function Shell() {
         <Toasts />
       </ToastsBoundary>
       <LiveRegion />
+      <ErrorBoundary area="the drop overlay" hidden>
+        <DropOverlay />
+      </ErrorBoundary>
     </div>
   );
 }

@@ -2,18 +2,23 @@
 // start / cancel / progress) and derives what each step needs (issues, request, gating).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '../../api/client';
+import { catalogDatabase } from '../../app/actions';
 import { dbKey, useCatalog } from '../../store/catalog';
-import { getConnection, hasDatabaseLevel } from '../../store/connections';
+import { getConnection, hasDatabaseLevel, useConnections } from '../../store/connections';
 import { useTabs, type ViewTab } from '../../store/tabs';
 import { importApi } from './api';
 import { listenForJobs, waitForImportJob } from './jobs';
 import {
-  buildImportRequest, formatOfPath, isUniqueKey, mappedTargets, mappingIssues, newTableIssues, pickDefaultKey,
+  autoMatch, buildImportRequest, formatOfPath, isUniqueKey, mappedTargets, mappingIssues, newTableIssues, pickDefaultKey, SKIP,
   type MapChoice, type NewColumnRow,
 } from './model';
-import type { ImportTabState } from './open';
+import { canImportInto, type ImportTabState } from './open';
+import { rememberRecent } from './recent';
 import type { ImportMode, ImportRequest, SourceOptions } from './types';
-import { applyPreview, applyTableInfo, effectiveSource, IDLE_RUN, initialState, STEP_FORMAT, STEP_MODE, STEP_RUN, STEP_SOURCE, STEP_TARGET, type WizardState } from './wizardState';
+import {
+  applyPreview, applyTableInfo, effectiveSource, IDLE_RUN, initialState, progressLog, STEP_COLUMNS, STEP_FORMAT, STEP_OPTIONS, STEP_RUN, STEP_SOURCE, STEP_TARGET,
+  type WizardState,
+} from './wizardState';
 
 export const PREVIEW_DEBOUNCE_MS = 300;
 /** Rows per preview page. */
@@ -44,7 +49,10 @@ export function useWizard(tab: ViewTab) {
 
   // ---------------------------------------------------------------- capabilities
   useEffect(() => {
-    if (!cid) return;
+    if (!cid) {
+      setS((p) => (p.caps || p.capsError ? { ...p, caps: null, capsError: null } : p));
+      return;
+    }
     let off = false;
     importApi.capabilities(cid, dbEngine).then(
       (caps) => !off && alive.current && setS((p) => ({ ...p, caps, capsError: null })),
@@ -71,7 +79,11 @@ export function useWizard(tab: ViewTab) {
       importApi
         .preview({ path, options: { ...(format ? { format } : {}), ...s.userOpts }, maxRows: PREVIEW_PAGE_SIZE, offset: s.previewPage * PREVIEW_PAGE_SIZE })
         .then(
-          (r) => seq === previewSeq.current && alive.current && setS((p) => applyPreview(p, r)),
+          (r) => {
+            if (seq !== previewSeq.current || !alive.current) return;
+            rememberRecent(path);
+            setS((p) => applyPreview(p, r));
+          },
           (e) => seq === previewSeq.current && alive.current && setS((p) => ({ ...p, previewLoading: false, previewError: errorMessage(e), preview: null, columnSig: '' })),
         );
     }, PREVIEW_DEBOUNCE_MS);
@@ -99,6 +111,19 @@ export function useWizard(tab: ViewTab) {
     () => (s.schema ? (dbCat?.loaded[s.schema]?.objects ?? []).filter((o) => o.t === 'table').map((o) => o.n).sort((a, b) => a.localeCompare(b)) : []),
     [dbCat?.loaded, s.schema],
   );
+  /** Lower-cased names of every object (tables, views ...) of the chosen schema: a new table cannot reuse one. */
+  const takenNames = useMemo(
+    () => new Set(s.schema ? (dbCat?.loaded[s.schema]?.objects ?? []).map((o) => o.n.toLowerCase()) : []),
+    [dbCat?.loaded, s.schema],
+  );
+  const dbLevel = hasDatabaseLevel(conn?.providerId);
+  const databases = useCatalog((c) => c.conns[cid]?.databases?.databases);
+  useEffect(() => {
+    if (cid && dbLevel) void useCatalog.getState().loadDatabases(cid);
+  }, [cid, dbLevel]);
+  /** Connections the wizard can load into (writable, relational). */
+  const allConnections = useConnections((c) => c.connections);
+  const connections = useMemo(() => allConnections.filter((c) => canImportInto(c.id)), [allConnections]);
 
   // ---------------------------------------------------------------- target table info
   const infoSeq = useRef(0);
@@ -145,6 +170,8 @@ export function useWizard(tab: ViewTab) {
     s.caps && !s.caps.canImport ? s.caps.reason ?? 'Importing is not available for this connection.'
       : conn?.readOnly ? 'This connection is read-only.'
         : null;
+  /** The new table's name clashes with a table / view of the schema (the CREATE TABLE would fail). */
+  const nameTaken = create && s.newTable.trim().length > 0 && takenNames.has(s.newTable.trim().toLowerCase());
 
   const request: ImportRequest | null = useMemo(() => {
     if (!source) return null;
@@ -160,12 +187,35 @@ export function useWizard(tab: ViewTab) {
     : [...(s.tableInfoError ? [s.tableInfoError] : []), ...(!s.table.trim() ? ['Choose the table to load into.'] : []), ...existingIssues.errors];
   const truncating = !create && mode === 'truncateInsert';
 
+  const optionsOk = !!request && !blocker && keyErrors.length === 0 && (!truncating || s.confirmTruncate) && (s.onError === 'stop' || s.maxErrors >= 0) && batchSize > 0;
   const canNext: Record<number, boolean> = {
-    [STEP_SOURCE]: s.path.trim().length > 0,
+    [STEP_SOURCE]: s.path.trim().length > 0 && !!cid,
     [STEP_FORMAT]: !!s.preview && s.preview.columns.length > 0 && !s.previewLoading && !s.previewError,
-    [STEP_TARGET]: !!s.preview && !s.tableInfoLoading && targetErrors.length === 0 && !blocker,
-    [STEP_MODE]:
-      !!request && !blocker && keyErrors.length === 0 && (!truncating || s.confirmTruncate) && (s.onError === 'stop' || s.maxErrors >= 0) && batchSize > 0,
+    [STEP_TARGET]: !!s.preview && !!cid && !blocker && (create
+      ? s.newTable.trim().length > 0 && !nameTaken
+      : !!s.tableInfo && !s.tableInfoLoading && !s.tableInfoError && s.table.trim().length > 0),
+    [STEP_COLUMNS]: !!s.preview && (create ? newIssues.length === 0 : !!s.tableInfo && existingIssues.errors.length === 0),
+    [STEP_OPTIONS]: optionsOk,
+    [STEP_RUN]: optionsOk,
+  };
+  /** Why Next is disabled, in a few words (shown next to the button; the details are in the step). */
+  const nextHint = (step: number): string | null => {
+    if (canNext[step]) return null;
+    switch (step) {
+      case STEP_SOURCE: return !s.path.trim() ? 'Choose a file to continue.' : 'Choose a connection to continue.';
+      case STEP_FORMAT: return s.previewLoading ? 'Reading the file…' : s.previewError ? 'The file cannot be read yet.' : 'The file has no columns.';
+      case STEP_TARGET:
+        if (!cid) return 'Choose a connection to continue.';
+        if (blocker) return 'This connection cannot be imported into.';
+        if (create) return nameTaken ? 'That table name is taken.' : 'Enter a table name to continue.';
+        return s.tableInfoLoading ? 'Reading the table…' : !s.table.trim() ? 'Choose a table to continue.' : 'The table cannot be used yet.';
+      case STEP_COLUMNS: {
+        const n = create ? newIssues.length : existingIssues.errors.length;
+        return n > 0 ? `${n} ${n === 1 ? 'problem' : 'problems'} to fix.` : 'Choose a table first.';
+      }
+      default:
+        return keyErrors.length > 0 ? 'Choose a key to continue.' : truncating && !s.confirmTruncate ? 'Confirm the replacement to continue.' : 'Check the options to continue.';
+    }
   };
 
   // ---------------------------------------------------------------- DDL preview (new table)
@@ -177,9 +227,9 @@ export function useWizard(tab: ViewTab) {
     [create, request, s.newTable, s.schema, dbEngine, s.newColumns, s.primaryKey],
   );
   const ddlSeq = useRef(0);
-  const showTarget = s.step >= STEP_TARGET;
+  const showColumns = s.step >= STEP_COLUMNS;
   useEffect(() => {
-    if (!ddlKey || !cid || !showTarget) return;
+    if (!ddlKey || !cid || !showColumns) return;
     const included = s.newColumns.filter((c) => c.include);
     if (!s.newTable.trim() || included.length === 0 || newIssues.length > 0) {
       setS((p) => (p.ddl ? { ...p, ddl: null } : p));
@@ -198,7 +248,7 @@ export function useWizard(tab: ViewTab) {
         );
     }, DDL_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [ddlKey, cid, showTarget]);
+  }, [ddlKey, cid, showColumns]);
 
   // ---------------------------------------------------------------- persistence of path / target
   useEffect(() => {
@@ -230,6 +280,46 @@ export function useWizard(tab: ViewTab) {
     setS((p) => (p.tableInfo ? applyTableInfo({ ...p, keyColumns: p.keyColumns }, p.tableInfo) : p));
   }, []);
 
+  /** Every table column to "skip" (the user then picks the sources one by one). */
+  const clearMapping = useCallback(() => {
+    setS((p) => ({ ...p, mapping: Object.fromEntries(Object.keys(p.mapping).map((k) => [k, SKIP])), mappingTouched: true, keyColumns: [] }));
+  }, []);
+
+  /** Skip / un-skip one table column; un-skipping restores the match by name, else the first file column nobody uses. */
+  const toggleSkip = useCallback((target: string) => {
+    setS((p) => {
+      const cur = p.mapping[target] ?? SKIP;
+      if (cur.kind !== 'skip') return { ...p, mapping: { ...p.mapping, [target]: SKIP }, mappingTouched: true };
+      const col = p.tableInfo?.columns.find((c) => c.name === target);
+      const cols = p.preview?.columns ?? [];
+      let next: MapChoice = col ? autoMatch([col], cols)[target] ?? SKIP : SKIP;
+      if (next.kind === 'skip') {
+        const used = new Set(Object.values(p.mapping).flatMap((m) => (m.kind === 'source' ? [m.index] : [])));
+        const free = cols.find((c) => !used.has(c.index));
+        if (free) next = { kind: 'source', index: free.index };
+      }
+      return { ...p, mapping: { ...p.mapping, [target]: next }, mappingTouched: true };
+    });
+  }, []);
+
+  /** Another connection: everything that depends on it (database, schema, table, capabilities) starts over. */
+  const setConnection = useCallback((id: string) => {
+    useTabs.getState().updateView(tab.id, { connectionId: id || null, database: id ? catalogDatabase(id, null) : null });
+    setS((p) => ({
+      ...p, caps: null, capsError: null, schema: null, table: '', tableInfo: null, tableInfoError: null, mapping: {}, keyColumns: [],
+      confirmTruncate: false, ddl: null, mode: 'append',
+    }));
+  }, [tab.id]);
+
+  const setDatabase = useCallback((db: string | null) => {
+    useTabs.getState().updateView(tab.id, { database: db });
+    setS((p) => ({ ...p, schema: null, table: '', tableInfo: null, tableInfoError: null, mapping: {}, keyColumns: [], ddl: null }));
+  }, [tab.id]);
+
+  const setSchema = useCallback((schema: string | null) => {
+    setS((p) => ({ ...p, schema, table: '', tableInfo: null, tableInfoError: null, mapping: {}, keyColumns: [], confirmTruncate: false }));
+  }, []);
+
   const updateNewColumn = useCallback((index: number, change: Partial<NewColumnRow>) => {
     setS((p) => {
       const old = p.newColumns.find((c) => c.index === index);
@@ -252,19 +342,20 @@ export function useWizard(tab: ViewTab) {
     });
   }, []);
 
-  const goTo = useCallback((step: number) => setS((p) => ({ ...p, step })), []);
+  /** Moves to a step; leaving the Run step after a failure makes the next visit a fresh review. */
+  const goTo = useCallback((step: number) => setS((p) => ({ ...p, step, run: step < STEP_RUN && p.run.status === 'failed' ? IDLE_RUN : p.run })), []);
 
   const start = useCallback(async () => {
     if (!request || !cid) return;
     listenForJobs();
-    setS((p) => ({ ...p, step: STEP_RUN, run: { ...IDLE_RUN, status: 'starting', startedAt: Date.now() } }));
+    setS((p) => ({ ...p, step: STEP_RUN, run: { ...IDLE_RUN, status: 'starting', startedAt: Date.now(), log: [{ at: 0, tone: 'info', text: 'Starting the import…' }] } }));
     try {
       const { jobId } = await importApi.start(cid, request);
       if (!alive.current) return;
       setS((p) => ({ ...p, run: { ...p.run, status: 'running', jobId } }));
       const end = await waitForImportJob(jobId, (progress, ev) => {
         if (!alive.current) return;
-        setS((p) => ({ ...p, run: { ...p.run, progress: progress ?? p.run.progress, rowsRead: ev.done } }));
+        setS((p) => ({ ...p, run: { ...p.run, log: progressLog(p.run, progress, Date.now()), progress: progress ?? p.run.progress, rowsRead: ev.done } }));
       });
       if (!alive.current) return;
       if (end.status === 'ok' && end.summary) {
@@ -302,9 +393,10 @@ export function useWizard(tab: ViewTab) {
   const setPreviewPage = useCallback((page: number) => setS((p) => ({ ...p, previewPage: Math.max(0, page) })), []);
 
   return {
-    s, patch, tab, cid, conn, dbEngine, dbCatalog, schemaNames, tables, source, columns, existingIssues, newIssues, create, tableName, modes, mode,
-    transactional, transaction, batchSize, keyed, keyErrors, keyIsUnique, mappedNames, blocker, request, targetErrors, truncating, canNext,
-    running, setPreviewPage, setOpt, setMapping, runAutoMatch, updateNewColumn, togglePk, setMode, goTo, start, cancel, restart,
+    s, patch, tab, cid, conn, dbEngine, dbCatalog, dbLevel, databases, connections, schemaNames, tables, takenNames, nameTaken, source, columns,
+    existingIssues, newIssues, create, tableName, modes, mode, transactional, transaction, batchSize, keyed, keyErrors, keyIsUnique, mappedNames,
+    blocker, request, targetErrors, truncating, canNext, nextHint, running, setPreviewPage, setOpt, setMapping, runAutoMatch, clearMapping,
+    toggleSkip, setConnection, setDatabase, setSchema, updateNewColumn, togglePk, setMode, goTo, start, cancel, restart,
   };
 }
 

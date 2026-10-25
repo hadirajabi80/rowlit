@@ -8,6 +8,7 @@ import { MockEngine } from './engine';
 import { createM15Handlers } from './m15/m15Handlers';
 import { createM2Context, createM2FrameworkHandlers } from './m2';
 import { createErHandlers } from './m2/er';
+import { createImportHandlers } from './m2/importWizard';
 import { createKafkaHandlers } from './m2/kafka';
 import { createLogsHandlers } from './m2/logs';
 import { createMongoHandlers } from './m2/mongo';
@@ -277,5 +278,6 @@ function m2Handlers(engine: MockEngine, ok: Parameters<typeof createM2Context>[1
     ...createLogsHandlers(ctx),
     ...createErHandlers(ctx),
     ...createSearchHandlers(ctx), // Find in database (db.search stream)
+    ...createImportHandlers(ctx), // Import Wizard (preview, capabilities, table info, DDL, start)
   ];
 }
