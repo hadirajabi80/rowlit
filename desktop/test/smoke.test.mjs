@@ -44,7 +44,7 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
   // openTabWindow, reattachTabs, reportDetachedTabs, windowRole
   assert.deepEqual(r.keys, [
     'appVersion', 'checkForUpdates', 'closeDetachedWindow', 'configureUpdates', 'getDetachedTabs', 'getEngineInfo',
-    'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace', 'onDetachedTabs',
+    'getPathForFile', 'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace', 'onDetachedTabs',
     'onEngineRestarted', 'onMenuCommand', 'onTabsReattached', 'onUpdateStatus', 'openExternal', 'openTabWindow', 'platform', 'quitAndInstall',
     'readTextFile', 'reattachTabs', 'reportDetachedTabs', 'saveWorkspace', 'setTitle', 'setTitleBarTheme', 'setZoomFactor', 'showAppMenu',
     'showNotification', // ---- notifications
