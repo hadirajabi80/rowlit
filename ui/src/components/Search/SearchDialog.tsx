@@ -4,7 +4,7 @@
 import { PanelBottom, Pin, Search, X } from 'lucide-react';
 import { useCallback, useRef, type KeyboardEvent } from 'react';
 import { eventStroke, normalizeShortcut } from '../../commands/keys';
-import { getCommand } from '../../commands/registry';
+import { primaryShortcut } from '../../commands/registry';
 import { useRestoreFocus } from '../common/focus';
 import { Kbd } from '../Shortcuts/Kbd';
 import { SEARCH_DIALOG_RUN, useSearchDialog } from './dialogStore';
@@ -31,7 +31,7 @@ export function SearchDialog() {
 
   if (!state) return null;
 
-  const findKey = getCommand('search.findInDatabase')?.shortcut ?? 'Mod+Shift+F';
+  const findKey = primaryShortcut('search.findInDatabase') ?? 'Mod+Shift+F';
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       // The panel handles Esc in the box and the results (cancel a running search first); anywhere else it closes.

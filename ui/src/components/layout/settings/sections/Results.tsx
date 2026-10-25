@@ -1,4 +1,4 @@
-import { displayShortcut } from '../../../../commands/keys';
+import { shortcutLabelOf } from '../../../../commands/registry';
 import { useSettings, type FullSettings } from '../../../../store/settings';
 import { Card, Num, Row, Select, ToggleRow } from '../controls';
 
@@ -35,7 +35,7 @@ export function ResultsSection() {
         <ToggleRow
           id="set-showsql"
           label="Show the SQL before saving edits"
-          hint={`Off: ${displayShortcut('Mod+S')} saves directly`}
+          hint={`Off: ${shortcutLabelOf('file.save') ?? 'Save'} saves directly`}
           keywords="preview sql save"
           checked={!!s.grid.showSqlBeforeSave}
           onChange={(v) => up({ grid: { showSqlBeforeSave: v } })}

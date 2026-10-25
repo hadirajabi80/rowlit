@@ -51,6 +51,9 @@ export const IPC = {
   notify: 'dbstudio:notify',
   // ---- stop the update download
   updatesCancelDownload: 'dbstudio:updates-cancel-download',
+  // ---- keyboard shortcuts
+  /** renderer -> main (send): the menu accelerators after the user's keymap */
+  setMenuShortcuts: 'dbstudio:set-menu-shortcuts',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

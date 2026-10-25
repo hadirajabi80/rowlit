@@ -87,6 +87,14 @@ export interface DbStudioBridge {
    */
   showNotification?(opts: NotificationOptions): void;
 
+  // ---- keyboard shortcuts
+  /**
+   * Additive (optional, older preloads lack it): the application menu's accelerators the user changed in Keyboard
+   * shortcuts, { commandId: "Mod+Shift+K" | null } (null: no accelerator). The main process rebuilds the menu from the
+   * menu model with these in place of the shipped ones; an empty object restores the shipped menu. Fire-and-forget.
+   */
+  setMenuShortcuts?(shortcuts: Record<string, string | null>): void;
+
   // ---- file drops
   /**
    * Additive (optional, older preloads lack it): the file-system path of a File from a drag & drop or an <input>

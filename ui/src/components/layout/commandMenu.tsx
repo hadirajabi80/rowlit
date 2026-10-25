@@ -66,7 +66,7 @@ export function commandMenuItems(entries: readonly ContextEntry[], args?: unknow
       id: e.command,
       label: v.title,
       icon: commandIcon(c.icon, 14),
-      shortcut: c.shortcut,
+      shortcut: v.shortcuts[0],
       ...(v.shortcuts.length > 1 ? { extraShortcuts: v.shortcuts.slice(1) } : {}),
       disabled: !v.enabled,
       danger: !!c.danger,

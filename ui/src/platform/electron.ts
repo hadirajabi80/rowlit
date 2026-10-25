@@ -47,6 +47,8 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
     ...(typeof b.showAppMenu === 'function' ? { showAppMenu: (pos: { x: number; y: number }) => b.showAppMenu!(pos) } : {}),
     // ---- notifications
     ...(typeof b.showNotification === 'function' ? { showNotification: (o: NotificationOptions) => b.showNotification!(o) } : {}),
+    // ---- keyboard shortcuts
+    ...(typeof b.setMenuShortcuts === 'function' ? { setMenuShortcuts: (m: Record<string, string | null>) => b.setMenuShortcuts!(m) } : {}),
     // ---- file drops
     ...(typeof b.getPathForFile === 'function' ? { getFilePath: (f: File) => b.getPathForFile!(f) || null } : {}),
     // ---- stop the update download

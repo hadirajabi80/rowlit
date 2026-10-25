@@ -8,7 +8,7 @@ import { ColorDot } from '../common/ConnectionBadge';
 import { PROVIDER_LABEL } from '../common/icons';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { RowlitMark } from '../../theme/brand/RowlitMark';
-import { Kbd } from '../Shortcuts/Kbd';
+import { CommandKbd } from '../Shortcuts/Kbd';
 
 const PROVIDERS: { id: ProviderId; blurb: string; whenListed?: boolean }[] = [
   { id: 'sqlserver', blurb: 'SQL Server 2012+ and Azure SQL' },
@@ -106,11 +106,11 @@ export function Welcome({ ready }: { ready: boolean }) {
         </section>
 
         <footer className="welcome-keys" aria-label="Keyboard shortcuts">
-          <span><Kbd shortcut="Mod+Shift+P" /> commands</span>
-          <span><Kbd shortcut="Mod+P" /> go to object</span>
-          <span><Kbd shortcut="Mod+N" /> new console</span>
-          <span><Kbd shortcut="Mod+Enter" /> run statement</span>
-          <span><Kbd shortcut="F1" /> all shortcuts</span>
+          <span><CommandKbd command="view.commandPalette" /> commands</span>
+          <span><CommandKbd command="view.goToObject" /> go to object</span>
+          <span><CommandKbd command="file.newConsole" /> new console</span>
+          <span><CommandKbd command="run.statement" /> run statement</span>
+          <span><CommandKbd command="view.shortcuts" /> all shortcuts</span>
         </footer>
       </div>
     </div>

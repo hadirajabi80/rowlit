@@ -1,4 +1,4 @@
-import { displayShortcut } from '../../../../commands/keys';
+import { keyHint } from '../../../../commands/registry';
 import { useSettings, type FullSettings } from '../../../../store/settings';
 import { Card, Num, Row, Select, ToggleRow } from '../controls';
 
@@ -7,7 +7,7 @@ export function FormattingSection() {
   const up = useSettings.getState().update;
   return (
     <>
-      <Card title="Layout" description={`Format SQL (${displayShortcut('Shift+Alt+F')}) and DDL shown when opening objects.`}>
+      <Card title="Layout" description={`Format SQL${keyHint('format.document', ' (', ')')} and DDL shown when opening objects.`}>
         <Row label="Keyword case" htmlFor="set-fkw" keywords="uppercase lowercase format">
           <Select id="set-fkw" value={s.format.keywordCase} options={[['upper', 'UPPER'], ['lower', 'lower'], ['asIs', 'As written']]} onChange={(v) => up({ format: { keywordCase: v } })} />
         </Row>

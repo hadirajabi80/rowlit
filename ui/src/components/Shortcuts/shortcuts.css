@@ -83,3 +83,169 @@
   background: var(--accent);
   color: var(--accent-fg);
 }
+
+/* ---------- keymap editor: tools row, editable rows, the shortcut recorder ---------- */
+.sheet-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.sheet-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+.sheet-preset button {
+  min-width: 190px;
+}
+.sheet-filters {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+.sheet-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--input-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.sheet-filter:hover {
+  background: var(--bg-hover);
+}
+.sheet-filter.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sheet-filter-count {
+  font-weight: var(--weight-strong);
+}
+
+.shortcut-sheet .sheet-body {
+  align-content: start;
+}
+.shortcut-sheet .sheet-row {
+  flex-wrap: wrap;
+}
+.shortcut-sheet .sheet-row dd {
+  align-items: center;
+}
+.shortcut-sheet .sheet-row.is-editing dd {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+}
+.sheet-edited {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+.sheet-warn {
+  margin-left: var(--space-1);
+  color: var(--warning);
+  vertical-align: -2px;
+}
+.sheet-chip,
+.sheet-x,
+.sheet-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.sheet-chip {
+  padding: 1px;
+}
+.sheet-chip:hover kbd,
+.sheet-chip:focus-visible kbd {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sheet-x,
+.sheet-add.icon {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
+.sheet-add.on-empty {
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  border-color: var(--border);
+}
+.sheet-x:hover,
+.sheet-add:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+/* row controls appear with the pointer or the keyboard on the row; the unassigned "Assign" stays visible */
+.shortcut-sheet .sheet-row:not(:hover, :focus-within, .is-editing) .sheet-x,
+.shortcut-sheet .sheet-row:not(:hover, :focus-within, .is-editing) .sheet-add.icon {
+  opacity: 0;
+}
+.sheet-lock {
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+
+.sheet-recorder {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-1) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  outline: none;
+}
+.sheet-rec-keys {
+  min-width: 150px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+}
+.sheet-rec-placeholder {
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.sheet-rec-msg {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+.sheet-rec-note {
+  color: var(--fg-muted);
+}
+.sheet-rec-error {
+  color: var(--danger-text);
+}
+.sheet-rec-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--warning);
+}
+.sheet-rec-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}

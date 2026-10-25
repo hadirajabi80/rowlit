@@ -52,6 +52,29 @@ export const SHORTCUTS: ShortcutRow[] = MENUS.flatMap((m) =>
   ),
 ).filter((r, i, all) => all.findIndex((x) => x.command === r.command) === i);
 
+// The user's keymap (Keyboard shortcuts dialog): { commandId: shortcut | null } for the menu items they rebound. The
+// renderer sends it with setMenuShortcuts; an item without an entry keeps the menu model's shortcut.
+let menuShortcuts: Record<string, string | null> = {};
+let lastOptions: MenuOptions | null = null;
+
+/** The accelerator source of a command item: the user's shortcut, else the menu model's. */
+export function shortcutOfItem(command: string, shipped: string | undefined, overrides: Record<string, string | null> = menuShortcuts): string | undefined {
+  return Object.prototype.hasOwnProperty.call(overrides, command) ? overrides[command] ?? undefined : shipped;
+}
+
+/** Applies the renderer's keymap and rebuilds the application menu with it. */
+export function setMenuShortcuts(map: Record<string, string | null>): void {
+  menuShortcuts = map;
+  if (!lastOptions) return;
+  try {
+    Menu.setApplicationMenu(buildMenu(lastOptions));
+  } catch {
+    // an accelerator Electron cannot parse: fall back to the shipped menu rather than losing it
+    menuShortcuts = {};
+    Menu.setApplicationMenu(buildMenu(lastOptions));
+  }
+}
+
 export function sendMenuCommand(command: string): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   if (win && !win.isDestroyed()) win.webContents.send(IPC.menuCommand, command);
@@ -73,7 +96,7 @@ function entry(it: MenuEntry, o: MenuOptions): MenuItemConstructorOptions | null
   const label = it.command === 'help.about' ? `About Rowlit ${app.getVersion()}` : it.label;
   return {
     label,
-    accelerator: toAccelerator(it.shortcut),
+    accelerator: toAccelerator(shortcutOfItem(it.command, it.shortcut)),
     registerAccelerator: it.registerAccelerator !== false,
     click: () => sendMenuCommand(it.command),
   };
@@ -91,6 +114,7 @@ function tidy(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[]
 }
 
 export function buildMenu(o: MenuOptions): Menu {
+  lastOptions = o;
   const template: MenuItemConstructorOptions[] = [];
   for (const m of MENUS) {
     if (m.platform && m.platform !== PLATFORM) continue;

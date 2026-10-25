@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import type { CatalogObjectType } from '../../api/types';
 import { displayShortcut } from '../../commands/keys';
-import { getCommand } from '../../commands/registry';
+import { primaryShortcut } from '../../commands/registry';
 import { formatCount } from '../../lib/format';
 import { OBJECT_TYPE_SINGULAR } from '../../lib/sql';
 import { useCatalog } from '../../store/catalog';
@@ -348,7 +348,7 @@ export function SearchPanel({ runId, state, update, visible, variant, onOpenResu
 
   const first = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
   const last = Math.min(rows.length, Math.ceil((scrollTop + height) / ROW_H) + OVERSCAN);
-  const findKey = displayShortcut(getCommand('search.findInDatabase')?.shortcut ?? 'Mod+Shift+F');
+  const findKey = displayShortcut(primaryShortcut('search.findInDatabase') ?? 'Mod+Shift+F');
   const scopeText = state.scope.kind === 'all' ? `All connected (${connected.size})` : scopeLabel(state.scope, nameOf, showDatabase);
   const consoleConn = state.consoleConnectionId && connections.find((c) => c.id === state.consoleConnectionId);
   const offerConsole = !!consoleConn && !sameScope(state.scope, { kind: 'connection', connectionId: consoleConn.id });

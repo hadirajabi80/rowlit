@@ -1,5 +1,7 @@
 import { Fragment } from 'react';
 import { displayShortcut, shortcutKeys, tooltipWithShortcut } from '../../commands/keys';
+import { primaryShortcut } from '../../commands/registry';
+import { useCommandsVersion } from '../../commands/useCommands';
 
 /** Key caps for a shortcut, platform-aware: Ctrl+Shift+P on Windows, ⇧⌘P on macOS. */
 export function Kbd({ shortcut, className }: { shortcut: string | undefined | null; className?: string }) {
@@ -18,6 +20,12 @@ export function Kbd({ shortcut, className }: { shortcut: string | undefined | nu
       )}
     </span>
   );
+}
+
+/** The key caps of a command's current primary shortcut (the user's own when they rebound it); nothing when unbound. */
+export function CommandKbd({ command, className }: { command: string; className?: string }) {
+  useCommandsVersion();
+  return <Kbd shortcut={primaryShortcut(command)} className={className} />;
 }
 
 /** "Title (Ctrl+Shift+P)" for tooltips ("Title (detail) · Ctrl+Shift+P" after a parenthetical). */

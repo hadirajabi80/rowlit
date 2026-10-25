@@ -46,7 +46,7 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
     'appVersion', 'cancelUpdateDownload', 'checkForUpdates', 'closeDetachedWindow', 'configureUpdates', 'getDetachedTabs', 'getEngineInfo',
     'getPathForFile', 'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace', 'onDetachedTabs',
     'onEngineRestarted', 'onMenuCommand', 'onTabsReattached', 'onUpdateStatus', 'openExternal', 'openPath', 'openTabWindow', 'platform', 'quitAndInstall',
-    'readTextFile', 'reattachTabs', 'reportDetachedTabs', 'revealInFolder', 'saveWorkspace', 'setTitle', 'setTitleBarTheme', 'setZoomFactor', 'showAppMenu',
+    'readTextFile', 'reattachTabs', 'reportDetachedTabs', 'revealInFolder', 'saveWorkspace', 'setMenuShortcuts', 'setTitle', 'setTitleBarTheme', 'setZoomFactor', 'showAppMenu',
     'showNotification', // ---- notifications
     'showOpenDialog',
     'showSaveDialog', 'windowRole', 'writeTextFile',

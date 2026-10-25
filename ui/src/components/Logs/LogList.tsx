@@ -6,7 +6,7 @@
 import { ArrowDownToLine, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { LogEntry } from '../../api/types';
-import { getCommand } from '../../commands/registry';
+import { primaryShortcut } from '../../commands/registry';
 import { withShortcut } from '../Shortcuts/Kbd';
 import { formatTime, fullTime, highlight, LEVEL_LABEL } from './model';
 
@@ -185,7 +185,7 @@ export function LogList(p: LogListProps) {
     if (follow !== atBottom) p.onFollowChange(atBottom);
   };
 
-  const copyTitle = withShortcut('Copy entry', getCommand('logs.copyEntry')?.shortcut);
+  const copyTitle = withShortcut('Copy entry', primaryShortcut('logs.copyEntry'));
   const rows: ReactNode[] = [];
   for (let i = start; i < end; i++) {
     const e = entries[i];
