@@ -98,7 +98,8 @@ public sealed partial class OracleCatalogReader
             {
                 itemsTitle = "Methods";
                 items.AddRange(methods.Select(m => new TypeItem(m.Name,
-                    $"{(m.Kind ?? "PUBLIC").ToLowerInvariant()} {(m.Results > 0 ? "function" : "procedure")}, {m.Params} parameter{(m.Params == 1 ? "" : "s")}" +
+                    // PARAMETERS counts the implicit SELF of a member method, so it is not shown.
+                    $"{(m.Kind ?? "PUBLIC").ToLowerInvariant()} {(m.Results > 0 ? "function" : "procedure")}" +
                     $"{(m.Overriding ? ", overriding" : "")}{(m.Final ? ", final" : "")}{(m.Instantiable ? "" : ", not instantiable")}")));
             }
         }

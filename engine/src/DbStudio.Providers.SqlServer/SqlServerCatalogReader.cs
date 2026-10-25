@@ -152,7 +152,7 @@ public sealed partial class SqlServerCatalogReader : ICatalogReader
                 Schema = schema,
                 Columns = ttCols,
                 Kind = t.IsTable ? TypeKinds.Table : t.IsClr ? TypeKinds.Clr : TypeKinds.Alias,
-                BaseType = t.IsTable ? $"table ({ttCols.Count} columns)" : t.IsClr ? clrTypes.GetValueOrDefault(t.Id) : $"{t.BaseText}{(t.Nullable ? "" : " not null")}",
+                BaseType = t.IsTable ? $"table ({ttCols.Count} column{(ttCols.Count == 1 ? "" : "s")})" : t.IsClr ? clrTypes.GetValueOrDefault(t.Id) : $"{t.BaseText}{(t.Nullable ? "" : " not null")}",
             });
         }
         foreach (var x in xmlCollections.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))

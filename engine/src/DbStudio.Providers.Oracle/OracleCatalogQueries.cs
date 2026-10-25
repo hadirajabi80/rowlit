@@ -191,7 +191,7 @@ public static class OracleCatalogQueries
         "FROM all_type_attrs WHERE owner=:owner AND type_name=:name ORDER BY attr_no";
 
     public const string TypeMethods =
-        "SELECT method_name, method_type, params, results, final, instantiable, overriding " +
+        "SELECT method_name, method_type, parameters, results, final, instantiable, overriding " +
         "FROM all_type_methods WHERE owner=:owner AND type_name=:name ORDER BY method_no";
 
 
