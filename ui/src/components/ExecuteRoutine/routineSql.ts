@@ -194,15 +194,32 @@ export function routineLabel(spec: RoutineSpec): string {
 
 // ---------------------------------------------------------------------------------------------- binds
 
-/** The bind value of one input; `{ error }` when it does not parse as the parameter's kind. */
-function bindValue(kind: ParamKind, input: ParamInput): { value: QueryParam['value'] } | { error: string } {
+/** Range of a declared integer type (SQL Server / PostgreSQL / Oracle names), or null when it is not a fixed-size one. */
+function intRange(type: string): { min: bigint; max: bigint; name: string; span: string } | null {
+  const base = type.trim().toLowerCase().replace(/\(.*$/, '').trim();
+  const bits = (n: number, name: string) => ({ min: -(2n ** BigInt(n - 1)), max: 2n ** BigInt(n - 1) - 1n, name, span: n === 64 ? '-2^63 to 2^63-1' : '' });
+  if (base === 'tinyint') return { min: 0n, max: 255n, name: base, span: '' };
+  if (['smallint', 'int2', 'smallserial'].includes(base)) return bits(16, base);
+  if (['int', 'integer', 'int4', 'serial', 'pls_integer', 'binary_integer', 'simple_integer'].includes(base)) return bits(32, base);
+  if (['bigint', 'int8', 'bigserial'].includes(base)) return bits(64, base);
+  return null;
+}
+
+/** The bind value of one input; `{ error }` when it does not parse as the parameter's kind (or is out of range for its integer type). */
+function bindValue(kind: ParamKind, input: ParamInput, type = ''): { value: QueryParam['value'] } | { error: string } {
   if (kind === 'string' || kind === 'binary' || kind === 'guid') {
     if (kind !== 'string' && !input.value.trim()) return { error: 'Enter a value, or choose NULL' };
   } else if (!input.value.trim()) {
     return { error: 'Enter a value, or choose NULL' };
   }
   const c = convertValue(kind, input.value);
-  return c.ok ? { value: c.value } : { error: c.error };
+  if (!c.ok) return { error: c.error };
+  const range = kind === 'int' ? intRange(type) : null;
+  if (range) {
+    const n = BigInt(input.value.trim().replace(/^\+/, ''));
+    if (n < range.min || n > range.max) return { error: `Out of range for ${range.name} (${range.span || `${range.min} to ${range.max}`})` };
+  }
+  return { value: c.value };
 }
 
 /** Bind name for SQL Server / Oracle: the parameter's own name when it is a safe identifier, else `p<n>`. */
@@ -278,7 +295,7 @@ function buildTsql(spec: RoutineSpec, inputs: readonly ParamInput[]): RoutineCal
       arg = isProc ? `${formal} = NULL` : 'NULL';
     } else {
       const kind = paramKindOf(p.type, 'tsql');
-      const v = bindValue(kind, input);
+      const v = bindValue(kind, input, p.type);
       if ('error' in v) { errors[i] = v.error; invalid.push(bare); }
       params.push({ name: bare, kind, value: 'error' in v ? null : v.value });
       arg = isProc ? `${formal} = @${bare}` : `@${bare}`;
@@ -328,7 +345,7 @@ function buildOracle(spec: RoutineSpec, inputs: readonly ParamInput[]): RoutineC
       } else args.push(`${formal} => NULL`);
       return;
     }
-    const v = bindValue(kind, input);
+    const v = bindValue(kind, input, p.type);
     const bind = bindNameFor(p, i, 'plsql', taken);
     if ('error' in v) { errors[i] = v.error; invalid.push(bind); }
     params.push({ name: bind, kind, value: 'error' in v ? null : v.value, ...(p.direction === 'inout' ? { direction: 'inout' as const } : {}) });
@@ -370,7 +387,7 @@ function buildPg(spec: RoutineSpec, inputs: readonly ParamInput[]): RoutineCall 
     else if (input.mode === 'null') expr = 'NULL';
     else {
       const kind = paramKindOf(p.type, 'pgsql');
-      const v = bindValue(kind, input);
+      const v = bindValue(kind, input, p.type);
       if ('error' in v) { errors[i] = v.error; invalid.push(String(params.length + 1)); }
       params.push({ name: String(params.length + 1), kind, value: 'error' in v ? null : v.value });
       expr = `$${params.length}${cast(p)}`;

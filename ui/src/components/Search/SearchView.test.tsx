@@ -171,7 +171,8 @@ describe('Search tab', () => {
     expect(items()).toHaveLength(1);
     fireEvent.keyDown(tree, { key: 'ArrowRight' });
     expect(items().length).toBeGreaterThan(5);
-    const codeIndex = items().findIndex((i) => /SELECT \* FROM dbo\.customers/.test(i.textContent ?? ''));
+    const getCustomer = items().findIndex((i) => /GetCustomer/.test(i.textContent ?? ''));
+    const codeIndex = getCustomer + 1 + items().slice(getCustomer + 1).findIndex((i) => /SELECT \* FROM dbo\.customers/.test(i.textContent ?? ''));
     for (let i = 0; i < codeIndex; i++) fireEvent.keyDown(tree, { key: 'ArrowDown' });
     expect(tree.getAttribute('aria-activedescendant')).toBe(`sx-row-${codeIndex}`);
     fireEvent.keyDown(tree, { key: 'Enter' });

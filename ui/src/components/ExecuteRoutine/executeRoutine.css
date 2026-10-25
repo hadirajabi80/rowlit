@@ -5,15 +5,17 @@
 .er-heading {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  flex: 1;
   min-width: 0;
 }
 .er-tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--obj-routine) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--obj-routine) 22%, transparent);
@@ -24,6 +26,7 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 0 1 auto;
 }
 .er-eyebrow {
   color: var(--text-muted);
@@ -37,7 +40,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   font-weight: var(--weight-strong);
 }
 .er-kind {
@@ -51,22 +54,54 @@
 }
 
 /* ================================================================ dialog */
+/* The dialog always fits the window: the overlay keeps 8vh above it, so the height is what is left of the viewport.
+   Header and footer stay put; the parameter rows are the only thing that scrolls. */
+.dialog.er-dialog {
+  max-height: min(720px, calc(100vh - 8vh - 24px));
+  max-height: min(720px, calc(100dvh - 8vh - 24px));
+}
 .er-dialog .dialog-header {
-  padding-top: var(--space-5);
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-3);
+  gap: var(--space-2);
+}
+.er-dialog .dialog-title {
+  min-width: 0;
+}
+.er-dialog .dialog-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 0;
   padding-bottom: var(--space-3);
 }
 .er-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  flex: 1 1 auto;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+}
+.er-top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: none;
   min-width: 0;
 }
+.er-top:empty {
+  display: none;
+}
 .er-context {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: 4px var(--space-3);
+  margin-left: auto;
+  min-width: 0;
   font-size: var(--fs-sm);
+  font-weight: var(--weight-regular);
   color: var(--text-muted);
 }
 .er-db {
@@ -84,7 +119,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: var(--radius);
   background: var(--warning-soft);
   color: var(--text);
@@ -101,7 +136,7 @@
 }
 .er-choice-pill {
   max-width: 100%;
-  height: 28px;
+  height: 26px;
   padding: 0 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -151,18 +186,13 @@
 .er-loading {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 6px 0;
+  gap: 8px;
+  padding: 4px 0;
 }
 .er-skeleton {
   height: 28px;
   border-radius: var(--radius);
   background: var(--bg-sunken);
-}
-.er-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 .er-section-head {
   display: flex;
@@ -184,23 +214,53 @@
   font-size: var(--fs-xs);
   line-height: 16px;
 }
+.er-footer-start,
+.er-footer-end {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.er-footer-end {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+.er-dialog .dialog-footer {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  flex: none;
+}
 
 /* ================================================================ parameter form */
-.er-params {
+.er-form {
   display: flex;
   flex-direction: column;
-  max-height: 46vh;
+  gap: var(--space-2);
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.er-params {
+  --er-opts-w: 44px;
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--bg-panel);
 }
+.er-params.has-defaults {
+  --er-opts-w: 108px;
+}
 .er-row {
   display: grid;
-  grid-template-columns: minmax(140px, 30%) minmax(0, 1fr) 124px;
-  gap: 12px;
+  grid-template-columns: minmax(104px, 30%) minmax(0, 1fr) var(--er-opts-w);
+  gap: 4px 12px;
   align-items: start;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 4px 10px;
+  flex: none;
 }
 .er-row + .er-row {
   border-top: 1px solid var(--border-subtle);
@@ -211,37 +271,40 @@
 .er-name-cell {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  justify-content: center;
+  min-height: var(--input-h);
   min-width: 0;
-  padding-top: 2px;
 }
 .er-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+  font-size: var(--fs-sm);
   font-weight: var(--weight-strong);
+  line-height: 1.25;
 }
 .er-meta {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  line-height: 1.2;
 }
 .er-type {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--syn-type);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
 }
 .er-dir {
-  padding: 0 6px;
+  padding: 0 5px;
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: var(--weight-strong);
   letter-spacing: 0.04em;
-  line-height: 16px;
+  line-height: 14px;
   white-space: nowrap;
 }
 .er-dir.dir-out {
@@ -255,6 +318,12 @@
 .er-value {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.er-value-line {
+  display: flex;
+  align-items: flex-start;
   gap: 4px;
   min-width: 0;
 }
@@ -262,18 +331,34 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1;
   min-width: 0;
+}
+/* Fields follow the type: numbers and dates stay short, text takes the row. */
+.er-row.ed-number .er-field-line {
+  max-width: 200px;
+}
+.er-row.ed-date .er-field-line {
+  max-width: 190px;
+}
+.er-row.ed-time .er-field-line {
+  max-width: 160px;
+}
+.er-row.ed-datetime .er-field-line {
+  max-width: 250px;
 }
 .er-input {
   height: var(--input-h);
   font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }
 .er-number {
   font-variant-numeric: tabular-nums;
 }
 .er-value .er-text {
+  flex: 1;
   height: auto;
-  min-height: calc(var(--input-h) * 2);
+  min-height: calc(var(--input-h) * 2.5);
   padding-top: 6px;
   padding-bottom: 6px;
   resize: vertical;
@@ -297,37 +382,31 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.er-raw:hover,
+.er-raw:hover:not(:disabled),
 .er-raw.on {
   color: var(--accent);
   border-color: var(--accent);
 }
-.er-output {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  height: var(--input-h);
-  padding: 0 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-}
-.er-output svg {
-  color: var(--success);
+.er-raw:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .er-bool {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
   gap: 2px;
+  height: var(--input-h);
   padding: 2px;
   border-radius: var(--radius);
   background: var(--bg-sunken);
+  box-sizing: border-box;
+}
+.er-bool.invalid {
+  box-shadow: 0 0 0 1px var(--danger);
 }
 .er-bool button {
-  min-width: 58px;
+  min-width: 52px;
   height: calc(var(--input-h) - 4px);
   border: none;
   border-radius: var(--radius-sm);
@@ -358,21 +437,32 @@
 .er-field-error {
   color: var(--danger-text);
   font-size: var(--fs-xs);
+  line-height: 1.3;
 }
 .er-opts {
   display: flex;
+  align-items: center;
   gap: 4px;
-  justify-content: flex-end;
-  padding-top: 2px;
+  justify-content: flex-start;
+  height: var(--input-h);
+}
+/* NULL and Default sit in fixed slots so the toggles line up from row to row */
+.er-opts .er-toggle:first-child {
+  width: 44px;
+  padding: 0;
+}
+.er-opts .er-toggle + .er-toggle {
+  width: 60px;
+  padding: 0;
 }
 .er-toggle {
-  height: var(--input-h-sm);
-  padding: 0 9px;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--border-control);
   border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
-  font-size: var(--fs-xs);
+  font-size: 10.5px;
   font-weight: var(--weight-strong);
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -391,26 +481,136 @@
 .er-raw:focus-visible,
 .er-bool button:focus-visible,
 .er-choice-pill:focus-visible,
-.er-copy:focus-visible {
+.er-copy:focus-visible,
+.er-expander:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* OUT parameters take no value: one line instead of rows */
+.er-outputs {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  margin: 0;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  flex: none;
+}
+.er-outputs > svg {
+  align-self: center;
+  color: var(--success);
+  flex-shrink: 0;
+}
+.er-outputs-label {
+  color: var(--text);
+  font-weight: var(--weight-strong);
+}
+.er-out-name {
+  color: var(--syn-variable);
+}
+.er-outputs .er-type {
+  font-size: var(--fs-xs);
+}
+.er-outputs-note {
+  font-size: var(--fs-xs);
+}
+
+/* Narrow window (the dialog class) and narrow containers (the result page): name and toggles on one line, the field
+   below, using the full width. */
+.er-stacked .er-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.er-stacked .er-name-cell {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+.er-stacked .er-opts {
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
+  height: 24px;
+}
+.er-stacked .er-value {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.er-stacked .er-row .er-field-line {
+  max-width: none;
 }
 
 /* ================================================================ call preview */
 .er-preview-wrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  flex: none;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-editor);
+  overflow: hidden;
 }
-.er-preview-head {
+.er-preview-bar {
   display: flex;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 4px 0 2px;
+}
+.er-expander {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 8px 0 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.er-expander:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.er-expander svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+.er-preview-wrap.open .er-expander svg {
+  transform: rotate(90deg);
+}
+.er-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--fs-sm);
 }
 .er-copy {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 22px;
+  flex-shrink: 0;
+  height: 24px;
   padding: 0 8px;
   border: none;
   border-radius: var(--radius-sm);
@@ -425,12 +625,10 @@
 }
 .er-preview {
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 12px;
   max-height: 160px;
   overflow: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-editor);
+  border-top: 1px solid var(--border-subtle);
   color: var(--text);
   font-size: var(--fs-sm);
   line-height: var(--line-height);
@@ -453,36 +651,47 @@
 .tk-ident {
   color: var(--syn-function);
 }
-.er-binds {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  font-size: var(--fs-xs);
-}
-.er-bind {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--bg-sunken);
-  color: var(--syn-variable);
-}
-.er-bind-eq {
-  margin-left: 4px;
-  color: var(--text-muted);
-}
-.er-bind.missing {
-  background: var(--danger-soft);
-}
-.er-bind.missing .er-bind-eq {
-  color: var(--danger-text);
-}
 
-@media (max-width: 640px) {
-  .er-row {
-    grid-template-columns: 1fr auto;
+/* Result page editor: the same rows stack when the window is narrow. */
+@media (max-width: 639px) {
+  .rr-editor .er-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 8px;
   }
-  .er-row > .er-value {
+  .rr-editor .er-name-cell {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 0;
+    grid-row: 1;
+  }
+  .rr-editor .er-opts {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+  }
+  .rr-editor .er-value {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+  .rr-editor .er-row .er-field-line {
+    max-width: none;
+  }
+}
+/* Dialog on a short or narrow window: tighter chrome */
+@media (max-width: 639px) {
+  .er-dialog .dialog-footer {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+  .er-footer-start,
+  .er-footer-end {
+    flex: 1 1 100%;
+  }
+  .er-footer-end .btn {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 }
 

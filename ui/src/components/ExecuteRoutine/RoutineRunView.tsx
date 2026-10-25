@@ -253,7 +253,7 @@ function ParamsEditor({ st, busy, onRun }: { st: RoutineRunState; busy: boolean;
     <div className="rr-editor">
       <RoutineParamsForm spec={st.spec} state={form} onSubmit={submit} idPrefix="rr" />
       <div className="rr-editor-side">
-        {form.call && <CallPreview spec={st.spec} call={form.call} />}
+        {form.call && <CallPreview spec={st.spec} call={form.call} inputs={form.inputs} defaultOpen />}
         {form.call?.error && <p className="er-error" role="alert">{form.call.error}</p>}
         <div className="rr-editor-actions">
           <button className="btn btn-primary" disabled={!form.call || !!form.call.error || busy} onClick={submit}>
