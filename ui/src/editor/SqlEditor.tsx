@@ -10,7 +10,8 @@ import { createIntel, type Intel } from '../intel';
 import { ensureDialect, isDialectReady } from '../intel/dialect/registry';
 import { intelOptionsFromSettings } from './settings';
 import type { RunTargetOptions, SqlEditorHandle, SqlEditorProps } from './SqlEditor.types';
-import { ensureMonacoSetup, LANGUAGE_IDS, THEME_IDS } from './monaco-setup';
+import { ensureMonacoSetup, LANGUAGE_IDS, openDefinitionDdl, THEME_IDS } from './monaco-setup';
+import { notifyCatalogChanged } from './definition-nav';
 import { baseMonacoOptions, remeasureAfterFonts, suggestMetrics } from './monacoOptions';
 import { bindEditorFontSize, editorFontSize } from './fontZoom';
 import { refreshSuggest, triggerSuggest } from './suggestKey';
@@ -270,7 +271,10 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       editor: ed,
       connectionId: () => propsRef.current.catalog?.connectionId ?? '',
       database: () => propsRef.current.catalog?.database ?? null,
-      openObject: (r) => propsRef.current.onOpenObject?.(r),
+      openObject: (r, column) => propsRef.current.onOpenObject?.(r, column),
+      openObjectDdl: (r, column) => (propsRef.current.onOpenObjectDdl ?? propsRef.current.onOpenObject)?.(r, column),
+      definitionMissing: (target, timedOut) => propsRef.current.onDefinitionMissing?.(target, timedOut),
+      catalogWaiters: new Set(),
       accepted: (usageKey) => {
         intel.recordAccepted({ usageKey });
         const u = intel.getUsage();
@@ -350,6 +354,12 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       id: 'dbstudio.triggerSuggest', label: 'Trigger Suggest', keybindings: [(isMac() ? K.WinCtrl : K.CtrlCmd) | C.Space, K.CtrlCmd | C.KeyI],
       contextMenuGroupId: '1_modification', contextMenuOrder: 1, precondition: '!editorReadonly', run: (x) => { triggerSuggest(x); },
     }));
+    // F12 / Ctrl+click open a table's DATA; this is the explicit way to its DDL (any object). Alt+F12 replaces Monaco's
+    // Peek Definition, which would only preview the object's one-line summary.
+    subs.push(ed.addAction({
+      id: 'dbstudio.openDefinitionDdl', label: 'Open definition (DDL)', keybindings: [K.Alt | C.F12],
+      contextMenuGroupId: 'navigation', contextMenuOrder: 1.6, run: () => { void openDefinitionDdl(binding); },
+    }));
     subs.push(ed.addAction({ id: 'dbstudio.signatureHelp', label: 'Parameter Info', keybindings: [K.CtrlCmd | K.Shift | C.Space], run: (x) => x.trigger('dbstudio', 'editor.action.triggerParameterHints', {}) }));
 
     refreshSoft();
@@ -389,6 +399,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
   useEffect(() => {
     intelRef.current?.setCatalog(props.catalog);
     refreshSoft();
+    notifyCatalogChanged(bindingRef.current);
     // a "Loading <schema>…" row is on screen: show the schema's objects now that the catalog has them
     const b = bindingRef.current, ed = edRef.current;
     if (b?.suggestLoading && ed) {
@@ -404,6 +415,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     if (!intel || props.dialect !== 'tsql') return;
     intel.setForeignCatalogs(props.foreignCatalogs ?? []);
     refreshSoft();
+    notifyCatalogChanged(bindingRef.current);
     // "Loading Other…" is on screen: show what arrived
     const b = bindingRef.current, ed = edRef.current;
     if (b?.suggestLoading && ed) {

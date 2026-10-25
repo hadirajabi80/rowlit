@@ -1,7 +1,7 @@
 // Public API of the Rowlit IntelliSense engine (PLAN 4.12). Pure TypeScript; no DOM/React/Monaco.
 import type { CatalogObject, CatalogSnapshot } from '../api/types';
 import type {
-  CompletionItem, CompletionResult, DefinitionResult, Diagnostic, Dialect, HoverInfo, IntelOptions, SignatureHelpInfo,
+  CompletionItem, CompletionResult, DefinitionResult, Diagnostic, Dialect, HoverInfo, IntelOptions, PendingDefinition, SignatureHelpInfo,
   SqlBatch, StatementInfo, StatementKind, Token,
 } from './types';
 import { getSpec, type DialectSpec } from './dialect';
@@ -19,6 +19,7 @@ import { signatureHelp as runSignature } from './signature/signature';
 import { symbolAt } from './hover/symbol';
 import { hoverFor } from './hover/hover';
 import { definitionFor } from './definition/definition';
+import { nameChainAt, pendingDefinitionFor } from './definition/pending';
 import { lexicalDiagnostics, statementDiagnostics, type RawDiagnostic } from './diagnostics/soft-diagnostics';
 
 export * from './types';
@@ -51,6 +52,11 @@ export interface Intel {
   hover(uri: string, offset: number): HoverInfo | null;
   signatureHelp(uri: string, offset: number): SignatureHelpInfo | null;
   definition(uri: string, offset: number): DefinitionResult | null;
+  /**
+   * The name at the cursor has no definition yet because its schema / database is still loading (each missing piece is
+   * requested from the host by this call). Null when nothing is on its way: the name is simply unknown.
+   */
+  pendingDefinition(uri: string, offset: number): PendingDefinition | null;
   softDiagnostics(uri: string): Diagnostic[];
   classify(sql: string): StatementKind;
   recordAccepted(item: Pick<CompletionItem, 'usageKey'>): void;
@@ -427,6 +433,15 @@ class IntelImpl implements Intel {
     const index = this.indexAt(d, st.start);
     const sym = symbolAt(m, offset, this.binderFor(d, st, index), this.spec, index);
     return sym ? definitionFor(sym, index) : null;
+  }
+
+  pendingDefinition(uri: string, offset: number): PendingDefinition | null {
+    const d = this.doc(uri);
+    const st = this.featureStatement(d, offset);
+    if (!st) return null;
+    const m = this.model(d, st);
+    const chain = nameChainAt(m.tokens, offset);
+    return chain ? pendingDefinitionFor(chain, this.indexAt(d, st.start)) : null;
   }
 
   signatureHelp(uri: string, offset: number): SignatureHelpInfo | null {

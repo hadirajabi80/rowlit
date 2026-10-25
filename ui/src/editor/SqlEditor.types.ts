@@ -21,8 +21,12 @@ export interface SqlEditorProps {
   onRun: (label: RunLabel, batches: SqlBatch[]) => void;
   /** Esc while running. */
   onCancel?: () => void;
-  /** F12 / Ctrl+click on a catalog object. */
-  onOpenObject?: (ref: ObjectRef) => void;
+  /** F12 / Ctrl+click on a catalog object (with the column, when the cursor is on one). */
+  onOpenObject?: (ref: ObjectRef, column?: string) => void;
+  /** "Open definition (DDL)" (Alt+F12): the object tab of the object under the cursor. Defaults to `onOpenObject`. */
+  onOpenObjectDdl?: (ref: ObjectRef, column?: string) => void;
+  /** Go-to-definition waited for the name's schema / database to load and the name was not there (or the load timed out). */
+  onDefinitionMissing?: (target: string, timedOut: boolean) => void;
   /**
    * Hard syntax diagnostics from the engine (POST /sql/diagnostics). The editor debounces (400 ms) and
    * discards stale responses. Omit to disable.
