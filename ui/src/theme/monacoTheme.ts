@@ -9,6 +9,7 @@
 // No literal colours here: every value comes from a token (QA 5.1 lint).
 import { editorColors, getActiveTheme, type ActiveTheme } from './activeTheme';
 import { firstColor, parseColor, themeTokens, toHex, type Rgba, type TokenMap } from './index';
+import type { EditorExtras } from './themes';
 import type { EffectiveTheme } from './useTheme';
 
 /** Structurally identical to monaco.editor.IStandaloneThemeData (kept local so this module stays Monaco-free). */
@@ -62,7 +63,7 @@ export const SUGGEST_KIND_COLORS: Record<string, string> = {
   text: '--kind-other',
 };
 
-export function buildMonacoTheme(theme: EffectiveTheme, tokens: TokenMap = themeTokens(theme)): MonacoThemeData {
+export function buildMonacoTheme(theme: EffectiveTheme, tokens: TokenMap = themeTokens(theme), extras?: EditorExtras): MonacoThemeData {
   const dark = theme === 'dark';
   const colorOf = (name: string): Rgba | null => parseColor(tokens[name] ?? '');
   /** Token as #rrggbb[aa]; '' when the token is missing (then the key is left to Monaco's base theme). */
@@ -79,22 +80,28 @@ export function buildMonacoTheme(theme: EffectiveTheme, tokens: TokenMap = theme
   const shadow = firstColor(tokens['--shadow-popup'] ?? '');
 
   const rule = (token: string, name: string, fontStyle?: string) => ({ token, foreground: bare(name), ...(fontStyle ? { fontStyle } : {}) });
+  /** A rule in a colour of the theme's extras (#rrggbb), else in a token's colour. */
+  const extraRule = (token: string, extra: string | undefined, fallback: string) => {
+    const hex = extra && parseColor(extra) ? toHex({ ...parseColor(extra)!, a: 1 }).slice(1) : '';
+    return hex ? { token, foreground: hex } : rule(token, fallback);
+  };
+  const bold = extras?.plainKeywords ? undefined : 'bold';
   const rules = [
     rule('', '--fg'),
-    rule('keyword', '--syn-keyword', 'bold'),
+    rule('keyword', '--syn-keyword', bold),
     rule('keyword.contextual', '--syn-keyword'),
-    rule('keyword.batch', '--syn-function', 'bold'),
+    rule('keyword.batch', '--syn-function', bold),
     rule('type', '--syn-type'),
     rule('predefined', '--syn-function'),
-    rule('identifier', '--fg'),
-    rule('identifier.quote', '--fg'),
+    extraRule('identifier', extras?.identifier, '--fg'),
+    extraRule('identifier.quote', extras?.quoted ?? extras?.identifier, '--fg'),
     rule('string', '--syn-string'),
     rule('number', '--syn-number'),
     rule('comment', '--syn-comment', 'italic'),
     rule('variable', '--syn-variable'),
     rule('operator', '--syn-operator'),
-    rule('delimiter', '--syn-operator'),
-    rule('delimiter.parenthesis', '--syn-operator'),
+    extraRule('delimiter', extras?.punct, '--syn-operator'),
+    extraRule('delimiter.parenthesis', extras?.punct, '--syn-operator'),
   ].filter((r) => r.foreground);
 
   const fg = c('--fg');
@@ -206,6 +213,8 @@ export function buildMonacoTheme(theme: EffectiveTheme, tokens: TokenMap = theme
     'menu.selectionForeground': c('--accent-fg'),
     'menu.separatorBackground': c('--border'),
   };
+  // the code theme's own editor-surface colours (current line, selection, brackets, find, guides, cursor, line numbers)
+  for (const [k, v] of Object.entries(extras?.colors ?? {})) if (parseColor(v)) colors[k] = v;
   for (const k of Object.keys(colors)) if (!colors[k]) delete colors[k];
   return { base: dark ? 'vs-dark' : 'vs', inherit: true, rules, colors };
 }
@@ -213,7 +222,7 @@ export function buildMonacoTheme(theme: EffectiveTheme, tokens: TokenMap = theme
 /** The Monaco theme of a selection: the code theme's colours, or the app theme's for "Match app theme". */
 export function effectiveMonacoTheme(t: ActiveTheme = getActiveTheme()): MonacoThemeData {
   const ed = editorColors(t);
-  return buildMonacoTheme(ed.base, ed.tokens);
+  return buildMonacoTheme(ed.base, ed.tokens, ed.extras);
 }
 
 /** Defines both Rowlit theme ids as the effective code theme (editor/monaco-setup.ts defineThemes, and every switch). */

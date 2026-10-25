@@ -18,14 +18,43 @@ export interface AppTheme {
   description: string;
   /** Overrides of the base block of tokens.css (raw declarations, resolved together with it). */
   vars: ThemeVars;
+  /** A lazily loaded theme whose palette has not arrived yet (see loadExtraThemes): `vars` is empty until it does. */
+  pending?: boolean;
+}
+
+/** The picker sections of the code themes. */
+export type EditorGroup = 'rowlit' | 'jetbrains' | 'popular';
+export const EDITOR_GROUPS: readonly { id: EditorGroup; title: string }[] = [
+  { id: 'rowlit', title: 'Rowlit' },
+  { id: 'jetbrains', title: 'JetBrains' },
+  { id: 'popular', title: 'Popular' },
+];
+
+/**
+ * What a code theme says beyond the shared token set: finer SQL token colours (identifiers, quoted identifiers,
+ * punctuation), plain instead of bold keywords, and Monaco colour keys of the editor surface (current line, selection,
+ * brackets, find, guides, cursor, line numbers). Colours are `#rrggbb[aa]`; unset keys derive from the tokens.
+ */
+export interface EditorExtras {
+  identifier?: string;
+  quoted?: string;
+  punct?: string;
+  plainKeywords?: boolean;
+  colors?: Readonly<Record<string, string>>;
 }
 
 export interface EditorTheme {
   id: string;
   name: string;
   base: ThemeBase;
+  group: EditorGroup;
+  /** One line under the name in the picker. */
+  description?: string;
   /** Overrides of the base block for the editor surface, its widgets (suggest, hover, find, menus) and the syntax. */
   vars: ThemeVars;
+  extras?: EditorExtras;
+  /** A lazily loaded theme whose palette has not arrived yet (see loadExtraThemes): `vars` is empty until it does. */
+  pending?: boolean;
 }
 
 /** settings.ui keys (free-form bag, no engine change; same pattern as AUTO_CHECK_UPDATES_KEY). */
@@ -329,15 +358,22 @@ const SOLARIZED_LIGHT: ThemeVars = {
   ...glass('253 246 227', false, '#e9e3d1'),
 };
 
+// Themes whose palettes live in themesExtra.ts (a lazily loaded chunk, so the initial bundle stays small): the lists
+// carry their metadata from the start, with an empty palette until loadExtraThemes() swaps in the real entry.
+const lazyApp = (id: string, name: string, base: ThemeBase, description: string): AppTheme => ({ id, name, base, description, vars: {}, pending: true });
+const lazyCode = (id: string, name: string, base: ThemeBase, group: EditorGroup, description: string): EditorTheme => ({ id, name, base, group, description, vars: {}, pending: true });
+
 /** The app themes, light ones first (the picker groups them by base). */
 export const APP_THEMES: readonly AppTheme[] = [
   { id: 'light', name: 'Light', base: 'light', description: 'Crisp and neutral', vars: {} },
   { id: 'paper', name: 'Paper', base: 'light', description: 'Warm paper, teal accent', vars: PAPER },
   { id: 'solarized-light', name: 'Solarized Light', base: 'light', description: 'Low-glare cream', vars: SOLARIZED_LIGHT },
+  lazyApp('intellij-light', 'IntelliJ Light', 'light', 'JetBrains light, blue accent'),
   { id: 'dark', name: 'Dark', base: 'dark', description: 'Soft graphite', vars: {} },
   { id: 'midnight', name: 'Midnight', base: 'dark', description: 'Deep blue-black', vars: MIDNIGHT },
   { id: 'nord', name: 'Nord', base: 'dark', description: 'Arctic slate, frost blue', vars: NORD },
   { id: 'violet', name: 'Violet', base: 'dark', description: 'Dracula-style purple', vars: VIOLET },
+  lazyApp('darcula', 'Darcula', 'dark', 'JetBrains classic dark'),
 ];
 
 export const DEFAULT_APP_THEME: Record<ThemeBase, string> = { light: 'light', dark: 'dark' };
@@ -506,18 +542,78 @@ const SOLARIZED_DARK: ThemeVars = {
 
 /** The code themes besides "Match app theme" (themes of the app list reuse their colours). */
 export const EDITOR_THEMES: readonly EditorTheme[] = [
-  { id: 'light', name: 'Rowlit Light', base: 'light', vars: {} },
-  { id: 'github-light', name: 'GitHub Light', base: 'light', vars: GITHUB_LIGHT },
-  { id: 'paper', name: 'Paper', base: 'light', vars: PAPER },
-  { id: 'solarized-light', name: 'Solarized Light', base: 'light', vars: SOLARIZED_LIGHT },
-  { id: 'dark', name: 'Rowlit Dark', base: 'dark', vars: {} },
-  { id: 'midnight', name: 'Midnight', base: 'dark', vars: MIDNIGHT },
-  { id: 'nord', name: 'Nord', base: 'dark', vars: NORD },
-  { id: 'dracula', name: 'Dracula', base: 'dark', vars: VIOLET },
-  { id: 'one-dark', name: 'One Dark', base: 'dark', vars: ONE_DARK },
-  { id: 'monokai', name: 'Monokai', base: 'dark', vars: MONOKAI },
-  { id: 'solarized-dark', name: 'Solarized Dark', base: 'dark', vars: SOLARIZED_DARK },
+  { id: 'light', name: 'Rowlit Light', base: 'light', group: 'rowlit', vars: {} },
+  { id: 'paper', name: 'Paper', base: 'light', group: 'rowlit', vars: PAPER },
+  { id: 'dark', name: 'Rowlit Dark', base: 'dark', group: 'rowlit', vars: {} },
+  { id: 'midnight', name: 'Midnight', base: 'dark', group: 'rowlit', vars: MIDNIGHT },
+  lazyCode('darcula', 'Darcula', 'dark', 'jetbrains', 'Classic IntelliJ / DataGrip dark'),
+  lazyCode('jetbrains-dark', 'JetBrains Dark', 'dark', 'jetbrains', 'New UI dark'),
+  lazyCode('intellij-light', 'IntelliJ Light', 'light', 'jetbrains', 'Classic IntelliJ light'),
+  lazyCode('jetbrains-light', 'JetBrains Light', 'light', 'jetbrains', 'New UI light'),
+  lazyCode('jetbrains-hc', 'JetBrains High Contrast', 'dark', 'jetbrains', 'Black, maximum contrast'),
+  { id: 'github-light', name: 'GitHub Light', base: 'light', group: 'popular', vars: GITHUB_LIGHT },
+  { id: 'solarized-light', name: 'Solarized Light', base: 'light', group: 'popular', vars: SOLARIZED_LIGHT },
+  lazyCode('vscode-light', 'VS Code Light+', 'light', 'popular', 'Visual Studio Code default light'),
+  lazyCode('catppuccin-latte', 'Catppuccin Latte', 'light', 'popular', 'Soothing pastel light'),
+  { id: 'nord', name: 'Nord', base: 'dark', group: 'popular', vars: NORD },
+  { id: 'dracula', name: 'Dracula', base: 'dark', group: 'popular', vars: VIOLET },
+  { id: 'one-dark', name: 'One Dark', base: 'dark', group: 'popular', vars: ONE_DARK },
+  { id: 'monokai', name: 'Monokai', base: 'dark', group: 'popular', vars: MONOKAI },
+  { id: 'solarized-dark', name: 'Solarized Dark', base: 'dark', group: 'popular', vars: SOLARIZED_DARK },
+  lazyCode('vscode-dark', 'VS Code Dark+', 'dark', 'popular', 'Visual Studio Code default dark'),
+  lazyCode('tokyo-night', 'Tokyo Night', 'dark', 'popular', 'Neon Tokyo evening'),
+  lazyCode('catppuccin-mocha', 'Catppuccin Mocha', 'dark', 'popular', 'Soothing pastel dark'),
+  lazyCode('gruvbox-dark', 'Gruvbox Dark', 'dark', 'popular', 'Retro groove, warm contrast'),
+  lazyCode('ayu-mirage', 'Ayu Mirage', 'dark', 'popular', 'Soft slate with orange'),
+  lazyCode('night-owl', 'Night Owl', 'dark', 'popular', 'Deep blue for night coders'),
+  lazyCode('material-darker', 'Material Darker', 'dark', 'popular', 'Material charcoal'),
+  lazyCode('rose-pine', 'Rosé Pine', 'dark', 'popular', 'All natural pine, faux fur'),
 ];
+
+// --------------------------------------------------------------- lazy palettes
+
+type ExtraPalettes = typeof import('./themesExtra');
+const libraryListeners = new Set<() => void>();
+let libraryLoading: Promise<void> | null = null;
+let libraryLoaded = false;
+
+/** True once the palettes of the lazily loaded themes are in the lists. */
+export function extraThemesLoaded(): boolean {
+  return libraryLoaded;
+}
+
+/** Called after the lazy palettes replaced their placeholders (activeTheme.ts re-resolves the selection). */
+export function onExtraThemesLoaded(fn: () => void): () => void {
+  libraryListeners.add(fn);
+  return () => libraryListeners.delete(fn);
+}
+
+/** Swaps the placeholders of APP_THEMES / EDITOR_THEMES for the real themes (idempotent). */
+export function installExtraThemes(p: Pick<ExtraPalettes, 'APP_PALETTES' | 'EDITOR_PALETTES'>): void {
+  const apps = APP_THEMES as AppTheme[];
+  const codes = EDITOR_THEMES as EditorTheme[];
+  apps.forEach((t, i) => {
+    const vars = t.pending ? p.APP_PALETTES[t.id] : undefined;
+    if (vars) apps[i] = { id: t.id, name: t.name, base: t.base, description: t.description, vars };
+  });
+  codes.forEach((t, i) => {
+    const pal = t.pending ? p.EDITOR_PALETTES[t.id] : undefined;
+    if (pal) codes[i] = { id: t.id, name: t.name, base: t.base, group: t.group, description: t.description, vars: pal.vars, extras: pal.extras };
+  });
+  libraryLoaded = true;
+  for (const fn of [...libraryListeners]) fn();
+}
+
+/** Loads the lazy palettes once (settings.ui may name one at startup, and the Appearance pickers show them all). */
+export function loadExtraThemes(): Promise<void> {
+  if (!libraryLoading) {
+    libraryLoading = import('./themesExtra').then(installExtraThemes).catch((e) => {
+      libraryLoading = null;
+      console.warn('[theme] extra themes failed to load', e);
+    });
+  }
+  return libraryLoading;
+}
 
 // --------------------------------------------------------------------- lookup
 

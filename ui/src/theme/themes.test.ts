@@ -8,10 +8,14 @@ import { matrixFailures, TEXT, UI, withGlass } from './contrastMatrix';
 import { contrast, parseColor, parseTokenBlocks, type TokenMap } from './index';
 import { buildMonacoTheme, effectiveMonacoTheme, SUGGEST_KIND_COLORS } from './monacoTheme';
 import {
-  APP_THEMES, appThemeFor, appThemeById, APP_THEME_DARK_KEY, APP_THEME_LIGHT_KEY, EDITOR_THEME_KEY, EDITOR_THEMES, editorThemeIdFor, MATCH_APP,
-  type ThemeBase,
+  APP_THEMES, appThemeFor, appThemeById, APP_THEME_DARK_KEY, APP_THEME_LIGHT_KEY, EDITOR_GROUPS, EDITOR_THEME_KEY, EDITOR_THEMES, editorThemeById, editorThemeIdFor,
+  extraThemesLoaded, loadExtraThemes, MATCH_APP, type EditorExtras, type ThemeBase,
 } from './themes';
 import { titleBarOverlayColors } from './titlebar';
+
+// the JetBrains and popular themes are a lazily loaded chunk: swap their palettes in before the suites enumerate the lists
+const pendingBefore = [...APP_THEMES, ...EDITOR_THEMES].filter((t) => t.pending).map((t) => t.id);
+await loadExtraThemes();
 
 interface NodeFs { readFileSync(p: string, enc: 'utf8'): string }
 const nodeFs = (await import(/* @vite-ignore */ `node:${'fs'}`)) as NodeFs;
@@ -23,13 +27,13 @@ const RAW = parseTokenBlocks(CSS);
 const sel = (base: ThemeBase, appId: string, editorId = MATCH_APP): ActiveTheme => ({ base, app: appThemeById(appId)!, editorId });
 
 /** Monaco / IntelliSense requirements of a code theme (the editor-facing subset of the matrix plus the widget colours). */
-function editorFailures(label: string, base: ThemeBase, t: TokenMap): string[] {
+function editorFailures(label: string, base: ThemeBase, t: TokenMap, extras?: EditorExtras): string[] {
   const out: string[] = [];
   const need = (what: string, fg: string, bg: string, min: number, over?: string) => {
     const r = contrast(fg, bg, over ?? t['--bg-panel']);
     if (r + 1e-9 < min) out.push(`${label}: ${what} = ${r.toFixed(2)} < ${min}`);
   };
-  const th = buildMonacoTheme(base, t);
+  const th = buildMonacoTheme(base, t, extras);
   const c = th.colors;
   for (const [k, v] of Object.entries(c)) if (!parseColor(v)) out.push(`${label}: ${k}=${v} is not a colour`);
   for (const r of th.rules) if (!/^[0-9a-f]{6}$/.test(r.foreground ?? '')) out.push(`${label}: rule ${r.token} has no colour`);
@@ -58,6 +62,22 @@ function editorFailures(label: string, base: ThemeBase, t: TokenMap): string[] {
   need('widget border', c['editorWidget.border'], c['editor.background'], UI);
   need('input border', c['input.border'], c['input.background'], UI);
   need('cursor', c['editorCursor.foreground'], c['editor.background'], UI);
+  // the theme's own syntax colours (identifiers, quoted identifiers, punctuation), selection and current line
+  if (extras?.colors) {
+    for (const r of th.rules) if (r.token !== '' && contrast(`#${r.foreground}`, c['editor.background']) + 1e-9 < TEXT) out.push(`${label}: rule ${r.token} #${r.foreground} on the editor < ${TEXT}`);
+    const bg = c['editor.background'];
+    const line = c['editor.lineHighlightBackground'];
+    need('editor text on the current line', c['editor.foreground'], line, TEXT, bg);
+    for (const k of ['--syn-keyword', '--syn-string', '--syn-comment', '--syn-number', '--syn-function', '--syn-variable', '--syn-operator', '--syn-type']) {
+      need(`${k} on the current line`, t[k], line, 4, bg);
+      need(`${k} on the selection`, t[k], c['editor.selectionBackground'], 2.5, bg);
+    }
+    need('editor text on the selection', c['editor.foreground'], c['editor.selectionBackground'], TEXT, bg);
+    need('editor text on the inactive selection', c['editor.foreground'], c['editor.inactiveSelectionBackground'], TEXT, bg);
+    need('line numbers', c['editorLineNumber.foreground'], bg, 1.5);
+    need('selection', c['editor.selectionBackground'], bg, 1.15);
+    need('indent guides', c['editorIndentGuide.background1'], bg, 1.1);
+  }
   const hover = contrast(c['list.hoverBackground'], surface);
   const selected = contrast(c['editorSuggestWidget.selectedBackground'], surface);
   if (hover < 1.05) out.push(`${label}: hovered suggest row invisible (${hover.toFixed(2)})`);
@@ -115,7 +135,7 @@ describe('app themes', () => {
     it(`${theme.name}: gives Monaco readable text, widgets and kind icons (Match app theme)`, () => {
       const ed = editorColors(sel(theme.base, theme.id), CSS);
       expect(ed.standalone).toBe(false);
-      expect(editorFailures(theme.id, theme.base, ed.tokens)).toEqual([]);
+      expect(editorFailures(theme.id, theme.base, ed.tokens, ed.extras)).toEqual([]);
     });
 
     it(`${theme.name}: colours the Windows caption buttons from its top bar`, () => {
@@ -141,9 +161,39 @@ describe('code themes', () => {
       const ed = editorColors({ base: theme.base === 'dark' ? 'light' : 'dark', app: appThemeById('light')!, editorId: theme.id }, CSS);
       expect(ed.standalone).toBe(true);
       expect(ed.base).toBe(theme.base);
-      expect(editorFailures(theme.id, theme.base, ed.tokens)).toEqual([]);
+      expect(editorFailures(theme.id, theme.base, ed.tokens, ed.extras)).toEqual([]);
     });
   }
+});
+
+describe('lazily loaded themes', () => {
+  it('lists the JetBrains and popular themes before their palettes load, and fills them in after', () => {
+    expect(pendingBefore).toEqual(expect.arrayContaining(['darcula', 'intellij-light', 'jetbrains-dark', 'jetbrains-light', 'jetbrains-hc', 'tokyo-night', 'rose-pine']));
+    expect(extraThemesLoaded()).toBe(true);
+    expect([...APP_THEMES, ...EDITOR_THEMES].filter((t) => t.pending)).toEqual([]);
+    expect(Object.keys(appThemeById('darcula')!.vars).length).toBeGreaterThan(40);
+    expect(editorThemeById('darcula')!.extras?.plainKeywords).toBe(true);
+  });
+
+  it('adds the JetBrains and popular code themes in their own sections, without duplicating existing ones', () => {
+    const ids = (g: string) => EDITOR_THEMES.filter((t) => t.group === g).map((t) => t.id);
+    expect(ids('jetbrains')).toEqual(['darcula', 'jetbrains-dark', 'intellij-light', 'jetbrains-light', 'jetbrains-hc']);
+    expect(ids('popular')).toEqual(expect.arrayContaining(['vscode-dark', 'vscode-light', 'tokyo-night', 'catppuccin-mocha', 'catppuccin-latte', 'gruvbox-dark', 'ayu-mirage', 'night-owl', 'material-darker', 'rose-pine']));
+    expect(EDITOR_GROUPS.map((g) => g.id)).toEqual(['rowlit', 'jetbrains', 'popular']);
+    expect(EDITOR_THEMES.every((t) => EDITOR_GROUPS.some((g) => g.id === t.group))).toBe(true);
+    for (const id of ['darcula', 'intellij-light']) expect(appThemeById(id)).toMatchObject({ id });
+  });
+
+  it('gives Darcula the DataGrip token colours and the JetBrains Dark theme its own', () => {
+    const tok = (id: string) => editorColors({ base: 'dark', app: appThemeById('dark')!, editorId: id }, CSS).tokens;
+    expect(tok('darcula')).toMatchObject({ '--bg-panel': '#2b2b2b', '--fg': '#a9b7c6', '--syn-function': '#ffc66d', '--syn-number': '#6897bb' });
+    expect(tok('jetbrains-dark')).toMatchObject({ '--bg-panel': '#1e1f22', '--syn-keyword': '#cf8e6d', '--syn-number': '#2aacb8' });
+    const monaco = effectiveMonacoTheme({ base: 'dark', app: appThemeById('dark')!, editorId: 'darcula' });
+    expect(monaco.colors['editor.selectionBackground']).toBe('#214283');
+    expect(monaco.rules.find((r) => r.token === 'keyword')).toEqual({ token: 'keyword', foreground: 'd4803b' });
+    // a Darcula app theme with "Match app theme" gets the Darcula editor surface and plain keywords too
+    expect(effectiveMonacoTheme({ base: 'dark', app: appThemeById('darcula')!, editorId: MATCH_APP }).colors['editor.selectionBackground']).toBe('#214283');
+  });
 });
 
 describe('settings', () => {

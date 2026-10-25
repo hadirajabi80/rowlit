@@ -22,12 +22,12 @@ export function AppearanceSection() {
             ]}
           />
         </Row>
-        <Row label="Theme" stacked labelHidden keywords="color colour theme palette nord midnight violet paper solarized">
+        <Row label="Theme" stacked labelHidden keywords="color colour theme palette nord midnight violet paper solarized darcula intellij jetbrains">
           <AppThemePicker />
         </Row>
       </Card>
       <Card title="Code theme" description="Syntax colours of the SQL editor and every other code view.">
-        <Row label="Code theme" stacked labelHidden keywords="code editor syntax highlighting monaco theme github dracula monokai one dark solarized">
+        <Row label="Code theme" stacked labelHidden keywords="code editor syntax highlighting monaco theme github dracula monokai one dark solarized darcula jetbrains intellij datagrip vscode tokyo night catppuccin gruvbox ayu night owl material rose pine">
           <EditorThemePicker />
         </Row>
       </Card>
