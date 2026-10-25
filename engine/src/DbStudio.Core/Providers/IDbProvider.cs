@@ -118,6 +118,10 @@ public interface ICatalogReader : IAsyncDisposable
 
     /// <summary>Oracle: resolve a PUBLIC synonym on demand. Others return null.</summary>
     Task<CatalogObject?> ResolvePublicSynonymAsync(string name, CancellationToken ct);
+
+    /// <summary>SQL Server: the built-in data types of the database (the explorer's System Data Types). Others return empty.</summary>
+    Task<IReadOnlyList<SystemTypeInfo>> ListSystemTypesAsync(string? database, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SystemTypeInfo>>([]);
 }
 
 public interface IDdlGenerator

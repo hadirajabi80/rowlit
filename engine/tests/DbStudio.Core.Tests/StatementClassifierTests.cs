@@ -71,6 +71,22 @@ public class StatementClassifierTests
     [InlineData("CREATE OR REPLACE VIEW v AS SELECT 1 x FROM dual", false)]
     public void IsQueryOnly_PlSql(string sql, bool expected) => Assert.Equal(expected, StatementClassifier.IsQueryOnly(sql, Dialect.PlSql));
 
+    [Theory]
+    [InlineData("CREATE TYPE dbo.Phone FROM nvarchar(20) NOT NULL", "CREATE", "dbo", "Phone", "CREATE TYPE")]
+    [InlineData("CREATE TYPE [dbo].[PhoneList] AS TABLE (Id int)", "CREATE", "dbo", "PhoneList", "CREATE TYPE")]
+    [InlineData("DROP TYPE IF EXISTS dbo.Phone", "DROP", "dbo", "Phone", "DROP TYPE")]
+    [InlineData("CREATE XML SCHEMA COLLECTION dbo.NoteSchema AS N'<x/>'", "CREATE", "dbo", "NoteSchema", "CREATE XML SCHEMA COLLECTION")]
+    [InlineData("DROP XML SCHEMA COLLECTION [dbo].[NoteSchema]", "DROP", "dbo", "NoteSchema", "DROP XML SCHEMA COLLECTION")]
+    [InlineData("ALTER XML SCHEMA COLLECTION dbo.NoteSchema ADD N'<y/>'", "ALTER", "dbo", "NoteSchema", "ALTER XML SCHEMA COLLECTION")]
+    public void Ddl_Types_TSql_AreTypeObjects_SoTheCatalogReloads(string sql, string action, string schema, string name, string kind)
+    {
+        var c = One(sql);
+        Assert.Equal(StatementCategory.Ddl, c.Category);
+        Assert.Equal(kind, c.Kind);
+        var t = c.Ddl!;
+        Assert.Equal((action, ObjectTypes.Type, schema, name, DdlScope.Object), (t.Action, t.ObjectType, t.Schema, t.Name, t.Scope));
+    }
+
     [Fact]
     public void Ddl_Targets_TSql()
     {

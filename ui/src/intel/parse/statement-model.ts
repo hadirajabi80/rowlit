@@ -23,6 +23,7 @@ export type DdlWhat =
   | 'objectName'   // existing object of `objectType`
   | 'columnOf'     // existing column of `table`
   | 'dataType'     // column / parameter data type
+  | 'paramTail'    // T-SQL: after a parameter's data type (objectType = the type text): OUTPUT, READONLY for table types
   | 'columnName';  // new column name in a definition: no suggestions
 
 export interface MarkerData {

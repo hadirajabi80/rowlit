@@ -5,13 +5,15 @@ import { targetOf } from '../commands/core';
 import { registerCommands, type Command } from '../commands/registry';
 import { isObjectTarget, isTabTarget } from '../commands/types';
 import { registerTabView } from '../components/layout/tabViews';
+import { supportsTypes } from '../lib/typeKinds';
 import { useSessions } from '../store/sessions';
 import { getActiveTab, useTabs } from '../store/tabs';
 import { toast } from '../store/ui';
 import { activeDesignerActions } from './actions';
 import { activeEditSession, editSessionOf, restorePersistedEdits } from './editSession';
 import {
-  contextOf, editObject, objectOf, openEditScript, openProcedureWizard, openTableDesigner, openViewDesigner, TABLE_VIEW, VIEW_VIEW,
+  containerTypeKind, contextOf, editObject, objectOf, openEditScript, openNewType, openProcedureWizard, openTableDesigner, openViewDesigner, TABLE_VIEW,
+  VIEW_VIEW,
 } from './open';
 import { useDesignerUi } from './store';
 import { TableDesignerTab, ViewDesignerTab } from './views';
@@ -83,6 +85,24 @@ export const DESIGNER_COMMANDS: Command<never>[] = [
     run: (args?: unknown) => {
       const c = contextOf(args);
       if (c) openProcedureWizard(c, { kind: 'trigger', table: explorerTable(args) });
+      else noContext();
+    },
+  },
+  {
+    id: 'designer.newType', title: 'New type…', category: 'Database', icon: 'Braces', keywords: 'create type user-defined alias enum domain composite varray',
+    when: (args?: unknown) => supportsTypes(contextOf(args)?.dialect ?? 'sqlite'),
+    run: (args?: unknown) => {
+      const c = contextOf(args);
+      if (c) openNewType(c, containerTypeKind(args));
+      else noContext();
+    },
+  },
+  {
+    id: 'designer.newTableType', title: 'New table type…', category: 'Database', icon: 'TableProperties', keywords: 'create type as table tvp table-valued parameter',
+    when: (args?: unknown) => contextOf(args)?.dialect === 'tsql',
+    run: (args?: unknown) => {
+      const c = contextOf(args);
+      if (c) openNewType(c, 'table');
       else noContext();
     },
   },

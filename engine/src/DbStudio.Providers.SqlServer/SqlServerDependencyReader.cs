@@ -30,6 +30,7 @@ public sealed class SqlServerDependencyReader(SqlConnection connection) : IDepen
     {
         await UseAsync(obj.Database, ct).ConfigureAwait(false);
         var schema = obj.Schema ?? await SqlDb.ScalarAsync<string>(_conn, SqlServerDependencyQueries.DefaultSchema, ct).ConfigureAwait(false) ?? "dbo";
+        if (obj.Type == ObjectTypes.Type) return await GetTypeDependenciesAsync(obj, schema, ct).ConfigureAwait(false);
         var found = (await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.FindObject,
                 r => (Id: r.GetInt32(0), Type: r.GetString(1).Trim(), Schema: r.GetString(2), Name: r.GetString(3)), ct,
                 ("@schema", schema), ("@name", obj.Name)).ConfigureAwait(false)).FirstOrDefault();
@@ -100,6 +101,38 @@ public sealed class SqlServerDependencyReader(SqlConnection connection) : IDepen
         return DependencyGraphs.Build(root, uses, usedBy);
     }
 
+    /// <summary>A user-defined type or XML schema collection: the columns, parameters and bodies that use it; a table type also uses its columns' types.</summary>
+    private async Task<DependencyGraph> GetTypeDependenciesAsync(ObjectRef obj, string schema, CancellationToken ct)
+    {
+        var db = obj.Database;
+        var root = new ObjectRef(db, schema, obj.Name, ObjectTypes.Type);
+        var uses = new List<ObjectDependency>();
+        var usedBy = new List<ObjectDependency>();
+        var type = (await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.FindUserType,
+            r => (Id: r.GetInt32(0), Schema: r.GetString(1), Name: r.GetString(2), TableObjectId: r.IsDBNull(4) ? (int?)null : r.GetInt32(4)), ct,
+            ("@schema", schema), ("@name", obj.Name)).ConfigureAwait(false)).FirstOrDefault();
+        IEnumerable<SqlServerCatalogReader.TypeUsageRow> rows;
+        if (type.Name is not null)
+        {
+            rows = await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.TypeUsage, SqlServerCatalogReader.ReadTypeUsageRow, ct, ("@tid", type.Id)).ConfigureAwait(false);
+            if (type.TableObjectId is int ttId)
+            {
+                foreach (var u in await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.TableTypeUses, r => (Schema: r.GetString(0), Name: r.GetString(1)), ct, ("@id", ttId)).ConfigureAwait(false))
+                    uses.Add(new ObjectDependency(DependencyKinds.Uses, new ObjectRef(db, u.Schema, u.Name, ObjectTypes.Type), "column type", null));
+            }
+        }
+        else
+        {
+            var xml = (await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.FindXmlSchemaCollection, r => r.GetInt32(0), ct,
+                ("@schema", schema), ("@name", obj.Name)).ConfigureAwait(false)).Select(x => (int?)x).FirstOrDefault()
+                ?? throw EngineException.NotFound($"Type {schema}.{obj.Name}");
+            rows = await SqlDb.QueryAsync(_conn, SqlServerCatalogQueries.XmlSchemaUsage, SqlServerCatalogReader.ReadTypeUsageRow, ct, ("@xid", xml)).ConfigureAwait(false);
+        }
+        foreach (var u in SqlServerCatalogReader.MapTypeUsage(rows))
+            usedBy.Add(new ObjectDependency(DependencyKinds.UsedBy, new ObjectRef(db, u.Schema, u.Name, u.Type), u.Usage, null));
+        return DependencyGraphs.Build(root, uses, usedBy);
+    }
+
     private sealed record FkRow(string Name, string Schema, string Table, string Column, string RefColumn, bool Disabled);
 
     private static FkRow ReadFk(SqlDataReader r) =>
@@ -155,8 +188,35 @@ public sealed class SqlServerDependencyReader(SqlConnection connection) : IDepen
             if (t == ObjectTypes.View && st.Rows is null) st = (null, null);
             list.Add(new ObjectListItem(t, o.Schema, o.Name, st.Rows, st.Bytes, Dto(o.Modified), Dto(o.Created), o.Comment));
         }
+        if (type is null or ObjectTypes.Type) await AddTypesAsync(list, schema, ct).ConfigureAwait(false);
         list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase) is var c && c != 0 ? c
             : string.Compare(a.Schema, b.Schema, StringComparison.OrdinalIgnoreCase));
         return list;
+    }
+
+    /// <summary>User-defined types (alias, table, CLR) and XML schema collections are not in sys.objects: the Types group reads sys.types.</summary>
+    private async Task AddTypesAsync(List<ObjectListItem> list, string? schema, CancellationToken ct)
+    {
+        static DateTimeOffset? Dto(DateTime? d) => d is DateTime v ? new DateTimeOffset(DateTime.SpecifyKind(v, DateTimeKind.Unspecified), TimeSpan.Zero) : null;
+        try
+        {
+            foreach (var t in await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.UserTypeList, r => (
+                         Schema: r.GetString(0), Name: r.GetString(1), IsTable: SqlDb.Bool(r, 2), IsClr: SqlDb.Bool(r, 3),
+                         Base: SqlServerCatalogReader.AliasBaseText(SqlDb.Str(r, 4), r.GetInt16(5), r.GetByte(6), r.GetByte(7)), Nullable: SqlDb.Bool(r, 8)),
+                         ct, ("@schema", schema)).ConfigureAwait(false))
+            {
+                var kind = t.IsTable ? TypeKinds.Table : t.IsClr ? TypeKinds.Clr : TypeKinds.Alias;
+                var summary = kind == TypeKinds.Alias ? $"{t.Base}{(t.Nullable ? "" : " not null")}" : kind == TypeKinds.Table ? "table type" : "CLR type";
+                list.Add(new ObjectListItem(ObjectTypes.Type, t.Schema, t.Name, null, null, null, null, summary) { Kind = kind });
+            }
+            foreach (var x in await SqlDb.QueryAsync(_conn, SqlServerDependencyQueries.XmlSchemaCollectionList, r => (
+                         Schema: r.GetString(0), Name: r.GetString(1), Created: r.IsDBNull(2) ? (DateTime?)null : r.GetDateTime(2),
+                         Modified: r.IsDBNull(3) ? (DateTime?)null : r.GetDateTime(3)), ct, ("@schema", schema)).ConfigureAwait(false))
+                list.Add(new ObjectListItem(ObjectTypes.Type, x.Schema, x.Name, null, null, Dto(x.Modified), Dto(x.Created), "xml schema collection") { Kind = TypeKinds.XmlSchema });
+        }
+        catch (SqlException)
+        {
+            // SQL Server 2005 (no sys.types.is_table_type): the list simply has no types.
+        }
     }
 }

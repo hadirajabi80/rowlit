@@ -23,6 +23,17 @@ function err(status: number, code: string, message: string) {
   return HttpResponse.json({ error: { code, message } }, { status });
 }
 
+const sys = (name: string, category: string, maxLength: number, precision = 0, scale = 0, collation: string | null = null) =>
+  ({ name, category, maxLength, precision, scale, collation, nullable: true });
+
+/** A handful of SQL Server's built-in types for the mock engine (GET …/catalog/systemtypes). */
+const MOCK_SYSTEM_TYPES = [
+  sys('bigint', 'Exact numerics', 8, 19), sys('int', 'Exact numerics', 4, 10), sys('decimal', 'Exact numerics', 17, 18),
+  sys('float', 'Approximate numerics', 8, 53), sys('date', 'Date and time', 3, 10), sys('datetime2', 'Date and time', 8, 27, 7),
+  sys('varchar', 'Character strings', 8000, 0, 0, 'SQL_Latin1_General_CP1_CI_AS'), sys('nvarchar', 'Unicode character strings', 8000, 0, 0, 'SQL_Latin1_General_CP1_CI_AS'),
+  sys('varbinary', 'Binary strings', 8000), sys('uniqueidentifier', 'Other data types', 16), sys('xml', 'Other data types', -1),
+];
+
 function refFrom(url: URL): ObjectRef {
   return {
     database: url.searchParams.get('database') || null,
@@ -87,6 +98,8 @@ export function createHandlers(engine: MockEngine) {
     http.get(`${P}/connections/:id/catalog/object`, ({ params, request }) => ok(engine.details(String(params.id), refFrom(new URL(request.url))))),
     http.get(`${P}/connections/:id/catalog/ddl`, ({ params, request }) => ok(engine.ddl(String(params.id), refFrom(new URL(request.url))))),
     http.get(`${P}/connections/:id/catalog/errors`, () => ok([])),
+    // SQL Server's built-in data types (the explorer's System Data Types group); other providers have none.
+    http.get(`${P}/connections/:id/catalog/systemtypes`, ({ params }) => ok(engine.conn(String(params.id))?.providerId === 'sqlserver' ? MOCK_SYSTEM_TYPES : [])),
     http.post(`${P}/connections/:id/catalog/refresh`, ({ params }) => ok({ version: engine.schemaVersion(String(params.id), null) })),
     http.get(`${P}/connections/:id/catalog`, async ({ params, request }) => {
       const id = String(params.id);

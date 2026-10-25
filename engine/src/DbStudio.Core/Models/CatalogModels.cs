@@ -41,6 +41,30 @@ public sealed class CatalogObject
     public List<PackageMember> Members { get; init; } = [];
     /// <summary>Oracle: VALID | INVALID. Null elsewhere.</summary>
     public string? Status { get; init; }
+    /// <summary>Type objects: the kind (<see cref="TypeKinds"/>); null for every other object. Wire "k".</summary>
+    public string? Kind { get; init; }
+    /// <summary>Type objects: one-line description of the definition (base type, subtype, element type...). Wire "bt".</summary>
+    public string? BaseType { get; init; }
+}
+
+/// <summary>Kinds of <see cref="ObjectTypes.Type"/> objects (wire tokens of <c>CatalogObject.k</c>).</summary>
+public static class TypeKinds
+{
+    /// <summary>SQL Server: alias type (CREATE TYPE ... FROM base).</summary>
+    public const string Alias = "alias";
+    /// <summary>SQL Server: user-defined table type.</summary>
+    public const string Table = "table";
+    /// <summary>SQL Server: CLR user-defined type (assembly type).</summary>
+    public const string Clr = "clr";
+    /// <summary>SQL Server: XML schema collection.</summary>
+    public const string XmlSchema = "xmlschema";
+    public const string Enum = "enum", Domain = "domain", Composite = "composite", Range = "range";
+    /// <summary>Oracle: object type (attributes and methods).</summary>
+    public const string Object = "object";
+    /// <summary>Oracle: VARRAY collection type.</summary>
+    public const string Varray = "varray";
+    /// <summary>Oracle: nested table collection type.</summary>
+    public const string Nested = "nested";
 }
 
 /// <param name="Flags">1 = identity/autoincrement, 2 = computed/virtual/generated, 4 = hidden, 8 = never written by DML (Oracle GENERATED ALWAYS identity).</param>
@@ -72,7 +96,33 @@ public sealed record ObjectDetails(
     IReadOnlyList<ParamInfo> Parameters,
     long? RowCountEstimate,
     DateTimeOffset? Created,
-    DateTimeOffset? Modified);
+    DateTimeOffset? Modified)
+{
+    /// <summary>Type objects (<see cref="ObjectTypes.Type"/>): kind-specific overview and usages. Null for other objects.</summary>
+    public TypeDetails? TypeInfo { get; init; }
+}
+
+/// <summary>Overview of a type object: its kind, a property list (base type, nullability, bindings...), named items and usages.</summary>
+public sealed record TypeDetails(string Kind)
+{
+    public IReadOnlyList<TypeProperty> Properties { get; init; } = [];
+    /// <summary>Title of <see cref="Items"/> ("Check constraints", "Methods", "Namespaces"); null when there are none.</summary>
+    public string? ItemsTitle { get; init; }
+    public IReadOnlyList<TypeItem> Items { get; init; } = [];
+    /// <summary>Columns, parameters and other objects that use the type.</summary>
+    public IReadOnlyList<TypeUsage> UsedBy { get; init; } = [];
+}
+
+public sealed record TypeProperty(string Name, string Value);
+
+public sealed record TypeItem(string Name, string Detail);
+
+/// <param name="Type">Object type of the user (table, view, proc, func, tablefunc, type...).</param>
+/// <param name="Usage">"column Phone", "parameter @p".</param>
+public sealed record TypeUsage(string? Schema, string Name, string Type, string Usage);
+
+/// <summary>A built-in data type (SQL Server's "System Data Types").</summary>
+public sealed record SystemTypeInfo(string Name, string Category, int? MaxLength, int? Precision, int? Scale, string? Collation, bool Nullable);
 
 public sealed record ColumnDetail(string Name, string Type, bool Nullable, string? Default, bool IsPk, bool IsIdentity, bool IsComputed, string? Comment, int Ordinal);
 

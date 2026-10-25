@@ -7,7 +7,7 @@ import {
   insertIntoActiveEditor, newConsole, openObject, openSampleDatabase, openSqlFile, openSqliteFile, reopenSql, rerun, rollbackTab,
   ownSessions, runActive, saveActiveFile, saveEditToDatabase, selectTop, setTxMode,
 } from '../app/actions';
-import { canDrop, copyDdl, dropObject, generateSqlInto, truncateTable, type SqlTemplate } from '../app/objectActions';
+import { canDrop, copyDdl, dropObject, generateSqlInto, scriptCreate, truncateTable, type SqlTemplate } from '../app/objectActions';
 import { checkForUpdatesNow } from '../app/updates';
 import { currentZoom, setZoom } from '../app/zoom';
 import { peekEditSession } from '../designer/editSession';
@@ -402,6 +402,11 @@ export const CORE_COMMANDS: Command<never>[] = [
     id: 'explorer.copyDdl', title: 'Copy DDL', category: 'Database', icon: 'ClipboardCopy', keywords: 'create script definition clipboard',
     when: (a?: unknown) => !!objectTargetOf(a),
     run: (a?: unknown) => { const t = objectTargetOf(a)!; void copyDdl(t.connectionId, t.database, t.ref); },
+  },
+  {
+    id: 'explorer.scriptCreate', title: 'Script as CREATE', category: 'Database', icon: 'FileCode2', keywords: 'create ddl definition script console type',
+    when: (a?: unknown) => !!objectTargetOf(a),
+    run: (a?: unknown) => { const t = objectTargetOf(a)!; void scriptCreate(t.connectionId, t.database, t.ref); },
   },
   ...(['select', 'insert', 'update', 'delete'] as SqlTemplate[]).map((k): Command<never> => ({
     id: `explorer.generate${k[0].toUpperCase()}${k.slice(1)}`, title: `Generate ${k.toUpperCase()} statement`, category: 'Database',

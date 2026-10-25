@@ -1499,6 +1499,20 @@ body.resizing-row .splitter-horizontal {
 .details-table tr.highlight td {
   background: var(--accent-soft);
 }
+.details-table tr.clickable {
+  cursor: pointer;
+}
+.details-table.type-overview {
+  width: auto;
+  min-width: 360px;
+}
+.details-table.type-overview td:first-child {
+  padding-right: 24px;
+  white-space: nowrap;
+}
+.object-empty {
+  padding: 16px;
+}
 
 /* ---------- history ---------- */
 .history {

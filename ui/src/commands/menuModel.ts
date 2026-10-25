@@ -141,6 +141,7 @@ export const MENUS: MenuDef[] = [
       cmd('designer.newProcedure', 'New procedure…', undefined, { optional: true }),
       cmd('designer.newFunction', 'New function…', undefined, { optional: true }),
       cmd('designer.newTrigger', 'New trigger…', undefined, { optional: true }),
+      cmd('designer.newType', 'New type…', undefined, { optional: true }),
       cmd('designer.edit', 'Design / edit object', 'F4', { optional: true }),
       cmd('data.open', 'Open table data', 'Mod+Alt+D', { optional: true }),
       cmd('codegen.open', 'Generate code…', 'Mod+Alt+G', { optional: true }),
@@ -200,7 +201,7 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
   'explorer.container': [
     c('objects.open', true), c('search.findInDatabase', true), c('connections.openConsole'), 'separator',
     n('designer.newTable'), n('designer.newView'), n('designer.newProcedure'), n('designer.newFunction'), n('designer.newPackage'),
-    n('designer.newTrigger'), n('queries.new'), 'separator',
+    n('designer.newTrigger'), n('designer.newType'), n('designer.newTableType'), n('queries.new'), 'separator',
     c('connections.refreshCatalog'), c('er.open', true), c('explorer.copyName'), 'separator',
     { command: 'scope.setColor', optional: true, hideDisabled: true, label: 'Set colour…' },
   ],
@@ -243,6 +244,13 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
     c('explorer.openDdl'), c('explorer.copyDdl'), c('designer.edit', true), c('objects.dependencies', true), 'separator',
     c('connections.openConsole'), c('explorer.copyName'), c('explorer.copyQualifiedName'), 'separator',
     c('connections.refreshCatalog'), 'separator',
+    h('explorer.drop'),
+  ],
+  /** User-defined types (alias, table, enum, domain, object types...): Open, Script as CREATE, Drop… with the usage warning. */
+  'explorer.type': [
+    c('explorer.openDdl'), c('explorer.scriptCreate'), c('explorer.copyDdl'), c('objects.dependencies', true), 'separator',
+    c('connections.openConsole'), c('explorer.copyName'), c('explorer.copyQualifiedName'), 'separator',
+    n('designer.newType'), n('designer.newTableType'), c('connections.refreshCatalog'), 'separator',
     h('explorer.drop'),
   ],
   'explorer.folder': [c('connections.connectFolder'), c('connections.newInFolder')],

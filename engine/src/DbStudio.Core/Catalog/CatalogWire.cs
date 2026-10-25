@@ -8,7 +8,7 @@ namespace DbStudio.Core.Catalog;
 /// <summary>
 /// Compact catalog JSON (docs/PLAN.md 3.3, D-10; ui/src/api/types.ts CatalogSnapshot/CatalogObject):
 /// <c>{"t","n","cm"?,"c"?:[[name,type,nullable,isPk,flags,comment]],"pk"?,"fk"?:[{"n","cols","rs","rt","rcols","dis"?,"nt"?}],"p"?:[[name,type,dir,hasDefault]],
-/// "target"?:{"d","s","n","t"},"members"?:[{"n","k","ov","p"}],"st"?}</c>. Empty/null optional members are omitted.
+/// "target"?:{"d","s","n","t"},"members"?:[{"n","k","ov","p"}],"st"?,"k"?,"bt"?}</c> (k = type kind, bt = type definition summary). Empty/null optional members are omitted.
 /// </summary>
 public static class CatalogWire
 {
@@ -144,6 +144,8 @@ public static class CatalogWire
         }
 
         if (!string.IsNullOrEmpty(o.Status)) w.WriteString("st", o.Status);
+        if (!string.IsNullOrEmpty(o.Kind)) w.WriteString("k", o.Kind);
+        if (!string.IsNullOrEmpty(o.BaseType)) w.WriteString("bt", o.BaseType);
         w.WriteEndObject();
     }
 

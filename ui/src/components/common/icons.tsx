@@ -1,4 +1,7 @@
-import { Columns3, Database, Eye, Folder, FunctionSquare, Hash, Key, Layers, Link, Link2, Package, Shapes, SquareFunction, Table2, Zap } from 'lucide-react';
+import {
+  ArrowLeftRight, Box, Boxes, Brackets, Columns3, Cpu, Database, Eye, FileBraces, Folder, FunctionSquare, Hash, Key, Layers, Link, Link2, ListOrdered, Package, Rows3,
+  Shapes, ShieldCheck, SquareFunction, Table2, TableProperties, Type, Zap,
+} from 'lucide-react';
 import type { CatalogObjectType } from '../../api/types';
 
 // Iconography (docs/PLAN-M1.5.md section 3): lucide only, 16 px, stroke 1.5, currentColor; fixed object-type icons.
@@ -25,8 +28,15 @@ const OBJ_ICONS: Record<CatalogObjectType, typeof Table2> = {
   trigger: Zap,
 };
 
-export function ObjectIcon({ type, size = 16 }: { type: CatalogObjectType; size?: number }) {
-  const I = OBJ_ICONS[type] ?? Table2;
+/** Distinct icons per kind of user-defined type (lib/typeKinds.ts); other providers' `type` objects keep the Shapes icon. */
+const TYPE_KIND_ICONS: Record<string, typeof Table2> = {
+  alias: Type, table: TableProperties, clr: Cpu, xmlschema: FileBraces,
+  enum: ListOrdered, domain: ShieldCheck, composite: Boxes, range: ArrowLeftRight,
+  object: Box, varray: Brackets, nested: Rows3,
+};
+
+export function ObjectIcon({ type, size = 16, kind }: { type: CatalogObjectType; size?: number; kind?: string | null }) {
+  const I = (type === 'type' && kind ? TYPE_KIND_ICONS[kind] : undefined) ?? OBJ_ICONS[type] ?? Table2;
   return <I size={size} strokeWidth={1.5} className={`obj-icon obj-${type}`} aria-hidden="true" />;
 }
 

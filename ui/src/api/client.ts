@@ -3,7 +3,7 @@ import type {
   ApiErrorBody, ApiErrorCode, CatalogSnapshot, CellResponse, ConnectionInput, ConnectionProfile,
   CreateSessionRequest, DatabasesResponse, DdlResponse, DiagnosticsRequest, DiagnosticsResponse, ExecuteRequest,
   ExecuteResponse, Health, HistoryEntry, ObjectDetails, ObjectError, ObjectRef, ProviderInfo, QueryExportRequest,
-  ResultSetExportRequest, RowsPage, SchemasResponse, SessionInfo, Settings, TestConnectionRequest,
+  ResultSetExportRequest, RowsPage, SchemasResponse, SessionInfo, Settings, SystemTypeInfo, TestConnectionRequest,
   TestConnectionResult, TxMode,
 } from './types';
 // M1.5
@@ -201,6 +201,8 @@ export const api = {
   },
   objectDetails: (cid: string, database: string | null, ref: ObjectRef) =>
     json<ObjectDetails>('GET', `/connections/${enc(cid)}/catalog/object`, { query: refQuery(database, ref) }),
+  systemTypes: (cid: string, database: string | null) =>
+    json<SystemTypeInfo[]>('GET', `/connections/${enc(cid)}/catalog/systemtypes`, { query: { database } }),
   ddl: (cid: string, database: string | null, ref: ObjectRef) =>
     json<DdlResponse>('GET', `/connections/${enc(cid)}/catalog/ddl`, { query: refQuery(database, ref) }),
   objectErrors: (cid: string, ref: ObjectRef) =>

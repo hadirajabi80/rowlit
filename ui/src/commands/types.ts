@@ -20,6 +20,8 @@ export interface ContainerTarget {
   schema: string | null;
   /** Folder type when invoked on a "Tables"/"Views"/... folder. */
   objectType?: CatalogObjectType;
+  /** A kind sub-folder of the Types folder ("User-Defined Table Types"): New type… starts from that kind. */
+  typeKind?: string;
   /** The schema's "Queries" folder (saved queries). */
   queries?: boolean;
 }

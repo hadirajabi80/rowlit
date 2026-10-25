@@ -88,7 +88,7 @@ public static class SqlServerCatalogQueries
 
     public const string UserTypes =
         "SELECT t.user_type_id, t.name, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable, t.is_table_type, " +
-        "tt.type_table_object_id " +
+        "tt.type_table_object_id, t.is_assembly_type " +
         "FROM sys.types t LEFT JOIN sys.types bt ON bt.user_type_id=t.system_type_id " +
         "LEFT JOIN sys.table_types tt ON tt.user_type_id=t.user_type_id " +
         "WHERE t.is_user_defined=1 AND t.schema_id=@sid";
@@ -96,9 +96,24 @@ public static class SqlServerCatalogQueries
     /// <summary>SQL Server 2005 (no table types: sys.table_types and sys.types.is_table_type are 2008+). Same columns as <see cref="UserTypes"/>.</summary>
     public const string UserTypes2005 =
         "SELECT t.user_type_id, t.name, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable, CAST(0 AS bit) AS is_table_type, " +
-        "CAST(NULL AS int) AS type_table_object_id " +
+        "CAST(NULL AS int) AS type_table_object_id, t.is_assembly_type " +
         "FROM sys.types t LEFT JOIN sys.types bt ON bt.user_type_id=t.system_type_id " +
         "WHERE t.is_user_defined=1 AND t.schema_id=@sid";
+
+    /// <summary>CLR user-defined types of a schema: the assembly and class behind them.</summary>
+    public const string ClrTypes =
+        "SELECT ast.user_type_id, a.name AS assembly_name, ast.assembly_class " +
+        "FROM sys.assembly_types ast JOIN sys.assemblies a ON a.assembly_id=ast.assembly_id " +
+        "WHERE ast.is_user_defined=1 AND ast.schema_id=@sid";
+
+    /// <summary>XML schema collections of a schema (sys.xml_schema_collections; the built-in one lives in sys).</summary>
+    public const string XmlSchemaCollections =
+        "SELECT x.xml_collection_id, x.name FROM sys.xml_schema_collections x WHERE x.schema_id=@sid ORDER BY x.name";
+
+    /// <summary>The built-in data types of the database (SSMS: System Data Types).</summary>
+    public const string SystemTypes =
+        "SELECT t.name, t.max_length, t.precision, t.scale, t.collation_name, t.is_nullable " +
+        "FROM sys.types t WHERE t.is_user_defined=0 ORDER BY t.name";
 
     public const string TableTypeColumns =
         "SELECT tt.user_type_id, c.column_id, c.name, t.name AS type_name, c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity, c.is_computed " +
@@ -171,10 +186,78 @@ public static class SqlServerCatalogQueries
         "FROM sys.sequences sq JOIN sys.types t ON t.user_type_id=sq.user_type_id WHERE sq.object_id=@id";
 
     public const string UserTypeByName =
-        "SELECT t.user_type_id, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable, t.is_table_type, tt.type_table_object_id " +
+        "SELECT t.user_type_id, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable, t.is_table_type, tt.type_table_object_id, " +
+        "t.is_assembly_type, t.collation_name, dob.name AS default_name, rob.name AS rule_name " +
         "FROM sys.types t LEFT JOIN sys.types bt ON bt.user_type_id=t.system_type_id " +
         "LEFT JOIN sys.table_types tt ON tt.user_type_id=t.user_type_id " +
+        "LEFT JOIN sys.objects dob ON dob.object_id=t.default_object_id LEFT JOIN sys.objects rob ON rob.object_id=t.rule_object_id " +
         "WHERE t.is_user_defined=1 AND t.schema_id=SCHEMA_ID(@schema) AND t.name=@name";
+
+    /// <summary>SQL Server 2005 (no table types). Same columns as <see cref="UserTypeByName"/>.</summary>
+    public const string UserTypeByName2005 =
+        "SELECT t.user_type_id, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable, CAST(0 AS bit) AS is_table_type, CAST(NULL AS int) AS type_table_object_id, " +
+        "t.is_assembly_type, t.collation_name, dob.name AS default_name, rob.name AS rule_name " +
+        "FROM sys.types t LEFT JOIN sys.types bt ON bt.user_type_id=t.system_type_id " +
+        "LEFT JOIN sys.objects dob ON dob.object_id=t.default_object_id LEFT JOIN sys.objects rob ON rob.object_id=t.rule_object_id " +
+        "WHERE t.is_user_defined=1 AND t.schema_id=SCHEMA_ID(@schema) AND t.name=@name";
+
+    /// <summary>The assembly and class of one CLR type.</summary>
+    public const string ClrTypeByName =
+        "SELECT a.name AS assembly_name, ast.assembly_class, ast.is_binary_ordered, ast.is_fixed_length " +
+        "FROM sys.assembly_types ast JOIN sys.assemblies a ON a.assembly_id=ast.assembly_id " +
+        "WHERE ast.is_user_defined=1 AND ast.schema_id=SCHEMA_ID(@schema) AND ast.name=@name";
+
+    public const string XmlSchemaCollectionByName =
+        "SELECT x.xml_collection_id, x.create_date, x.modify_date FROM sys.xml_schema_collections x " +
+        "WHERE x.schema_id=SCHEMA_ID(@schema) AND x.name=@name";
+
+    /// <summary>The schemas (one per target namespace) of an XML schema collection, reconstituted by XML_SCHEMA_NAMESPACE.</summary>
+    public const string XmlSchemaNamespaces =
+        "SELECT ns.name AS namespace_uri, CONVERT(nvarchar(max), XML_SCHEMA_NAMESPACE(SCHEMA_NAME(x.schema_id), x.name, ns.name)) AS definition " +
+        "FROM sys.xml_schema_collections x JOIN sys.xml_schema_namespaces ns ON ns.xml_collection_id=x.xml_collection_id " +
+        "WHERE x.xml_collection_id=@xid ORDER BY ns.xml_namespace_id";
+
+    /// <summary>
+    /// Columns and parameters declared with the type @tid (alias or table type), and objects whose body references it.
+    /// The table-type object (type TT) of a column holder is mapped back to the type it belongs to. SQL Server 2008+.
+    /// </summary>
+    public const string TypeUsage =
+        "SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, tts.name AS owner_schema, ttt.name AS owner_name, " +
+        "c.name AS member_name, CAST(NULL AS int) AS parameter_id " +
+        "FROM sys.columns c JOIN sys.objects o ON o.object_id=c.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "LEFT JOIN sys.table_types ttt ON ttt.type_table_object_id=o.object_id LEFT JOIN sys.schemas tts ON tts.schema_id=ttt.schema_id " +
+        "WHERE c.user_type_id=@tid AND (o.is_ms_shipped=0 OR o.type='TT') " +
+        "UNION ALL " +
+        "SELECT s.name, o.name, o.type, NULL, NULL, p.name, p.parameter_id " +
+        "FROM sys.parameters p JOIN sys.objects o ON o.object_id=p.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "WHERE p.user_type_id=@tid AND o.is_ms_shipped=0 " +
+        "UNION ALL " +
+        "SELECT s.name, o.name, o.type, NULL, NULL, CAST(NULL AS sysname), CAST(NULL AS int) " +
+        "FROM sys.sql_expression_dependencies d JOIN sys.objects o ON o.object_id=d.referencing_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "WHERE d.referenced_class=6 AND d.referenced_id=@tid AND d.referencing_class=1";
+
+    /// <summary>SQL Server 2005: no table types.</summary>
+    public const string TypeUsage2005 =
+        "SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, CAST(NULL AS sysname) AS owner_schema, CAST(NULL AS sysname) AS owner_name, " +
+        "c.name AS member_name, CAST(NULL AS int) AS parameter_id " +
+        "FROM sys.columns c JOIN sys.objects o ON o.object_id=c.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "WHERE c.user_type_id=@tid AND (o.is_ms_shipped=0 OR o.type='TT') " +
+        "UNION ALL " +
+        "SELECT s.name, o.name, o.type, NULL, NULL, p.name, p.parameter_id " +
+        "FROM sys.parameters p JOIN sys.objects o ON o.object_id=p.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "WHERE p.user_type_id=@tid AND o.is_ms_shipped=0";
+
+    /// <summary>Columns and parameters typed with an XML schema collection (@xid).</summary>
+    public const string XmlSchemaUsage =
+        "SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, tts.name AS owner_schema, ttt.name AS owner_name, " +
+        "c.name AS member_name, CAST(NULL AS int) AS parameter_id " +
+        "FROM sys.columns c JOIN sys.objects o ON o.object_id=c.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "LEFT JOIN sys.table_types ttt ON ttt.type_table_object_id=o.object_id LEFT JOIN sys.schemas tts ON tts.schema_id=ttt.schema_id " +
+        "WHERE c.xml_collection_id=@xid AND (o.is_ms_shipped=0 OR o.type='TT') " +
+        "UNION ALL " +
+        "SELECT s.name, o.name, o.type, NULL, NULL, p.name, p.parameter_id " +
+        "FROM sys.parameters p JOIN sys.objects o ON o.object_id=p.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id " +
+        "WHERE p.xml_collection_id=@xid AND o.is_ms_shipped=0";
 
     /// <summary>All catalog queries, for the syntax unit test.</summary>
     public static IReadOnlyDictionary<string, string> All { get; } = new Dictionary<string, string>
@@ -188,5 +271,9 @@ public static class SqlServerCatalogQueries
         [nameof(DetailCheckConstraints)] = DetailCheckConstraints, [nameof(DetailTriggers)] = DetailTriggers,
         [nameof(DetailParameters)] = DetailParameters, [nameof(DetailRowCount)] = DetailRowCount, [nameof(ModuleDefinition)] = ModuleDefinition,
         [nameof(SynonymDefinition)] = SynonymDefinition, [nameof(SequenceDefinition)] = SequenceDefinition, [nameof(UserTypeByName)] = UserTypeByName,
+        [nameof(UserTypeByName2005)] = UserTypeByName2005, [nameof(ClrTypes)] = ClrTypes, [nameof(XmlSchemaCollections)] = XmlSchemaCollections,
+        [nameof(SystemTypes)] = SystemTypes, [nameof(ClrTypeByName)] = ClrTypeByName, [nameof(XmlSchemaCollectionByName)] = XmlSchemaCollectionByName,
+        [nameof(XmlSchemaNamespaces)] = XmlSchemaNamespaces, [nameof(TypeUsage)] = TypeUsage, [nameof(TypeUsage2005)] = TypeUsage2005,
+        [nameof(XmlSchemaUsage)] = XmlSchemaUsage,
     };
 }

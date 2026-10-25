@@ -607,6 +607,12 @@ public static class StatementClassifier
                 objectType = ObjectTypes.Type;
                 if (j < t.Count && t[j].IsWord("BODY")) { j++; typeWord = "TYPE BODY"; }
                 break;
+            case "SCHEMA" when j < t.Count && t[j].IsWord("COLLECTION") && t[i + 1].IsWord("XML"):
+                // SQL Server XML schema collection (XML is a DDL modifier): a type object of the catalog, not a schema
+                objectType = ObjectTypes.Type;
+                j++;
+                typeWord = "XML SCHEMA COLLECTION";
+                break;
             case "SCHEMA": objectType = "schema"; scope = DdlScope.Database; break;
             case "DATABASE": objectType = "database"; scope = DdlScope.Database; break;
             case "USER": objectType = "user"; scope = dialect == Dialect.PlSql ? DdlScope.Database : DdlScope.Object; break;

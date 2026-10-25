@@ -66,6 +66,33 @@ public static class SqlServerDependencyQueries
         "WHERE o.is_ms_shipped=0 AND o.type IN (" + SqlServerCatalogQueries.ObjectTypeList + ") AND (@schema IS NULL OR s.name=@schema) AND " +
         SqlServerCatalogQueries.SchemaFilter;
 
+    /// <summary>Objects tab, Types group: alias, table and CLR types of one schema (@schema) or of the whole database (@schema NULL).</summary>
+    public const string UserTypeList =
+        "SELECT s.name, t.name, t.is_table_type, t.is_assembly_type, bt.name AS base_type, t.max_length, t.precision, t.scale, t.is_nullable " +
+        "FROM sys.types t JOIN sys.schemas s ON s.schema_id=t.schema_id LEFT JOIN sys.types bt ON bt.user_type_id=t.system_type_id " +
+        "WHERE t.is_user_defined=1 AND (@schema IS NULL OR s.name=@schema) AND " + SqlServerCatalogQueries.SchemaFilter;
+
+    /// <summary>Objects tab, Types group: XML schema collections.</summary>
+    public const string XmlSchemaCollectionList =
+        "SELECT s.name, x.name, x.create_date, x.modify_date FROM sys.xml_schema_collections x JOIN sys.schemas s ON s.schema_id=x.schema_id " +
+        "WHERE (@schema IS NULL OR s.name=@schema) AND " + SqlServerCatalogQueries.SchemaFilter;
+
+    /// <summary>A user-defined type by name (@schema, @name): id, table-type object id (NULL for other kinds).</summary>
+    public const string FindUserType =
+        "SELECT t.user_type_id, s.name, t.name, t.is_table_type, tt.type_table_object_id " +
+        "FROM sys.types t JOIN sys.schemas s ON s.schema_id=t.schema_id LEFT JOIN sys.table_types tt ON tt.user_type_id=t.user_type_id " +
+        "WHERE t.is_user_defined=1 AND s.name=@schema AND t.name=@name";
+
+    /// <summary>An XML schema collection by name (@schema, @name).</summary>
+    public const string FindXmlSchemaCollection =
+        "SELECT x.xml_collection_id, s.name, x.name FROM sys.xml_schema_collections x JOIN sys.schemas s ON s.schema_id=x.schema_id " +
+        "WHERE s.name=@schema AND x.name=@name";
+
+    /// <summary>User-defined types used by the columns of a table type (@id = its type_table_object_id).</summary>
+    public const string TableTypeUses =
+        "SELECT DISTINCT ts.name, t.name FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id JOIN sys.schemas ts ON ts.schema_id=t.schema_id " +
+        "WHERE c.object_id=@id AND t.is_user_defined=1";
+
     /// <summary>Row counts and reserved bytes per object (needs VIEW DATABASE STATE).</summary>
     public const string PartitionStats =
         "SELECT ps.object_id, SUM(CASE WHEN ps.index_id IN (0,1) THEN ps.row_count ELSE 0 END), SUM(ps.reserved_page_count) * 8192 " +
@@ -81,5 +108,7 @@ public static class SqlServerDependencyQueries
         [nameof(ForeignKeysOut)] = ForeignKeysOut, [nameof(ForeignKeysIn)] = ForeignKeysIn, [nameof(Triggers)] = Triggers,
         [nameof(TriggerEvents)] = TriggerEvents, [nameof(TriggerParent)] = TriggerParent, [nameof(ObjectList)] = ObjectList,
         [nameof(PartitionStats)] = PartitionStats, [nameof(PartitionRows)] = PartitionRows,
+        [nameof(UserTypeList)] = UserTypeList, [nameof(XmlSchemaCollectionList)] = XmlSchemaCollectionList, [nameof(FindUserType)] = FindUserType,
+        [nameof(FindXmlSchemaCollection)] = FindXmlSchemaCollection, [nameof(TableTypeUses)] = TableTypeUses,
     };
 }

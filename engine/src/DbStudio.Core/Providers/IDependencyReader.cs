@@ -33,7 +33,11 @@ public interface IDependencyReader : IAsyncDisposable
 
 /// <summary>One row of the Objects tab (Navicat-like object list) with cheap statistics where the server has them.</summary>
 public sealed record ObjectListItem(
-    string Type, string? Schema, string Name, long? RowCount, long? SizeBytes, DateTimeOffset? Modified, DateTimeOffset? Created, string? Comment);
+    string Type, string? Schema, string Name, long? RowCount, long? SizeBytes, DateTimeOffset? Modified, DateTimeOffset? Created, string? Comment)
+{
+    /// <summary>Type objects: the kind (<see cref="TypeKinds"/>); null otherwise.</summary>
+    public string? Kind { get; init; }
+}
 
 public interface IObjectListReader : IAsyncDisposable
 {

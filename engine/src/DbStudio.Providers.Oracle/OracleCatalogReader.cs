@@ -10,7 +10,7 @@ namespace DbStudio.Providers.Oracle;
 /// Oracle catalog reader over a short-lived pooled connection. Every dictionary query is OWNER-bound (docs/PLAN.md 2.6, R4).
 /// Oracle has no databases: <c>database</c> arguments are ignored and the "current database" is the current schema.
 /// </summary>
-public sealed class OracleCatalogReader : ICatalogReader
+public sealed partial class OracleCatalogReader : ICatalogReader
 {
     private const int InListLimit = 1000;
     private readonly OracleConnection _conn;
@@ -111,6 +111,10 @@ public sealed class OracleCatalogReader : ICatalogReader
             ct, owner).ConfigureAwait(false))
             .GroupBy(s => s.Name).ToDictionary(g => g.Key, g => g.First().Target, StringComparer.Ordinal);
 
+        var typeInfos = objects.Any(o => o.Type == "TYPE")
+            ? await LoadTypesAsync(schema, ct).ConfigureAwait(false)
+            : new Dictionary<string, TypeSummary>(StringComparer.Ordinal);
+
         // ---- assemble
         var colsByTable = columns.GroupBy(c => c.Table).ToDictionary(g => g.Key, g => g.OrderBy(c => c.ColumnId).ToList(), StringComparer.Ordinal);
         var pkByTable = constraints.Where(c => c.Type == "P").GroupBy(c => c.Table).ToDictionary(g => g.Key, g => g.First().Columns, StringComparer.Ordinal);
@@ -169,6 +173,12 @@ public sealed class OracleCatalogReader : ICatalogReader
                         Type = type, Name = o.Name, Schema = schema, Status = o.Status, Target = synonyms.GetValueOrDefault(o.Name),
                     };
                     break;
+                case ObjectTypes.Type when typeInfos.TryGetValue(o.Name, out var ti):
+                    obj = new CatalogObject
+                    {
+                        Type = type, Name = o.Name, Schema = schema, Status = o.Status, Kind = ti.Kind, BaseType = ti.BaseType, Columns = ti.Attributes,
+                    };
+                    break;
             }
             result.Add(obj);
         }
@@ -198,6 +208,7 @@ public sealed class OracleCatalogReader : ICatalogReader
                 OracleDb.Str(r, 2), OracleDb.Str(r, 5), OracleDb.Str(r, 6) == "Y"), ct, o, n).ConfigureAwait(false);
             return new ObjectDetails(refOut, [], [], [], [], [], ToParams(args), null, created, modified);
         }
+        if (obj.Type == ObjectTypes.Type) return await GetTypeDetailsAsync(obj, owner, created, modified, ct).ConfigureAwait(false);
         if (obj.Type is not (ObjectTypes.Table or ObjectTypes.View or ObjectTypes.MView))
             return new ObjectDetails(refOut, [], [], [], [], [], [], null, created, modified);
 
@@ -277,7 +288,12 @@ public sealed class OracleCatalogReader : ICatalogReader
             var ddl = await OracleDb.ScalarAsync(_conn, OracleCatalogQueries.GetDdl, ct,
                 ("type", OracleTypeText.MetadataType(obj.Type)), ("name", obj.Name), ("owner", owner)).ConfigureAwait(false);
             var text = ddl switch { OracleClob clob => clob.Value, null => null, _ => Convert.ToString(ddl) };
-            if (!string.IsNullOrWhiteSpace(text)) return new DdlResult(NormalizeDdl(text), "stored");
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var normalized = NormalizeDdl(text);
+                if (obj.Type == ObjectTypes.Type) normalized = normalized.TrimEnd() + "\n\n" + await TypeBodyDdlAsync(owner, obj.Name, ct).ConfigureAwait(false);
+                return new DdlResult(normalized.TrimEnd() + "\n", "stored");
+            }
         }
         catch (OracleException)
         {

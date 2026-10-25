@@ -3,10 +3,12 @@
 import { api, errorMessage } from '../api/client';
 import type { CatalogObjectType, Dialect, ObjectRef } from '../api/types';
 import { catalogDatabase, newConsole, preloadCatalog } from '../app/actions';
+import { catalogTypeKind } from '../app/objectActions';
 import { targetOf } from '../commands/core';
 import { displayShortcut } from '../commands/keys';
 import { isConnectionTarget, isContainerTarget, isObjectTarget, isTabTarget, type ObjectTarget } from '../commands/types';
 import { qualifiedName } from '../lib/sql';
+import { newTypeTemplate } from '../lib/typeKinds';
 import { dbKey, useCatalog } from '../store/catalog';
 import { dialectOf, getConnection, useConnections } from '../store/connections';
 import { useSessions } from '../store/sessions';
@@ -149,6 +151,24 @@ export function openViewDesigner(ctx: DesignerContext, name: string | null): str
 export function openProcedureWizard(ctx: DesignerContext, opts: { kind?: 'procedure' | 'function' | 'package' | 'trigger'; table?: string | null; packageName?: string | null } = {}): void {
   void preloadCatalog(ctx.connectionId, ctx.database);
   useDesignerUi.getState().openWizard({ ...ctx, kind: opts.kind ?? (ctx.dialect === 'sqlite' ? 'trigger' : 'procedure'), table: opts.table ?? null, packageName: opts.packageName ?? null });
+}
+
+/** The kind a "New type…" menu entry starts from: the Types sub-folder it was invoked on (null = the dialect's default kind). */
+export function containerTypeKind(args?: unknown): string | null {
+  if (isTabTarget(args)) return null;
+  const t = targetOf(args);
+  if (isObjectTarget(t)) return catalogTypeKind(t.connectionId, t.database, t.ref);
+  return isContainerTarget(t) && t.objectType === 'type' ? t.typeKind ?? null : null;
+}
+
+/** "New type…": a console with a CREATE TYPE template (alias / table type on SQL Server, enum… on PostgreSQL, object… on Oracle). */
+export function openNewType(ctx: DesignerContext, kind: string | null): string | null {
+  const sql = newTypeTemplate(ctx.dialect, ctx.schema, kind);
+  if (!sql) return null;
+  void preloadCatalog(ctx.connectionId, ctx.database);
+  const id = newConsole(ctx.connectionId, ctx.database, sql);
+  useTabs.getState().rename(id, 'New type');
+  return id;
 }
 
 /** Routines whose Run executes them (Execute routine) rather than re-running the script. */
