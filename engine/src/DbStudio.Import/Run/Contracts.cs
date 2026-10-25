@@ -9,13 +9,15 @@ public sealed class PreviewRequest
     public string Path { get; set; } = "";
     public SourceOptions? Options { get; set; }
     public int? MaxRows { get; set; }
+    /// <summary>Data rows to skip before the preview page (pagination); type inference always samples from the start.</summary>
+    public long? Offset { get; set; }
 }
 
 public sealed record PreviewColumn(int Index, string Name, InferredType Inferred);
 
 public sealed record PreviewResult(string Path, string FileName, long FileSize, SourceOptions Options, IReadOnlyList<string>? Sheets,
     IReadOnlyList<string>? JsonPaths, IReadOnlyList<PreviewColumn> Columns, IReadOnlyList<IReadOnlyList<string?>> Rows, long SampledRows,
-    bool MoreRows, IReadOnlyList<string> Warnings);
+    bool MoreRows, IReadOnlyList<string> Warnings, long Offset = 0, bool HasNextPage = false);
 
 public sealed class TableRefDto
 {

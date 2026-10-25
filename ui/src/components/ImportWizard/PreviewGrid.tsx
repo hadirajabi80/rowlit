@@ -1,11 +1,23 @@
-// Preview table of the first rows of the file, with the inferred type of every column in its header.
+// Preview table of the file, one page at a time, with the inferred type of every column in its header.
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { typeLabel } from './model';
 import type { PreviewResult } from './types';
 
-export function PreviewGrid({ preview, loading }: { preview: PreviewResult | null; loading?: boolean }) {
+interface Props {
+  preview: PreviewResult | null;
+  loading?: boolean;
+  /** 0-based page shown (the engine returns one page per request). */
+  page?: number;
+  onPage?: (page: number) => void;
+}
+
+export function PreviewGrid({ preview, loading, page = 0, onPage }: Props) {
   if (!preview) {
     return <div className="iw-grid-empty" role="status">{loading ? 'Reading the file…' : 'No preview yet.'}</div>;
   }
+  const first = preview.offset ?? 0;
+  const count = preview.rows.length;
+  const hasNext = !!preview.hasNextPage;
   return (
     <div className="iw-grid-wrap" aria-busy={loading ? true : undefined}>
       <table className="iw-grid" aria-label="Preview of the file">
@@ -22,8 +34,8 @@ export function PreviewGrid({ preview, loading }: { preview: PreviewResult | nul
         </thead>
         <tbody>
           {preview.rows.map((row, i) => (
-            <tr key={i}>
-              <td className="iw-grid-rownum">{i + 1}</td>
+            <tr key={first + i}>
+              <td className="iw-grid-rownum">{(first + i + 1).toLocaleString('en-US')}</td>
               {preview.columns.map((c) => {
                 const v = row[c.index] ?? null;
                 return v === null ? <td key={c.index} className="iw-null">NULL</td> : <td key={c.index} dir="auto">{v}</td>;
@@ -33,8 +45,23 @@ export function PreviewGrid({ preview, loading }: { preview: PreviewResult | nul
         </tbody>
       </table>
       <div className="iw-grid-foot" role="status">
-        {preview.rows.length} {preview.rows.length === 1 ? 'row' : 'rows'} shown
-        {preview.moreRows ? ` · the file has more rows (types are inferred from the first ${preview.sampledRows.toLocaleString('en-US')})` : ''}
+        <span>
+          {count === 0
+            ? 'No rows on this page'
+            : `Rows ${(first + 1).toLocaleString('en-US')}–${(first + count).toLocaleString('en-US')}`}
+          {preview.moreRows ? ` · types are inferred from the first ${preview.sampledRows.toLocaleString('en-US')} rows` : ''}
+        </span>
+        {onPage && (page > 0 || hasNext) && (
+          <span className="iw-pager">
+            <button type="button" className="icon-btn sm" aria-label="Previous page" title="Previous page" disabled={page === 0 || loading} onClick={() => onPage(page - 1)}>
+              <ChevronLeft size={14} />
+            </button>
+            <span className="iw-pager-label">Page {(page + 1).toLocaleString('en-US')}</span>
+            <button type="button" className="icon-btn sm" aria-label="Next page" title="Next page" disabled={!hasNext || loading} onClick={() => onPage(page + 1)}>
+              <ChevronRight size={14} />
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );

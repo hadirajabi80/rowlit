@@ -35,6 +35,7 @@ public sealed class ImportService(ConnectionStore connections, ProviderRegistry 
         if (string.IsNullOrWhiteSpace(opts.Format)) opts.Format = SourceOptions.FormatOf(path) ?? "csv";
         opts.Format = opts.Format.ToLowerInvariant();
         var maxRows = Math.Clamp(request.MaxRows ?? 100, 1, 1000);
+        var offset = Math.Max(0, request.Offset ?? 0);
 
         IReadOnlyList<string>? sheets = null, jsonPaths = null;
         var warnings = new List<string>();
@@ -75,20 +76,31 @@ public sealed class ImportService(ConnectionStore connections, ProviderRegistry 
             var firstTexts = new string?[source.Columns.Count];
             long sampled = 0;
             var more = false;
+            var hasNext = false;
             try
             {
+                long index = 0;
                 while (source.Read())
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (sampled >= InferenceSampleRows) { more = true; break; }
-                    sampled++;
+                    if (index >= InferenceSampleRows && rows.Count >= maxRows) { more = true; hasNext = true; break; }
                     var cur = source.Current;
-                    for (var i = 0; i < profilers.Length && i < cur.Length; i++)
+                    if (index < InferenceSampleRows)
                     {
-                        profilers[i].Add(cur[i]);
-                        if (cur[i] is string s && firstTexts[i] is null && s.Length > 0) firstTexts[i] = s;
+                        sampled++;
+                        for (var i = 0; i < profilers.Length && i < cur.Length; i++)
+                        {
+                            profilers[i].Add(cur[i]);
+                            if (cur[i] is string s && firstTexts[i] is null && s.Length > 0) firstTexts[i] = s;
+                        }
                     }
-                    if (rows.Count < maxRows) rows.Add(cur.Select(Display).ToList());
+                    else more = true;
+                    if (index >= offset)
+                    {
+                        if (rows.Count < maxRows) rows.Add(cur.Select(Display).ToList());
+                        else hasNext = true;
+                    }
+                    index++;
                 }
             }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or System.Xml.XmlException)
@@ -101,7 +113,7 @@ public sealed class ImportService(ConnectionStore connections, ProviderRegistry 
                     warnings.Add($"Column '{c.Name}' looks like Persian (Jalali) dates ({txt}); they would be read as Gregorian years. Import the column as text or convert it first.");
             warnings.AddRange(source.Warnings);
             if (columns.Count == 0) warnings.Add("No columns were found. Check the delimiter, header row and skipped rows.");
-            return new PreviewResult(path, info.Name, info.Length, effective, sheets, jsonPaths, columns, rows, sampled, more, warnings);
+            return new PreviewResult(path, info.Name, info.Length, effective, sheets, jsonPaths, columns, rows, sampled, more, warnings, offset, hasNext);
         }
     }
 

@@ -16,6 +16,8 @@ import type { ImportMode, ImportRequest, SourceOptions } from './types';
 import { applyPreview, applyTableInfo, effectiveSource, IDLE_RUN, initialState, STEP_FORMAT, STEP_MODE, STEP_RUN, STEP_SOURCE, STEP_TARGET, type WizardState } from './wizardState';
 
 export const PREVIEW_DEBOUNCE_MS = 300;
+/** Rows per preview page. */
+export const PREVIEW_PAGE_SIZE = 50;
 export const DDL_DEBOUNCE_MS = 300;
 export const DEFAULT_MAX_ERRORS = 1000;
 
@@ -67,14 +69,14 @@ export function useWizard(tab: ViewTab) {
       const seq = ++previewSeq.current;
       setS((p) => ({ ...p, previewLoading: true }));
       importApi
-        .preview({ path, options: { ...(format ? { format } : {}), ...s.userOpts }, maxRows: 100 })
+        .preview({ path, options: { ...(format ? { format } : {}), ...s.userOpts }, maxRows: PREVIEW_PAGE_SIZE, offset: s.previewPage * PREVIEW_PAGE_SIZE })
         .then(
           (r) => seq === previewSeq.current && alive.current && setS((p) => applyPreview(p, r)),
           (e) => seq === previewSeq.current && alive.current && setS((p) => ({ ...p, previewLoading: false, previewError: errorMessage(e), preview: null, columnSig: '' })),
         );
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [s.path, s.userOpts]);
+  }, [s.path, s.userOpts, s.previewPage]);
 
   // ---------------------------------------------------------------- catalog (schemas and tables)
   const dbCat = useCatalog((c) => c.dbs[dbKey(cid, dbCatalog)]);
@@ -216,7 +218,7 @@ export function useWizard(tab: ViewTab) {
       const userOpts = { ...p.userOpts };
       if (value === undefined) delete userOpts[key];
       else userOpts[key] = value;
-      return { ...p, userOpts };
+      return { ...p, userOpts, previewPage: 0 };
     });
   }, []);
 
@@ -297,10 +299,12 @@ export function useWizard(tab: ViewTab) {
     }));
   }, []);
 
+  const setPreviewPage = useCallback((page: number) => setS((p) => ({ ...p, previewPage: Math.max(0, page) })), []);
+
   return {
     s, patch, tab, cid, conn, dbEngine, dbCatalog, schemaNames, tables, source, columns, existingIssues, newIssues, create, tableName, modes, mode,
     transactional, transaction, batchSize, keyed, keyErrors, keyIsUnique, mappedNames, blocker, request, targetErrors, truncating, canNext,
-    running, setOpt, setMapping, runAutoMatch, updateNewColumn, togglePk, setMode, goTo, start, cancel, restart,
+    running, setPreviewPage, setOpt, setMapping, runAutoMatch, updateNewColumn, togglePk, setMode, goTo, start, cancel, restart,
   };
 }
 

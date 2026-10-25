@@ -132,7 +132,7 @@ describe('step 1 and 2: source and format', () => {
     expect(nextBtn()).toBeEnabled();
     expect(h.api.preview).not.toHaveBeenCalled(); // debounced
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(1));
-    expect(h.api.preview).toHaveBeenCalledWith({ path: CSV, options: { format: 'csv' }, maxRows: 100 });
+    expect(h.api.preview).toHaveBeenCalledWith({ path: CSV, options: { format: 'csv' }, maxRows: 50, offset: 0 });
     await screen.findByText('people.csv');
 
     next();
@@ -152,14 +152,14 @@ describe('step 1 and 2: source and format', () => {
 
     fireEvent.change(screen.getByLabelText('Encoding'), { target: { value: 'windows-1256' } });
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(2));
-    expect(h.api.preview).toHaveBeenLastCalledWith({ path: CSV, options: { format: 'csv', encoding: 'windows-1256' }, maxRows: 100 });
+    expect(h.api.preview).toHaveBeenLastCalledWith({ path: CSV, options: { format: 'csv', encoding: 'windows-1256' }, maxRows: 50, offset: 0 });
 
     fireEvent.change(screen.getByLabelText('Delimiter'), { target: { value: ';' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /First row contains/ }));
     fireEvent.change(screen.getByLabelText('Skip rows'), { target: { value: '2' } });
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(3));
     expect(h.api.preview).toHaveBeenLastCalledWith({
-      path: CSV, options: { format: 'csv', encoding: 'windows-1256', delimiter: ';', hasHeader: false, skipRows: 2 }, maxRows: 100,
+      path: CSV, options: { format: 'csv', encoding: 'windows-1256', delimiter: ';', hasHeader: false, skipRows: 2 }, maxRows: 50, offset: 0,
     });
 
     // back to auto-detect removes the key again

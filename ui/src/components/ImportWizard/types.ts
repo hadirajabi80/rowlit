@@ -53,6 +53,8 @@ export interface PreviewRequest {
   options?: Partial<SourceOptions>;
   /** Rows returned (default 100, max 1000). Column types are inferred from up to 2000 rows regardless. */
   maxRows?: number;
+  /** Data rows to skip before the returned page (pagination). */
+  offset?: number;
 }
 
 export type InferredKind = 'empty' | 'bool' | 'int' | 'bigint' | 'decimal' | 'float' | 'date' | 'datetime' | 'time' | 'guid' | 'text';
@@ -92,6 +94,10 @@ export interface PreviewResult {
   sampledRows: number;
   /** The file has more rows than were sampled. */
   moreRows: boolean;
+  /** First data row of this page (0-based). */
+  offset?: number;
+  /** There are rows after this page. */
+  hasNextPage?: boolean;
   warnings: string[];
 }
 

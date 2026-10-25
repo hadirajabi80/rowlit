@@ -221,7 +221,7 @@ export function FormatStep({ w }: { w: Wizard }) {
 
       {s.previewError && <div className="iw-msg iw-error" role="alert">{s.previewError}</div>}
       {p?.warnings.map((m, i) => <div key={i} className="iw-msg iw-warn" role="status">{m}</div>)}
-      <PreviewGrid preview={p} loading={s.previewLoading} />
+      <PreviewGrid preview={p} loading={s.previewLoading} page={s.previewPage} onPage={w.setPreviewPage} />
     </section>
   );
 }

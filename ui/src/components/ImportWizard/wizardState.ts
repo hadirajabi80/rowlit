@@ -34,6 +34,8 @@ export interface WizardState {
   userOpts: Partial<SourceOptions>;
   preview: PreviewResult | null;
   previewLoading: boolean;
+  /** Preview page (0-based, PREVIEW_PAGE_SIZE rows each). */
+  previewPage: number;
   previewError: string | null;
   /** Signature of the file columns (index + name): a change resets the mapping. */
   columnSig: string;
@@ -83,6 +85,7 @@ export function initialState(init: { path?: string | null; targetMode?: 'existin
     userOpts: {},
     preview: null,
     previewLoading: false,
+    previewPage: 0,
     previewError: null,
     columnSig: '',
     caps: null,

@@ -14,7 +14,7 @@ export function SourceStep({ w }: { w: Wizard }) {
   const platform = getPlatform();
   const [over, setOver] = useState(false);
 
-  const setPath = (path: string) => patch({ path, userOpts: {}, step: 0 });
+  const setPath = (path: string) => patch({ path, userOpts: {}, step: 0, previewPage: 0 });
 
   const browse = async () => {
     const path = await platform.showOpenDialog({ title: 'Choose the file to import', filters: IMPORT_FILE_FILTERS });
