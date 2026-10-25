@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { resetCellColors } from '../components/Grid/cellColors';
 import { useSettings } from '../store/settings';
-import { applyDocumentVars, applyEditorScope, documentVars, getActiveTheme, notifyThemeChange, setActiveTheme, type ActiveTheme } from './activeTheme';
+import { applyDocumentVars, applyEditorScope, documentVars, getActiveTheme, notifyThemeChange, setActiveTheme, useThemeRevision, type ActiveTheme } from './activeTheme';
 import { applyMonacoTheme } from './monacoTheme';
-import { appThemeFor, editorThemeIdFor, type ThemeVars } from './themes';
+import { appThemeFor, editorThemeById, editorThemeIdFor, loadExtraThemes, type ThemeVars } from './themes';
 import { syncTitleBar } from './titlebar';
 
 export type EffectiveTheme = 'light' | 'dark';
@@ -52,7 +52,8 @@ export function applyBootTheme(): void {
 /** Applies a selection to the document: data-theme, the theme's custom properties, the code theme's token scope. */
 function applySelection(t: ActiveTheme): void {
   applyThemeAttribute(t.base);
-  applyDocumentVars(documentVars(t));
+  // a lazily loaded app theme (themes.ts) keeps the colours of the boot cache until its palette arrives
+  if (!t.app.pending) applyDocumentVars(documentVars(t));
   applyEditorScope(t);
 }
 
@@ -80,21 +81,31 @@ export function useEffectiveTheme(): EffectiveTheme {
     };
   }, []);
   const eff: EffectiveTheme = pref === 'light' || pref === 'dark' ? pref : sys;
+  // re-render when the lazily loaded palettes arrive (the selection then names their real entries)
+  const revision = useThemeRevision();
   const app = appThemeFor(ui, eff);
   const editorId = editorThemeIdFor(ui);
+  const waiting = app.pending || editorThemeById(editorId)?.pending;
   // Applied during render (idempotent) so children that read CSS variables while rendering — the canvas grid
   // theme — already see the new values; the effect covers StrictMode/edge cases.
   if (setActiveTheme({ base: eff, app, editorId }, { notify: false })) resetCellColors();
   applySelection(getActiveTheme());
   useEffect(() => {
+    if (waiting) void loadExtraThemes();
+  }, [waiting]);
+  useEffect(() => {
     applySelection(getActiveTheme());
+    if (!waiting) resetCellColors();
     notifyThemeChange();
-    void applyMonacoTheme();
-  }, [eff, app, editorId]);
+    if (!waiting) void applyMonacoTheme(); // else: re-run once the palette arrives (the revision bumps)
+  }, [eff, app, editorId, waiting, revision]);
   useEffect(() => {
     if (!loaded) return;
-    writeBoot({ pref, light: appThemeFor(ui, 'light').vars, dark: appThemeFor(ui, 'dark').vars });
-  }, [loaded, pref, ui]);
+    const light = appThemeFor(ui, 'light');
+    const dark = appThemeFor(ui, 'dark');
+    if (light.pending || dark.pending) return; // keep the cache from the last complete write
+    writeBoot({ pref, light: light.vars, dark: dark.vars });
+  }, [loaded, pref, ui, revision]);
   // Desktop: the window chrome (native light/dark mode, Windows caption buttons) follows the theme setting.
   useEffect(() => syncTitleBar(eff), [eff, pref, app]);
   useEffect(() => {

@@ -425,6 +425,10 @@
   grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
   margin-top: 0;
 }
+/* code themes under a section title */
+.tp-grid-grouped {
+  margin-top: var(--space-2);
+}
 .tp-card {
   position: relative;
   display: flex;

@@ -308,6 +308,7 @@ describe('token lint (QA 5.1)', () => {
     const ALLOWED: Record<string, string> = {
       'theme/monacoTheme.ts': 'editor line numbers (incidental gutter text)',
       'theme/themes.ts': 'theme definitions: the token values themselves, not a use',
+      'theme/themesExtra.ts': 'theme definitions: the token values themselves, not a use',
     };
     const offenders: string[] = [];
     for (const [path, text] of Object.entries(SOURCES)) {

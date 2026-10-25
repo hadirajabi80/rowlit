@@ -3,7 +3,7 @@
 // the Monaco theme builder, the title bar sync and canvas consumers (the grid) read the *effective* tokens from here.
 import { useSyncExternalStore } from 'react';
 import { parseColor, firstColor, themeTokens, type TokenMap } from './index';
-import { APP_THEMES, editorThemeById, MATCH_APP, type AppTheme, type ThemeBase, type ThemeVars } from './themes';
+import { APP_THEMES, appThemeById, editorThemeById, MATCH_APP, onExtraThemesLoaded, type AppTheme, type EditorExtras, type ThemeBase, type ThemeVars } from './themes';
 
 export interface ActiveTheme {
   base: ThemeBase;
@@ -42,12 +42,21 @@ export function useThemeRevision(): number {
  * read the new revision anyway); call notifyThemeChange() from an effect then.
  */
 export function setActiveTheme(next: ActiveTheme, opts: { notify?: boolean } = {}): boolean {
-  if (next.base === active.base && next.app.id === active.app.id && next.editorId === active.editorId) return false;
+  // identity of the app theme, not just its id: a lazily loaded theme is replaced by its real entry once it arrives
+  if (next.base === active.base && next.app === active.app && next.editorId === active.editorId) return false;
   active = next;
   revision++;
   if (opts.notify !== false) notifyThemeChange();
   return true;
 }
+
+// The lazily loaded themes (themes.ts loadExtraThemes) arrived: the selection names the real entries now, and every
+// consumer of the colours (Monaco, the grid, the title bar) re-reads them.
+onExtraThemesLoaded(() => {
+  active = { ...active, app: appThemeById(active.app.id) ?? active.app };
+  revision++;
+  notifyThemeChange();
+});
 
 /** Runs the revision listeners (useThemeRevision re-renders only components that rendered an older revision). */
 export function notifyThemeChange(): void {
@@ -64,14 +73,22 @@ export interface EditorColors {
   tokens: TokenMap;
   /** A code theme of its own (not derived from the app theme): the editor gets its own token scope. */
   standalone: boolean;
+  /** Finer syntax colours and editor-surface colours of the theme (themes.ts EditorExtras). */
+  extras?: EditorExtras;
 }
 
-/** The code theme's base and tokens: the app tokens for "Match app theme", otherwise the code theme's own set. */
+/**
+ * The code theme's base and tokens: the app tokens for "Match app theme" (plus the extras of the code theme of the same
+ * id and mode, e.g. Darcula), otherwise the code theme's own set.
+ */
 export function editorColors(t: ActiveTheme = active, css?: string): EditorColors {
   const ed = t.editorId === MATCH_APP ? undefined : editorThemeById(t.editorId);
-  if (!ed) return { base: t.base, tokens: appTokens(t, css), standalone: false };
+  if (!ed) {
+    const twin = editorThemeById(t.app.id);
+    return { base: t.base, tokens: appTokens(t, css), standalone: false, extras: twin && twin.base === t.base ? twin.extras : undefined };
+  }
   const tokens = css === undefined ? themeTokens(ed.base, ed.vars) : themeTokens(ed.base, ed.vars, css);
-  return { base: ed.base, tokens, standalone: true };
+  return { base: ed.base, tokens, standalone: true, extras: ed.extras };
 }
 
 /** Resolved colour-valued tokens (colours and shadows) of a token map, for scoping them onto an element. */
@@ -127,11 +144,12 @@ export function applyEditorScope(t: ActiveTheme = active): void {
     el.id = SCOPE_ID;
     document.head.appendChild(el);
   }
-  // built once per code theme (this runs on every render of the shell)
-  if (el.dataset.editorTheme === t.editorId && el.textContent) return;
+  // built once per code theme (this runs on every render of the shell); a lazy theme is rebuilt once its palette arrives
+  const key = t.editorId + (editorThemeById(t.editorId)?.pending ? '~' : '');
+  if (el.dataset.editorTheme === key && el.textContent) return;
   const body = Object.entries(colorTokens(ed.tokens)).map(([k, v]) => `${k}: ${v};`).join(' ');
   el.textContent = `${SCOPE} { color-scheme: ${ed.base}; ${body} }`;
-  el.dataset.editorTheme = t.editorId;
+  el.dataset.editorTheme = key;
 }
 
 /** Tests. */

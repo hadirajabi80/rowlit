@@ -2,13 +2,14 @@
 // dark favourite, so "Follow system" switches between them) and the code theme (cards with a 3-line SQL preview).
 // The previews are painted from each theme's resolved tokens (theme/themes.ts), not from the live document.
 import { Check } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { isMac } from '../../../commands/keys';
 import { useSettings } from '../../../store/settings';
 import { getActiveTheme, useThemeRevision } from '../../../theme/activeTheme';
 import { themeTokens, type TokenMap } from '../../../theme/index';
 import {
-  APP_THEMES, appThemeFor, appThemeKey, EDITOR_THEME_KEY, EDITOR_THEMES, editorThemeIdFor, MATCH_APP, type AppTheme, type ThemeBase,
+  APP_THEMES, appThemeFor, appThemeKey, EDITOR_GROUPS, EDITOR_THEME_KEY, EDITOR_THEMES, editorThemeById, editorThemeIdFor, loadExtraThemes, MATCH_APP,
+  type AppTheme, type EditorExtras, type ThemeBase,
 } from '../../../theme/themes';
 
 const tokensOf = (base: ThemeBase, vars: Readonly<Record<string, string>>): TokenMap => themeTokens(base, vars);
@@ -62,6 +63,9 @@ function ThemeCard({ theme, selected, inUse, onPick }: { theme: AppTheme; select
 /** App theme picker: a radiogroup per mode. */
 export function AppThemePicker() {
   useThemeRevision();
+  useEffect(() => {
+    void loadExtraThemes(); // the Darcula / IntelliJ Light palettes are a lazily loaded chunk (theme/themesExtra.ts)
+  }, []);
   const pref = useSettings((s) => s.settings.theme);
   const ui = useSettings((s) => s.settings.ui);
   const shown = getActiveTheme();
@@ -93,47 +97,72 @@ export function AppThemePicker() {
   );
 }
 
-/** Three lines of SQL in a theme's syntax colours. */
-function CodePreview({ t }: { t: TokenMap }) {
-  const k = { color: t['--syn-keyword'], fontWeight: 600 } as CSSProperties;
+/** Three lines of SQL in a theme's syntax colours (identifiers, quoted identifiers and keyword weight follow its extras). */
+function CodePreview({ t, extras }: { t: TokenMap; extras?: EditorExtras }) {
+  const k = { color: t['--syn-keyword'], fontWeight: extras?.plainKeywords ? 400 : 600 } as CSSProperties;
   const s = (name: string) => ({ color: t[name] });
+  const ident = { color: extras?.identifier ?? t['--fg'] };
+  const quoted = { color: extras?.quoted ?? extras?.identifier ?? t['--fg'] };
+  const punct = { color: extras?.punct ?? t['--syn-operator'] };
   return (
     <pre className="tp-code-preview" aria-hidden="true" style={{ background: t['--bg-panel'], color: t['--fg'], borderColor: t['--border-subtle'] }}>
-      <span style={k}>SELECT</span> name, <span style={s('--syn-function')}>count</span><span style={s('--syn-operator')}>(*)</span>{'\n'}
-      <span style={k}>FROM</span> orders <span style={{ ...s('--syn-comment'), fontStyle: 'italic' }}>-- paid</span>{'\n'}
-      <span style={k}>WHERE</span> id <span style={s('--syn-operator')}>&gt;</span> <span style={s('--syn-number')}>10</span> <span style={k}>AND</span> s <span style={s('--syn-operator')}>=</span> <span style={s('--syn-string')}>{"'ok'"}</span>
+      <span style={k}>SELECT</span> <span style={ident}>name</span><span style={punct}>,</span> <span style={s('--syn-function')}>count</span><span style={punct}>(</span><span style={s('--syn-operator')}>*</span><span style={punct}>)</span>{'\n'}
+      <span style={k}>FROM</span> <span style={quoted}>&quot;orders&quot;</span> <span style={{ ...s('--syn-comment'), fontStyle: 'italic' }}>-- paid</span>{'\n'}
+      <span style={k}>WHERE</span> <span style={ident}>id</span> <span style={s('--syn-operator')}>&gt;</span> <span style={s('--syn-number')}>10</span> <span style={k}>AND</span> <span style={ident}>s</span> <span style={s('--syn-operator')}>=</span> <span style={s('--syn-string')}>{"'ok'"}</span>
     </pre>
   );
 }
 
-/** Code theme picker: "Match app theme" first, then every code theme. */
+interface CodeCard { id: string; name: string; desc: string; t: TokenMap; extras?: EditorExtras }
+
+/**
+ * Code theme picker: "Match app theme" first, then the code themes in sections (Rowlit, JetBrains, Popular; light
+ * ones first). The JetBrains and popular palettes are a lazily loaded chunk (theme/themesExtra.ts): the picker asks for
+ * it on mount and shows their previews as soon as it arrives.
+ */
 export function EditorThemePicker() {
   useThemeRevision();
+  useEffect(() => {
+    void loadExtraThemes();
+  }, []);
   const ui = useSettings((s) => s.settings.ui);
   const value = editorThemeIdFor(ui);
   const shown = getActiveTheme();
   const app = appThemeFor(ui, shown.base);
   const pick = (id: string) => useSettings.getState().update({ ui: { [EDITOR_THEME_KEY]: id } });
-  const cards = [
-    { id: MATCH_APP, name: 'Match app theme', desc: `Follows ${app.name}`, t: tokensOf(app.base, app.vars) },
-    ...EDITOR_THEMES.map((e) => ({ id: e.id, name: e.name, desc: e.base === 'dark' ? 'Dark' : 'Light', t: tokensOf(e.base, e.vars) })),
-  ];
+  const twin = editorThemeById(app.id);
+  const match: CodeCard = { id: MATCH_APP, name: 'Match app theme', desc: `Follows ${app.name}`, t: tokensOf(app.base, app.vars), extras: twin && twin.base === app.base ? twin.extras : undefined };
+  const card = (c: CodeCard) => (
+    <button key={c.id} type="button" role="radio" aria-checked={value === c.id} className={`tp-card tp-card-code${value === c.id ? ' selected' : ''}`} onClick={() => pick(c.id)}>
+      <CodePreview t={c.t} extras={c.extras} />
+      <span className="tp-card-text">
+        <span className="tp-card-name">{c.name}</span>
+        <span className="tp-card-desc">{c.desc}</span>
+      </span>
+      {value === c.id && (
+        <span className="tp-check" aria-hidden="true">
+          <Check size={12} strokeWidth={2.5} data-stroke="" />
+        </span>
+      )}
+    </button>
+  );
   return (
-    <div className="tp-grid tp-grid-code" role="radiogroup" aria-label="Code theme">
-      {cards.map((c) => (
-        <button key={c.id} type="button" role="radio" aria-checked={value === c.id} className={`tp-card tp-card-code${value === c.id ? ' selected' : ''}`} onClick={() => pick(c.id)}>
-          <CodePreview t={c.t} />
-          <span className="tp-card-text">
-            <span className="tp-card-name">{c.name}</span>
-            <span className="tp-card-desc">{c.desc}</span>
-          </span>
-          {value === c.id && (
-            <span className="tp-check" aria-hidden="true">
-              <Check size={12} strokeWidth={2.5} data-stroke="" />
-            </span>
-          )}
-        </button>
-      ))}
+    <div className="tp-groups" role="radiogroup" aria-label="Code theme">
+      <div className="tp-grid tp-grid-code">{card(match)}</div>
+      {EDITOR_GROUPS.map((g) => {
+        const themes = EDITOR_THEMES.filter((e) => e.group === g.id).sort((a, b) => Number(a.base === 'dark') - Number(b.base === 'dark'));
+        return (
+          <div key={g.id} className="tp-group" role="group" aria-label={g.title}>
+            <div className="tp-group-head">
+              <span className="tp-group-title">{g.title}</span>
+              <span className="tp-group-hint">{themes.length} themes</span>
+            </div>
+            <div className="tp-grid tp-grid-code tp-grid-grouped">
+              {themes.map((e) => card({ id: e.id, name: e.name, desc: e.description ?? (e.base === 'dark' ? 'Dark' : 'Light'), t: tokensOf(e.base, e.vars), extras: e.extras }))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 // Applying the chosen themes: settings.theme picks the mode, settings.ui the app theme of that mode and the code
 // theme; the app theme's tokens land on <html> as custom properties (and leave again), the code theme re-scopes the
 // tokens inside Monaco, the grid's revision hook fires, and the next start paints the cached theme first.
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, useSettings } from '../store/settings';
 import { getActiveTheme, resetActiveTheme, themeRevision, useThemeRevision } from './activeTheme';
@@ -83,5 +83,21 @@ describe('useEffectiveTheme', () => {
     applyBootTheme();
     expect(html().dataset.theme).toBe('dark');
     expect(html().style.getPropertyValue('--bg-app')).toBe(appThemeById('midnight')!.vars['--bg-app']);
+  });
+});
+
+describe('lazily loaded themes (JetBrains, popular)', () => {
+  it('keeps the cached colours while the palette loads, then applies it and re-applies the Monaco theme', async () => {
+    html().style.setProperty('--bg-panel', '#123456'); // what applyBootTheme put there from the cache
+    settings('dark', { [APP_THEME_DARK_KEY]: 'darcula', [EDITOR_THEME_KEY]: 'tokyo-night' });
+    expect(appThemeById('darcula')!.pending).toBe(true);
+    renderHook(() => useEffectiveTheme());
+    expect(html().style.getPropertyValue('--bg-panel')).toBe('#123456');
+    expect(monaco.apply).not.toHaveBeenCalled();
+    await waitFor(() => expect(appThemeById('darcula')!.pending).toBeFalsy());
+    await waitFor(() => expect(html().style.getPropertyValue('--bg-panel')).toBe('#2b2b2b'));
+    expect(getActiveTheme().app.vars['--bg-panel']).toBe('#2b2b2b');
+    expect(document.getElementById('dbstudio-editor-theme')?.textContent).toContain('--bg-panel: #1a1b26;');
+    expect(monaco.apply).toHaveBeenCalled();
   });
 });
