@@ -67,7 +67,6 @@ export const SNIPPET_DIALECTS = Object.keys(LOADERS) as Dialect[];
 
 const loaded = new Map<Dialect, SnippetDef[]>();
 const pending = new Map<Dialect, Promise<SnippetDef[]>>();
-const listeners = new Set<() => void>();
 
 /** The built-ins of a dialect once ensureBuiltins() resolved (empty before: the completer falls back to the dialect spec's own few). */
 export function loadedBuiltins(dialect: Dialect): readonly SnippetDef[] {
@@ -94,7 +93,6 @@ export function ensureBuiltins(dialect: Dialect): Promise<readonly SnippetDef[]>
         const all = [...own, ...shared];
         loaded.set(dialect, all);
         pending.delete(dialect);
-        for (const l of listeners) l();
         return all;
       },
       (e: unknown) => {
@@ -120,10 +118,4 @@ export async function loadAllBuiltins(): Promise<SnippetDef[]> {
     else byKey.set(key, { ...s, dialects: s.dialects ? [...s.dialects] : null });
   }
   return [...byKey.values()].map((s) => (s.dialects && s.dialects.length >= SNIPPET_DIALECTS.length ? { ...s, id: `builtin:${s.prefix}:all`, dialects: null } : s));
-}
-
-/** Called after a dialect's built-ins finished loading. */
-export function onBuiltinsLoaded(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => { listeners.delete(fn); };
 }

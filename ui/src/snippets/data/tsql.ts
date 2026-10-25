@@ -82,7 +82,7 @@ export const SNIPPETS: SnippetDef[] = [
   s('drpif', 'DROP … IF EXISTS', C.L, 'Drop objects without failing when missing (2016+).', 'DROP TABLE IF EXISTS ${1:dbo.MyTable};\nDROP VIEW IF EXISTS ${2:dbo.vw_Name};\nDROP PROCEDURE IF EXISTS ${3:dbo.Name};$0'),
 
   // ------------------------------------------------------------------ Programmability
-  s('ifx', 'IF EXISTS … BEGIN … END', C.P, 'Run a block when rows exist.', 'IF EXISTS (SELECT 1 FROM ${1:my_table} WHERE ${2:condition})\nBEGIN\n\t$0\nEND'),
+  s('ifx', 'IF EXISTS … BEGIN … END', C.P, 'Run a block when rows exist.', 'IF EXISTS (SELECT 1 FROM ${1:my_table} WHERE ${2:id = 1})\nBEGIN\n\t$0\nEND'),
   s('tryc', 'BEGIN TRY … CATCH', C.P, 'Error handling that re-throws.', 'BEGIN TRY\n\t$0\nEND TRY\nBEGIN CATCH\n\tTHROW;\nEND CATCH'),
   s('trytx', 'Transaction with TRY / CATCH', C.P, 'Commit on success, roll back and re-throw on error.', 'SET XACT_ABORT ON;\nBEGIN TRY\n\tBEGIN TRANSACTION;\n\t$0\n\tCOMMIT TRANSACTION;\nEND TRY\nBEGIN CATCH\n\tIF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;\n\tTHROW;\nEND CATCH'),
   s('tx', 'Transaction', C.P, 'BEGIN / COMMIT.', 'BEGIN TRANSACTION;\n\t$0\nCOMMIT TRANSACTION;'),

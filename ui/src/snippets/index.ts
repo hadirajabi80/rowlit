@@ -9,11 +9,11 @@ import type { Dialect, Snippet } from '../api/types';
 import type { CompletionItem, CursorContext, CompleteEnv, ExtraCompletionSource } from '../intel';
 import { matchScore, sortTextFor } from '../intel';
 import {
-  CATEGORY_LABELS, SNIPPET_CATEGORIES, builtinsReady, ensureBuiltins, loadAllBuiltins, loadedBuiltins, onBuiltinsLoaded,
+  CATEGORY_LABELS, SNIPPET_CATEGORIES, builtinsReady, ensureBuiltins, loadAllBuiltins, loadedBuiltins,
   type SnippetCategory, type SnippetDef,
 } from './builtins';
 
-export { CATEGORY_LABELS, SNIPPET_CATEGORIES, builtinsReady, ensureBuiltins, loadAllBuiltins, loadedBuiltins, onBuiltinsLoaded, type SnippetCategory, type SnippetDef };
+export { CATEGORY_LABELS, SNIPPET_CATEGORIES, builtinsReady, ensureBuiltins, loadAllBuiltins, loadedBuiltins, type SnippetCategory, type SnippetDef };
 
 /**
  * Built-ins for a dialect overlaid with the user's snippets (a user snippet replaces a built-in with its prefix). The

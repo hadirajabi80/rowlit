@@ -36,6 +36,12 @@ interface Server {
   isSyntax(e: { code: string; message: string }): boolean;
   /** Statement that stands in for the cursor position ($0) of a body, when that sits on a line of its own. */
   filler(body: string): string;
+  /** Snippets that belong to another engine of the same dialect (MySQL vs MariaDB) and are skipped here. */
+  skip?: string[];
+  /** Read-only snippets may fail for engine differences (a disabled performance_schema…): only syntax errors count. */
+  lenientRun?: boolean;
+  /** Runs all batches of a snippet in one session, joined by this text (session state such as PREPARE survives); default: one call per batch. */
+  joiner?: string;
 }
 
 function docker(container: string, args: string[], input?: string): string {
@@ -69,7 +75,7 @@ const ORA = (user: string) => ['sqlplus', '-S', '-L', user === 'system' ? 'syste
 const mysqlErrors = (out: string) => [...out.matchAll(/ERROR (\d+) \([^)]*\)[^:]*: ([^\n]*)/g)].map((m) => ({ code: m[1], message: m[2] }));
 // 1064 syntax, 1303/1235/1286/1193 unknown option or variable, 1305 unknown function
 const mysqlSyntax = (e: { code: string; message: string }) => ['1064', '1303', '1235', '1286', '1193'].includes(e.code) || (e.code === '1305' && /FUNCTION/.test(e.message));
-const mysqlFiller = () => 'SET @snip = 1;';
+const mysqlFiller = (body: string) => (/^EXPLAIN/i.test(body) ? 'SELECT 1;' : 'SET @snip = 1;');
 
 const SERVERS: Server[] = [
   {
@@ -77,7 +83,8 @@ const SERVERS: Server[] = [
     setup() { docker(this.container, SQLCMD('master'), `DROP DATABASE IF EXISTS ${SCRATCH};\nGO\nCREATE DATABASE ${SCRATCH};\nGO\n`); },
     teardown() { docker(this.container, SQLCMD('master'), `ALTER DATABASE ${SCRATCH} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;\nGO\nDROP DATABASE IF EXISTS ${SCRATCH};\nGO\n`); },
     exec(sql) { return dockerAsync(this.container, SQLCMD(SCRATCH), `${sql}\nGO\n`); },
-    errors: (out) => [...out.matchAll(/Msg (\d+), Level (\d+), State \d+[^\n]*\n([^\n]*)/g)].map((m) => ({ code: m[1], message: m[3] })),
+    // (an undeclared @variable in front of WITH also reports 319: not a syntax problem of the snippet)
+    errors: (out) => [...out.matchAll(/Msg (\d+), Level (\d+), State \d+[^\n]*\n([^\n]*)/g)].map((m) => ({ code: m[1], message: m[3] })).filter((e) => !(e.code === '319' && out.includes('Msg 137'))),
     // 102/103/105/111/125/156/170/174/195/319/321: syntax, unknown function, bad option
     isSyntax: (e) => ['102', '103', '105', '111', '125', '156', '170', '174', '195', '319', '321', '1018', '8120', '8121', '137', '4104'].includes(e.code) && !/Must declare the (scalar|table) variable/.test(e.message),
     filler: () => 'SELECT 1;',
@@ -89,21 +96,24 @@ const SERVERS: Server[] = [
     exec(sql) { return dockerAsync(this.container, ['psql', '-U', 'shop', '-d', SCRATCH, '-X', '-q'], sql.trimEnd().endsWith(';') ? sql : `${sql};`); },
     errors: (out) => [...out.matchAll(/ERROR:\s+([^\n]*)/g)].map((m) => ({ code: 'ERROR', message: m[1] })),
     isSyntax: (e) => /syntax error|unterminated|function [^\n]* does not exist|unrecognized|invalid (?:reference|value for parameter)|operator does not exist|query has no destination/i.test(e.message),
-    filler: (body) => (body.includes('$$') ? 'NULL;' : 'SELECT 1;'),
+    // (`$$` is written `\$\$` in a snippet body)
+    filler: (body) => (body.includes('\\$\\$') ? 'NULL;' : 'SELECT 1;'),
   },
   {
     name: 'MySQL 8.4', dialect: 'mysql', container: 'dbstudio-it-mysql-1',
     setup() { const m = (q: string) => docker(this.container, ['mysql', '-uroot', '-pshop', '-e', q]); m(`DROP DATABASE IF EXISTS ${SCRATCH}`); m(`CREATE DATABASE ${SCRATCH}`); },
     teardown() { docker(this.container, ['mysql', '-uroot', '-pshop', '-e', `DROP DATABASE IF EXISTS ${SCRATCH}`]); },
     exec(sql) { return dockerAsync(this.container, ['mysql', '-uroot', '-pshop', '--force', '-D', SCRATCH], `DELIMITER ~~\n${sql}\n~~\n`); },
-    errors: mysqlErrors, isSyntax: mysqlSyntax, filler: mysqlFiller,
+    errors: mysqlErrors, isSyntax: mysqlSyntax, filler: mysqlFiller, skip: ['seq'], joiner: '\n~~\n',
   },
   {
     name: 'MariaDB 11', dialect: 'mysql', container: 'dbstudio-it-mariadb-1',
     setup() { const m = (q: string) => docker(this.container, ['mariadb', '-uroot', '-pshop', '-e', q]); m(`DROP DATABASE IF EXISTS ${SCRATCH}`); m(`CREATE DATABASE ${SCRATCH}`); },
     teardown() { docker(this.container, ['mariadb', '-uroot', '-pshop', '-e', `DROP DATABASE IF EXISTS ${SCRATCH}`]); },
     exec(sql) { return dockerAsync(this.container, ['mariadb', '-uroot', '-pshop', '--force', '-D', SCRATCH], `DELIMITER ~~\n${sql}\n~~\n`); },
-    errors: mysqlErrors, isSyntax: mysqlSyntax, filler: mysqlFiller,
+    errors: mysqlErrors, isSyntax: mysqlSyntax, filler: mysqlFiller, lenientRun: true, joiner: '\n~~\n',
+    // MySQL-only: LATERAL, the sys schema, EXPLAIN ANALYZE
+    skip: ['apply', 'idxuse', 'block', 'locks', 'explain'],
   },
   {
     name: 'ClickHouse 24.8', dialect: 'clickhouse', container: 'dbstudio-it-clickhouse-1',
@@ -114,7 +124,7 @@ const SERVERS: Server[] = [
       c('DROP FUNCTION IF EXISTS fn_name'); // the udf snippet creates a (server-wide) SQL function
     },
     exec(sql) { return dockerAsync(this.container, ['clickhouse-client', '--user', 'shop', '--password', 'shop', '--database', SCRATCH, '--multiquery'], sql.trimEnd().endsWith(';') ? sql : `${sql};`); },
-    errors: (out) => [...out.matchAll(/Code: (\d+)\. DB::Exception: ([^\n]*)/g)].map((m) => ({ code: m[1], message: m[2] })),
+    errors: (out) => [...out.matchAll(/^Code: (\d+)\. DB::Exception: ([^\n]*)/gm)].map((m) => ({ code: m[1], message: m[2] })),
     // 62 SYNTAX_ERROR, 46 UNKNOWN_FUNCTION, 36/42/48 bad arguments; unknown tables/identifiers are expected
     isSyntax: (e) => ['62', '46', '42', '36', '48', '215', '232', '344'].includes(e.code) && !/Unknown (expression|table|identifier)/.test(e.message),
     filler: () => 'SELECT 1',
@@ -177,13 +187,16 @@ describe.skipIf(!LIVE)('built-in snippets against the Docker sample servers', ()
         const problems: string[] = [];
         const notes: string[] = [];
         let ran = 0, probed = 0;
-        await pool(list.filter((s) => !skipped(server.dialect, s.prefix)), async (s) => {
-          for (const sql of batchesOf(server.dialect, expand(server, s))) {
-            if (!sql.trim()) continue;
+        await pool(list.filter((s) => !skipped(server.dialect, s.prefix) && !server.skip?.includes(s.prefix)), async (s) => {
+          const all = batchesOf(server.dialect, expand(server, s)).filter((b) => b.trim());
+          for (const sql of server.joiner === undefined ? all : all.length ? [all.join(server.joiner)] : []) {
             const errs = server.errors(await server.exec(sql));
             if (s.run) {
               ran++;
-              for (const e of errs) problems.push(`RUN ${s.prefix}: ${e.code} ${e.message}`);
+              for (const e of errs) {
+                if (!server.lenientRun || server.isSyntax(e)) problems.push(`RUN ${s.prefix}: ${e.code} ${e.message}`);
+                else notes.push(`${s.prefix}: ${e.code} ${e.message}`);
+              }
             } else {
               probed++;
               for (const e of errs) {

@@ -39,7 +39,9 @@ export interface SnippetsSettingsProps {
 const PREVIEW_LINES = 3;
 
 function dialectText(d: Dialect[] | null): string {
-  if (!d || d.length === 0 || d.length >= DIALECTS.length) return 'All dialects';
+  // the shared snippets cover every SQL dialect (7 of the 8 without CQL)
+  if (!d || d.length === 0 || d.length >= DIALECTS.length - 1) return 'All dialects';
+  if (d.length > 3) return `${d.length} dialects`;
   return d.map((x) => DIALECTS.find((y) => y.id === x)?.label ?? x).join(', ');
 }
 

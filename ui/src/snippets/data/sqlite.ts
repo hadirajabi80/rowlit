@@ -33,12 +33,12 @@ export const SNIPPETS: SnippetDef[] = [
   // ------------------------------------------------------------------ DML
   s('insel', 'INSERT … SELECT', C.D, 'Insert the result of a query.', 'INSERT INTO ${1:target} (${2:columns})\nSELECT ${3:columns}\nFROM ${4:source}\nWHERE ${5:1 = 1};$0'),
   s('insmulti', 'INSERT multiple rows', C.D, 'Row constructor.', "INSERT INTO ${1:my_table} (${2:col1, col2})\nVALUES (${3:1, 'a'}),\n\t(${4:2, 'b'}),\n\t(${5:3, 'c'});$0"),
-  s('upsert', 'INSERT … ON CONFLICT DO UPDATE', C.D, 'Insert, or update the existing row with the same key.', 'INSERT INTO ${1:my_table} (${2:columns})\nVALUES (${3:values})\nON CONFLICT (${4:key_col}) DO UPDATE SET ${5:my_column} = excluded.${5:my_column};$0'),
-  s('insign', 'INSERT OR IGNORE', C.D, 'Skip rows that violate a constraint.', 'INSERT OR IGNORE INTO ${1:my_table} (${2:columns})\nVALUES (${3:values});$0'),
-  s('insrep', 'INSERT OR REPLACE', C.D, 'Replace the whole row on a key conflict (deletes the old row first).', 'INSERT OR REPLACE INTO ${1:my_table} (${2:columns})\nVALUES (${3:values});$0'),
-  s('ret', 'INSERT … RETURNING', C.D, 'Get the generated key back (3.35+).', 'INSERT INTO ${1:my_table} (${2:columns})\nVALUES (${3:values})\nRETURNING ${4:*};$0'),
+  s('upsert', 'INSERT … ON CONFLICT DO UPDATE', C.D, 'Insert, or update the existing row with the same key.', 'INSERT INTO ${1:my_table} (${2:columns})\nVALUES (${3:value1})\nON CONFLICT (${4:key_col}) DO UPDATE SET ${5:my_column} = excluded.${5:my_column};$0'),
+  s('insign', 'INSERT OR IGNORE', C.D, 'Skip rows that violate a constraint.', 'INSERT OR IGNORE INTO ${1:my_table} (${2:columns})\nVALUES (${3:value1});$0'),
+  s('insrep', 'INSERT OR REPLACE', C.D, 'Replace the whole row on a key conflict (deletes the old row first).', 'INSERT OR REPLACE INTO ${1:my_table} (${2:columns})\nVALUES (${3:value1});$0'),
+  s('ret', 'INSERT … RETURNING', C.D, 'Get the generated key back (3.35+).', 'INSERT INTO ${1:my_table} (${2:columns})\nVALUES (${3:value1})\nRETURNING ${4:*};$0'),
   s('updj', 'UPDATE … FROM (join)', C.D, 'Update from another table (3.33+).', 'UPDATE ${1:target}\nSET ${2:col} = s.${2:col}\nFROM ${3:source} AS s\nWHERE s.${4:id} = ${1:target}.${4:id};$0'),
-  s('delj', 'DELETE rows that match another table', C.D, 'DELETE with a subquery.', 'DELETE FROM ${1:target}\nWHERE ${2:id} IN (SELECT ${2:id} FROM ${3:source} WHERE ${4:condition});$0'),
+  s('delj', 'DELETE rows that match another table', C.D, 'DELETE with a subquery.', 'DELETE FROM ${1:target}\nWHERE ${2:id} IN (SELECT ${2:id} FROM ${3:source} WHERE ${4:id = 1});$0'),
   s('dedel', 'Delete duplicates (keep one)', C.D, 'Keep the row with the lowest rowid per key.', 'DELETE FROM ${1:my_table}\nWHERE rowid NOT IN (SELECT MIN(rowid) FROM ${1:my_table} GROUP BY ${2:key_col});$0'),
   s('trunc', 'Empty a table', C.D, 'SQLite has no TRUNCATE: DELETE without a WHERE is optimised.', 'DELETE FROM ${1:my_table};\n-- DELETE FROM sqlite_sequence WHERE name = \'${1:my_table}\';  -- restart AUTOINCREMENT$0'),
 
