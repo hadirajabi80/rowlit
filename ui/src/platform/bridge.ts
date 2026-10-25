@@ -27,6 +27,9 @@ export interface DbStudioBridge {
   readTextFile(path: string): Promise<string>;
   writeTextFile(path: string, content: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** Additive (optional, older preloads lack them): open an exported data file with its default app / show it in its folder. */
+  openPath?(path: string): Promise<void>;
+  revealInFolder?(path: string): Promise<void>;
   /** Subscribe to native menu commands. Returns an unsubscribe function. */
   onMenuCommand(cb: (cmd: MenuCommand) => void): () => void;
   /** Engine process died; the main process shows a restart dialog and calls this after a restart with fresh info. */

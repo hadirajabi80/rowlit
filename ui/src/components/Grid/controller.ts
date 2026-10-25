@@ -35,6 +35,20 @@ export interface GridController {
   exportAs?(format: import('./clientExport').FileFormat): void;
   /** Client-side export of the visible rows (filter, sort and committed edits applied; full values fetched). */
   exportVisible?(format: import('./clientExport').FileFormat, o: { baseName: string; note?: string | null }): Promise<void>;
+  /** "Export…": opens the export dialog (scope, format, options) for this grid (Data tab, results pane). */
+  openExport?(): void;
+  /**
+   * For the export dialog: rows the grid shows now (client filters and committed edits applied) and the size of the
+   * selection, or null while there is nothing but a single cell selected.
+   */
+  exportInfo?(): { visibleRows: number; selection: { rows: number; cols: number; kind: 'rows' | 'columns' | 'cells' } | null };
+  /** For the export dialog: the rows to write (every visible row, or the selected block) with the full-value lookups. */
+  exportBlock?(selectionOnly: boolean): {
+    columns: import('../../api/types').ColumnInfo[];
+    rows: import('../../api/types').CellValue[][];
+    locate: ((row: number, col: number) => import('../../lib/serialize').CellLocator | null) | null;
+    fetch: import('../../lib/serialize').CellFetcher | null;
+  };
   toggleValueViewer?(): void;
   clearSort?(): void;
   hasSort?(): boolean;

@@ -540,6 +540,20 @@ export function DataGrid(p: DataGridProps) {
     await exportRowsToFile(format, b.columns, b.rows, { baseName: o.baseName, dialect, locate: locateFor(b.refs, b.colIdx), note: o.note, fetch: p.fetchCell });
   };
 
+  /** For the export dialog: what the grid shows and how much of it is selected (a lone focused cell is no selection). */
+  const exportInfo = () => {
+    const r = selection.current?.range;
+    const sel = selection.rows.length > 0 ? { rows: selection.rows.length, cols: columns.length, kind: 'rows' as const }
+      : selection.columns.length > 0 ? { rows: rowCount, cols: selection.columns.length, kind: 'columns' as const }
+        : r && r.width * r.height > 1 ? { rows: r.height, cols: r.width, kind: 'cells' as const } : null;
+    return { visibleRows: rowCount, selection: sel };
+  };
+  /** For the export dialog: every visible row, or only the selected block, with the full-value lookups. */
+  const exportBlock = (selectionOnly: boolean) => {
+    const b = block(!selectionOnly);
+    return { columns: b.columns, rows: b.rows, locate: locateFor(b.refs, b.colIdx), fetch: p.fetchCell ?? defaultFetch };
+  };
+
   const copyAs = async (format: CopyFormat, all = false) => {
     const b = block(all);
     if (b.rows.length === 0) return;
@@ -808,8 +822,8 @@ export function DataGrid(p: DataGridProps) {
   };
 
   // ---------------------------------------------------------------- controller (commands)
-  const latest = useRef({ quickFilterAtCell, setNullOnSelection, insertRow, deleteSelectedRows, p, editable, buffer, copyAs, submit, editFocusedCell, shownSort, setSort, columns, exportVisible });
-  latest.current = { quickFilterAtCell, setNullOnSelection, insertRow, deleteSelectedRows, p, editable, buffer, copyAs, submit, editFocusedCell, shownSort, setSort, columns, exportVisible };
+  const latest = useRef({ quickFilterAtCell, setNullOnSelection, insertRow, deleteSelectedRows, p, editable, buffer, copyAs, submit, editFocusedCell, shownSort, setSort, columns, exportVisible, exportInfo, exportBlock });
+  latest.current = { quickFilterAtCell, setNullOnSelection, insertRow, deleteSelectedRows, p, editable, buffer, copyAs, submit, editFocusedCell, shownSort, setSort, columns, exportVisible, exportInfo, exportBlock };
   useEffect(() => {
     const L = () => latest.current;
     const base: GridController = {
@@ -839,6 +853,8 @@ export function DataGrid(p: DataGridProps) {
       hasSort: () => L().shownSort.length > 0,
       copyColumnNames: () => void copyText(L().columns.map((c) => c.name).join(', '), 'Copied column names'),
       exportVisible: (format, o) => L().exportVisible(format, o),
+      exportInfo: () => L().exportInfo(),
+      exportBlock: (selectionOnly) => L().exportBlock(selectionOnly),
       focus: () => {
         const host = hostRef.current;
         const canvas = host?.querySelector<HTMLElement>('canvas[data-testid="data-grid-canvas"]');

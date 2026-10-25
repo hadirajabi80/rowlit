@@ -130,6 +130,12 @@ export const GRID_COMMANDS: Command<never>[] = [
     ...(f.shortcut ? { shortcut: f.shortcut } : {}),
     when: (a?: unknown) => !!gridOf(a)?.copyAs, run: (a?: unknown) => gridOf(a)?.copyAs?.(f.format, !!gridArgs(a).all),
   })),
+  {
+    // The export dialog: loaded rows, selection, current filter & sort (all matches), all records; every format and option.
+    id: 'grid.export', title: 'Export data…', category: 'Grid', scope: 'grid', icon: 'Download',
+    keywords: 'export save file download csv excel xlsx json sql insert markdown tsv filter all rows',
+    when: (a?: unknown) => !!gridOf(a)?.openExport, run: (a?: unknown) => gridOf(a)?.openExport?.(),
+  },
   ...EXPORTS.map((e): Command<never> => ({
     id: e.id, title: e.title, category: 'Grid', scope: 'grid', icon: 'Download', keywords: `export save file download${e.format === 'xlsx' ? ' excel spreadsheet workbook' : ''}`,
     when: (a?: unknown) => !!gridOf(a)?.exportAs, run: (a?: unknown) => gridOf(a)?.exportAs?.(e.format),

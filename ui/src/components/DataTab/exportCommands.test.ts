@@ -21,6 +21,16 @@ describe('grid export commands', () => {
     }
   });
 
+  it('"Export data…" opens the export dialog of the grid and heads the Export menu', async () => {
+    expect(ids(GRID_EXPORT_MENU)[0]).toBe('grid.export');
+    registerGridCommands();
+    const openExport = vi.fn();
+    const off = registerGridController({ key: 'g-dlg', editable: false, openExport } as unknown as GridController);
+    await runCommand('grid.export', { gridKey: 'g-dlg' });
+    expect(openExport).toHaveBeenCalledOnce();
+    off();
+  });
+
   it("runs the grid's exportAs with the xlsx format", async () => {
     registerGridCommands();
     expect(getCommand('grid.export.xlsx')).toBeTruthy();

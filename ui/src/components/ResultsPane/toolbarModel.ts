@@ -12,6 +12,7 @@ export const GRID_COPY_AS_MENU: ContextEntry[] = [
 
 /** Toolbar "Export ▾" menu (results pane and Data tab); copy items act on all visible rows (args.all). */
 export const GRID_EXPORT_MENU: ContextEntry[] = [
+  c('grid.export'), 'separator',
   c('grid.export.csv'), c('grid.export.xlsx'), c('grid.export.json'), c('grid.export.sqlInsert'), 'separator',
   c('grid.copyAs.tsv', 'Copy all as TSV'), c('grid.copyAs.csv', 'Copy all as CSV'), c('grid.copyAs.json', 'Copy all as JSON'),
   c('grid.copyAs.markdown', 'Copy all as Markdown'), c('grid.copyAs.insert', 'Copy all as SQL INSERT'),

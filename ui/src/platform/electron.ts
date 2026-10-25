@@ -36,6 +36,8 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
     setTitle: (t) => b.setTitle(t),
     ...(typeof b.setZoomFactor === 'function' ? { setZoomFactor: (f: number) => b.setZoomFactor!(f) } : {}),
     // Additive bridge members: only present when this preload has them.
+    ...(typeof b.openPath === 'function' ? { openPath: (p: string) => b.openPath!(p) } : {}),
+    ...(typeof b.revealInFolder === 'function' ? { revealInFolder: (p: string) => b.revealInFolder!(p) } : {}),
     ...(typeof b.onUpdateStatus === 'function' ? { onUpdateStatus: (cb: Parameters<NonNullable<DbStudioBridge['onUpdateStatus']>>[0]) => b.onUpdateStatus!(cb) } : {}),
     ...(typeof b.getUpdateStatus === 'function' ? { getUpdateStatus: () => b.getUpdateStatus!() } : {}),
     ...(typeof b.checkForUpdates === 'function' ? { checkForUpdates: (o?: { manual?: boolean }) => b.checkForUpdates!(o) } : {}),

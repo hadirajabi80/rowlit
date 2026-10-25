@@ -3,6 +3,7 @@ import { api, errorMessage, isApiError } from '../api/client';
 import type { ExportFormat, ObjectRef, QueryParam, RunLabel, SessionInfo, SqlBatch, TxMode } from '../api/types';
 import { resolveParams } from '../components/ParamsDialog/ParamsDialog';
 import { findDestructive } from '../lib/classify';
+import { EXPORT_EXT, EXPORT_FILTER_NAME, EXPORT_MIME } from '../lib/exportFormats';
 import { serializeRows, type CopyFormat } from '../lib/serialize';
 import { computeView } from '../lib/filter';
 import { qualifiedName, selectTopSql } from '../lib/sql';
@@ -501,16 +502,13 @@ export async function copyText(text: string, what = 'Copied to clipboard'): Prom
   }
 }
 
-const EXT: Record<ExportFormat, string> = { csv: 'csv', json: 'json', 'sql-insert': 'sql', xlsx: 'xlsx' };
-const MIME: Record<ExportFormat, string> = { csv: 'text/csv', json: 'application/json', 'sql-insert': 'application/sql', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-const FILTER: Record<ExportFormat, string> = { csv: 'CSV', json: 'JSON', 'sql-insert': 'SQL', xlsx: 'Excel workbook' };
 
 /** Export a result set: engine-side via ResultStore when possible, else from the rows the UI already has. */
 export async function exportResultSet(exec: ExecutionState, rs: ResultSetState, format: ExportFormat): Promise<void> {
   const platform = getPlatform();
   const base = (rs.columns.find((c) => c.table)?.table ?? `result_${rs.id + 1}`).replace(/[^\p{L}\p{N}_.-]+/gu, '_');
-  const name = `${base}.${EXT[format]}`;
-  const filters = [{ name: FILTER[format], extensions: [EXT[format]] }];
+  const name = `${base}.${EXPORT_EXT[format]}`;
+  const filters = [{ name: EXPORT_FILTER_NAME[format], extensions: [EXPORT_EXT[format]] }];
   const nullAs = format === 'csv' ? '' : undefined;
   const view = useResults.getState().views[viewKey(exec.localId, rs.id)];
   const hasView = !!view && (view.quickFilter || view.filter || view.sort.length);
@@ -525,7 +523,7 @@ export async function exportResultSet(exec: ExecutionState, rs: ResultSetState, 
       }
       const r = await api.exportResultSet(exec.executionId, rs.id, { format, path: null, options: { header: true, nullAs } });
       if ('blob' in r) {
-        await platform.saveFile({ suggestedName: r.filename ?? name, content: r.blob, mime: MIME[format] });
+        await platform.saveFile({ suggestedName: r.filename ?? name, content: r.blob, mime: EXPORT_MIME[format] });
         toast('success', `Exported ${r.filename ?? name}`);
         return;
       }
@@ -536,7 +534,7 @@ export async function exportResultSet(exec: ExecutionState, rs: ResultSetState, 
   const content = format === 'xlsx'
     ? (await import('../components/Grid/clientExport').then((m) => m.rowsToXlsx(rs.columns, visibleRows(exec, rs), { sheetName: base }))).blob
     : serializeRows(format satisfies CopyFormat, rs.columns, visibleRows(exec, rs), { dialect: dialectOf(exec.connectionId), header: true });
-  const saved = await platform.saveFile({ suggestedName: name, content, mime: MIME[format], filters });
+  const saved = await platform.saveFile({ suggestedName: name, content, mime: EXPORT_MIME[format], filters });
   if (saved) toast('success', `Exported ${saved}`);
 }
 

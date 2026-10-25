@@ -34,6 +34,8 @@ const bridge: DbStudioBridge = {
   writeTextFile: (path: string, content: string) =>
     ipcRenderer.invoke(IPC.writeTextFile, path, content) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
+  revealInFolder: (path: string) => ipcRenderer.invoke(IPC.revealInFolder, path) as Promise<void>,
   onMenuCommand: (cb: (cmd: MenuCommand) => void) => subscribe<MenuCommand>(IPC.menuCommand, cb),
   onEngineRestarted: (cb: (info: EngineInfo) => void) => subscribe<EngineInfo>(IPC.engineRestarted, cb),
   loadWorkspace: () => ipcRenderer.invoke(IPC.loadWorkspace) as Promise<unknown | null>,

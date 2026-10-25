@@ -7,8 +7,16 @@ using DbStudio.Core.Services;
 
 namespace DbStudio.Core.Export;
 
-/// <summary>Export options (ui/src/api/types.ts ExportOptions).</summary>
-public sealed record ExportOptions(string? Delimiter = null, bool? Header = null, string? NullAs = null, string? TableName = null);
+/// <summary>
+/// Export options (ui/src/api/types.ts ExportOptions).
+/// </summary>
+/// <param name="Bom">Text formats: start the file with a UTF-8 byte order mark (Excel then reads Persian / Arabic CSV correctly).</param>
+/// <param name="DateFormat">Pattern for date / time columns of the text formats (<see cref="ExportDateFormat"/>); null/empty = as stored (ISO 8601).</param>
+/// <param name="SheetName">Excel sheet name (falls back to <paramref name="TableName"/>, then the table of the first column).</param>
+/// <param name="TargetDialect">SQL INSERT: dialect of the literals and identifier quoting (default: the session's dialect).</param>
+public sealed record ExportOptions(
+    string? Delimiter = null, bool? Header = null, string? NullAs = null, string? TableName = null,
+    bool? Bom = null, string? DateFormat = null, string? SheetName = null, Dialect? TargetDialect = null);
 
 /// <summary>Streams one result set (wire values, see <see cref="ValueConverter"/>) into a file format.</summary>
 public interface IResultWriter : IAsyncDisposable
@@ -20,32 +28,53 @@ public interface IResultWriter : IAsyncDisposable
 
 public static class ExportFormats
 {
-    public const string Csv = "csv", Json = "json", SqlInsert = "sql-insert", Xlsx = "xlsx";
+    public const string Csv = "csv", Tsv = "tsv", Json = "json", SqlInsert = "sql-insert", Markdown = "markdown", Xlsx = "xlsx";
 
-    public static bool IsKnown(string? format) => format is Csv or Json or SqlInsert or Xlsx;
+    public static bool IsKnown(string? format) => format is Csv or Tsv or Json or SqlInsert or Markdown or Xlsx;
 
     /// <summary>Binary formats (no charset in the Content-Type).</summary>
     public static bool IsBinary(string format) => format is Xlsx;
 
-    public static string Extension(string format) => format switch { Json => ".json", SqlInsert => ".sql", Xlsx => ".xlsx", _ => ".csv" };
+    public static string Extension(string format) => format switch
+    {
+        Json => ".json", SqlInsert => ".sql", Xlsx => ".xlsx", Tsv => ".tsv", Markdown => ".md", _ => ".csv",
+    };
 
     public static string ContentType(string format) => format switch
     {
         Json => "application/json",
         SqlInsert => "application/sql",
         Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Tsv => "text/tab-separated-values",
+        Markdown => "text/markdown",
         _ => "text/csv",
     };
 
-    /// <summary>Creates a writer over <paramref name="stream"/> (UTF-8 without BOM). The stream is left open.</summary>
+    /// <summary>Creates a writer over <paramref name="stream"/> (UTF-8, with a BOM only when asked for). The stream is left open.</summary>
     public static IResultWriter Create(string format, Stream stream, ExportOptions options, Dialect dialect) => format switch
     {
         Csv => new CsvResultWriter(stream, options),
-        Json => new JsonResultWriter(stream),
-        SqlInsert => new SqlInsertResultWriter(stream, options, dialect),
+        Tsv => new CsvResultWriter(stream, options with { Delimiter = "\t" }),
+        Json => new JsonResultWriter(stream, options),
+        SqlInsert => new SqlInsertResultWriter(stream, options, options.TargetDialect ?? dialect),
+        Markdown => new MarkdownResultWriter(stream, options),
         Xlsx => new XlsxResultWriter(stream, options),
-        _ => throw EngineException.Validation($"Unknown export format '{format}'. Expected csv, json, sql-insert or xlsx."),
+        _ => throw EngineException.Validation($"Unknown export format '{format}'. Expected csv, tsv, json, sql-insert, markdown or xlsx."),
     };
+
+    internal static UTF8Encoding Utf8(ExportOptions options) => new(options.Bom == true);
+
+    /// <summary>
+    /// Text of a cell with the user's date pattern applied to date / time columns; everything else as
+    /// <see cref="FullText"/>.
+    /// </summary>
+    internal static string? CellText(object? wire, ColumnInfo? column, ExportOptions options)
+    {
+        var text = FullText(wire);
+        if (text is not null && column is not null && !string.IsNullOrEmpty(options.DateFormat) && ExportDateFormat.AppliesTo(column.Kind))
+            return ExportDateFormat.Format(text, options.DateFormat);
+        return text;
+    }
 
     /// <summary>Text of a cell for text formats: full values (not the 32 KB wire preview), binary as 0x-hex.</summary>
     internal static string? FullText(object? wire) => wire switch
@@ -70,23 +99,27 @@ public sealed class CsvResultWriter : IResultWriter
     private readonly string _delimiter;
     private readonly bool _header;
     private readonly string _nullAs;
+    private readonly ExportOptions _options;
+    private ColumnInfo[] _columns = [];
 
     public CsvResultWriter(Stream stream, ExportOptions options)
     {
-        _writer = new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024, leaveOpen: true) { NewLine = "\r\n" };
+        _writer = new StreamWriter(stream, ExportFormats.Utf8(options), 64 * 1024, leaveOpen: true) { NewLine = "\r\n" };
         _delimiter = string.IsNullOrEmpty(options.Delimiter) ? "," : options.Delimiter == "\\t" ? "\t" : options.Delimiter;
         _header = options.Header ?? true;
         _nullAs = options.NullAs ?? "";
+        _options = options;
     }
 
     public async Task BeginAsync(ColumnInfo[] columns, CancellationToken ct)
     {
+        _columns = columns;
         if (!_header) return;
         await WriteRecordAsync(columns.Select(c => (string?)c.Name).ToArray(), nullAsIs: true).ConfigureAwait(false);
     }
 
     public Task WriteRowAsync(object?[] row, CancellationToken ct) =>
-        WriteRecordAsync(row.Select(ExportFormats.FullText).ToArray(), nullAsIs: false);
+        WriteRecordAsync(row.Select((v, i) => ExportFormats.CellText(v, i < _columns.Length ? _columns[i] : null, _options)).ToArray(), nullAsIs: false);
 
     private async Task WriteRecordAsync(string?[] fields, bool nullAsIs)
     {
@@ -111,18 +144,20 @@ public sealed class CsvResultWriter : IResultWriter
 }
 
 /// <summary>JSON array of objects keyed by column name (duplicates get _2, _3 ...). Exact numerics are written as JSON numbers.</summary>
-public sealed partial class JsonResultWriter(Stream stream) : IResultWriter
+public sealed partial class JsonResultWriter(Stream stream, ExportOptions? options = null) : IResultWriter
 {
     private readonly Utf8JsonWriter _json = new(stream, new JsonWriterOptions { Indented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    private readonly ExportOptions _options = options ?? new ExportOptions();
     private JsonEncodedText[] _names = [];
     private ColumnInfo[] _columns = [];
 
     [GeneratedRegex(@"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$")]
     private static partial Regex JsonNumber();
 
-    public Task BeginAsync(ColumnInfo[] columns, CancellationToken ct)
+    public async Task BeginAsync(ColumnInfo[] columns, CancellationToken ct)
     {
         _columns = columns;
+        if (_options.Bom == true) await stream.WriteAsync(ExportFormats.Utf8(_options).GetPreamble(), ct).ConfigureAwait(false);
         var seen = new Dictionary<string, int>(StringComparer.Ordinal);
         _names = columns.Select(c =>
         {
@@ -132,7 +167,6 @@ public sealed partial class JsonResultWriter(Stream stream) : IResultWriter
             return JsonEncodedText.Encode(name);
         }).ToArray();
         _json.WriteStartArray();
-        return Task.CompletedTask;
     }
 
     public async Task WriteRowAsync(object?[] row, CancellationToken ct)
@@ -162,7 +196,7 @@ public sealed partial class JsonResultWriter(Stream stream) : IResultWriter
             case string s when column.Kind is ColumnKinds.Decimal or ColumnKinds.Int && JsonNumber().IsMatch(s): _json.WriteRawValue(s); break;
             case BinaryValue bin: _json.WriteBase64StringValue(bin.Full); break;
             case TruncatedValue t: _json.WriteStringValue(t.Full); break;
-            default: _json.WriteStringValue(ExportFormats.FullText(v)); break;
+            default: _json.WriteStringValue(ExportFormats.CellText(v, column, _options)); break;
         }
     }
 
@@ -199,7 +233,7 @@ public sealed partial class SqlInsertResultWriter : IResultWriter
 
     public SqlInsertResultWriter(Stream stream, ExportOptions options, Dialect dialect)
     {
-        _writer = new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024, leaveOpen: true) { NewLine = "\r\n" };
+        _writer = new StreamWriter(stream, ExportFormats.Utf8(options), 64 * 1024, leaveOpen: true) { NewLine = "\r\n" };
         _options = options;
         _dialect = dialect;
     }

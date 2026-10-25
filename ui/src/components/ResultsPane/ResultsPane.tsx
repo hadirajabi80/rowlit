@@ -49,6 +49,7 @@ import type { QueryCodegenArgs } from '../CodegenPanel/commands';
 import { OverflowToolbar, type OverflowItem } from '../layout/OverflowToolbar';
 import type { ObjectTarget } from '../../commands/types';
 import { DockButton } from './DockMenu';
+import { openExportDialog } from '../Export/open';
 import { ExecutedQueryLine } from './ExecutedQueryLine';
 import { resultStatement, type ExecutedQuery } from './executedQuery';
 import { applyServerFilter, originalBatch, originatingSelect, previewServerSql, serverFilterAvailability } from './serverFilter';
@@ -321,6 +322,29 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
     if ((xid && !hasView && !edited) || !g?.exportVisible) return void exportResultSet(exec, rs, format);
     void g.exportVisible(format, { baseName: rs.columns.find((x) => x.table)?.table ?? `result_${rs.id + 1}` });
   };
+  /** "Export…": the loaded rows, the selection, or the query run again for every row. */
+  const openExport = () => {
+    const v = useResults.getState().views[key];
+    const hasView = !!v && (!!v.quickFilter || !!v.filter || v.sort.length > 0);
+    const c = useEdits.getState().get(key).committed;
+    const edited = c.appended.length > 0 || Object.keys(c.patched).length > 0 || Object.keys(c.hidden).length > 0;
+    const live = useSessions.getState().forTab(exec.tabId);
+    const sql = stmt && analyzeSelect(stmt, dialect).ok ? stmt : null;
+    void openExportDialog({
+      kind: 'query', connectionId: exec.connectionId, dialect, gridKey: key, columns,
+      baseName: rs.columns.find((x) => x.table)?.table ?? `result_${rs.id + 1}`,
+      sql, params: exec.params ?? [],
+      rerunDisabled: !sql ? 'Only a single SELECT statement can be run again; export the loaded rows instead.'
+        : !live ? 'The console\'s session is closed; run the query again first.' : null,
+      rowCount: rs.rowCount, truncated: rs.truncated, gridFiltered: hasView,
+      stored: xid && !hasView && !edited ? { executionId: xid, resultSetId: rs.id } : null,
+      withSession: async (run) => {
+        const s = useSessions.getState().forTab(exec.tabId);
+        if (!s) throw new Error('The console\'s session is closed; run the query again first.');
+        return run(s.sessionId);
+      },
+    });
+  };
   const gridArgs = { gridKey: key };
   const cv = (id: string) => commandView(id, gridArgs);
   const exportMenu = (el: HTMLElement) => showMenuBelow(el, commandMenuItems(GRID_EXPORT_MENU, { ...gridArgs, all: true }));
@@ -588,7 +612,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}
-                controllerExtras={{ applyServerFilter: avail.available ? serverApply : undefined, exportAs, toggleValueViewer: toggleViewer, ...(editCtx ? pendingActions.controller : {}) }}
+                controllerExtras={{ applyServerFilter: avail.available ? serverApply : undefined, exportAs, openExport, toggleValueViewer: toggleViewer, ...(editCtx ? pendingActions.controller : {}) }}
               />
               {noMatch && (
                 <div className="rs-empty-filter">

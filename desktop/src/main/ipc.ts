@@ -10,6 +10,7 @@ import {
   LIMITS,
   serializeWorkspace,
   validateExternalUrl,
+  validateExportedFilePath,
   validateFileContent,
   validateFilePath,
   validateMenuPosition,
@@ -109,6 +110,15 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.openExternal, async (_e, url) => {
     await shell.openExternal(validateExternalUrl(url));
+  });
+
+  // Exported files: opened with the default app (data file types only) or shown in their folder.
+  handle(IPC.openPath, async (_e, p) => {
+    const error = await shell.openPath(validateExportedFilePath(p));
+    if (error) throw new Error(error);
+  });
+  handle(IPC.revealInFolder, async (_e, p) => {
+    shell.showItemInFolder(validateFilePath(p));
   });
 
   handle(IPC.loadWorkspace, () => loadWorkspace());
