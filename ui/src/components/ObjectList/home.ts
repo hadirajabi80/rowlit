@@ -21,6 +21,7 @@ import { showObjectsTab, useSettings } from '../../store/settings';
 import { isPinnedTab, useTabs, type ViewTab } from '../../store/tabs';
 import { useExplorer } from '../Explorer/explorerStore';
 import { DEFAULT_SORT, groupOf, QUERIES_GROUP, type GroupFilter, type SortSpec } from './model';
+import { detailsOf, type DetailsState } from './detailsModel';
 import type { ObjectsLayout } from './open';
 
 export const OBJECTS_HOME_VIEW = 'objectsHome';
@@ -54,6 +55,8 @@ export interface ObjectsHomeState {
   groups: Record<string, GroupFilter>;
   layout: ObjectsLayout;
   sort: SortSpec;
+  /** The details side panel (dependencies of the selected object): open / closed and width, shared by every scope. */
+  details?: DetailsState;
 }
 
 export const EMPTY_HOME: ObjectsHomeState = { target: null, highlight: null, groups: {}, layout: 'list', sort: DEFAULT_SORT };
@@ -75,6 +78,7 @@ export function homeStateOf(tab: Pick<ViewTab, 'state'> | undefined | null): Obj
     groups: s.groups && typeof s.groups === 'object' ? s.groups : {},
     layout: s.layout === 'grid' || s.layout === 'compact' ? s.layout : 'list',
     sort: s.sort && typeof s.sort === 'object' && typeof s.sort.key === 'string' ? s.sort : DEFAULT_SORT,
+    ...(s.details && typeof s.details === 'object' ? { details: detailsOf(s.details) } : {}),
   };
 }
 
@@ -161,12 +165,13 @@ export function showInObjectsHome(target: CommandTarget): string | null {
 }
 
 /** The list's type filter (remembered for the scope), layout and sort (shared by every scope). */
-export function setHomeListOptions(scopeKey: string, p: { group?: GroupFilter; layout?: ObjectsLayout; sort?: SortSpec }): void {
+export function setHomeListOptions(scopeKey: string, p: { group?: GroupFilter; layout?: ObjectsLayout; sort?: SortSpec; details?: DetailsState }): void {
   patchHome((s) => ({
     ...s,
     ...(p.group ? { groups: withGroup(s.groups, scopeKey, p.group) } : {}),
     ...(p.layout ? { layout: p.layout } : {}),
     ...(p.sort ? { sort: p.sort } : {}),
+    ...(p.details ? { details: p.details } : {}),
   }));
 }
 

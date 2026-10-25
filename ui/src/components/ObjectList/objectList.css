@@ -433,3 +433,77 @@
 .ol-body .empty-state {
   margin-top: 8vh;
 }
+
+/* ---------- details side panel: layout (the panel itself is objectDetails.css, a lazy chunk) ---------- */
+.ol-split {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.ol-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.ol-details-toggle[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ol-details-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* resize handle: a focusable separator (arrows resize, Home / End jump to the limits, double-click resets) */
+.ol-details-split {
+  flex-shrink: 0;
+  background: var(--border);
+  position: relative;
+  z-index: 5;
+  width: 1px;
+  cursor: col-resize;
+  outline: none;
+}
+.ol-details-split::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.ol-details-split:hover,
+.ol-details-split:focus-visible,
+body.resizing-col .ol-details-split {
+  background: var(--accent);
+}
+.ol-details-split:focus-visible::after {
+  box-shadow: 0 0 0 1px var(--focus-ring);
+}
+.ol-details-slot {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+/* narrow tab: the panel floats over the list instead of squeezing it */
+.ol-details-slot.floating {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - 40px);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-popup);
+}
+.ol-details-skel {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
