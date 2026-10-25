@@ -16,7 +16,8 @@ export type SymbolInfo =
   | { kind: 'temp'; t: TempTableDef; columns: ColumnDef[]; range: [number, number] }
   | { kind: 'function'; f: FunctionDef; range: [number, number] }
   | { kind: 'member'; pkg: ObjectEntry; members: CatalogPackageMember[]; range: [number, number] }
-  | { kind: 'schema'; name: string; count: number; range: [number, number] }
+  | { kind: 'schema'; name: string; count: number; range: [number, number]; database?: string }
+  | { kind: 'database'; name: string; current: boolean; range: [number, number] }
   | { kind: 'operator'; op: OperatorDef; range: [number, number] }
   | { kind: 'sequenceOp'; seq: ObjectEntry; op: string; range: [number, number] };
 
@@ -102,6 +103,9 @@ export function symbolAt(model: StatementModel, offset: number, binder: Binder, 
       if (obj) return { kind: 'object', entry: obj.type === 'synonym' ? index.followSynonym(obj) ?? obj : obj, synonym: obj.type === 'synonym' ? obj : null, range };
       const sch = index.schema(me.text, me.quoted);
       if (sch) return { kind: 'schema', name: sch.name, count: sch.objects.length, range };
+      // T-SQL `Other.dbo.Orders`: the database name
+      const db = hi < parts.length - 1 ? index.resolveDatabase(me.text, me.quoted) : null;
+      if (db) return { kind: 'database', name: db.name, current: db.home, range };
       const bi = index.builtin(me);
       if (bi) return { kind: 'object', entry: bi, synonym: null, range };
       return null;
@@ -134,8 +138,8 @@ export function symbolAt(model: StatementModel, offset: number, binder: Binder, 
     case 'sequence':
       return { kind: 'sequenceOp', seq: target.entry, op: me.text.toUpperCase(), range };
     case 'database': {
-      const sch = index.schema(me.text, me.quoted);
-      return sch ? { kind: 'schema', name: sch.name, count: sch.objects.length, range } : null;
+      const sch = target.db.index?.schema(me.text, me.quoted);
+      return sch ? { kind: 'schema', name: sch.name, count: sch.objects.length, range, ...(target.db.home ? {} : { database: target.db.name }) } : null;
     }
   }
   return null;

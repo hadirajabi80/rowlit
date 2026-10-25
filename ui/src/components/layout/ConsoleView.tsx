@@ -7,7 +7,7 @@ import { interceptRoutineRun } from '../ExecuteRoutine/intercept';
 import { registerEditor } from '../../app/editors';
 import { SqlEditor } from '../../editor/SqlEditor';
 import type { SqlEditorHandle } from '../../editor/SqlEditor.types';
-import { useCatalog, useSnapshot } from '../../store/catalog';
+import { requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
 import { getConnection, useConnection, useDialect } from '../../store/connections';
 import { useTabExecution } from '../../store/results';
 import { useSettings } from '../../store/settings';
@@ -68,6 +68,8 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
   const dialect = useDialect(tab.connectionId);
   const catDb = useCatalog(() => catalogDatabase(tab.connectionId, tab.database));
   const snapshot = useSnapshot(tab.connectionId, catDb);
+  // SQL Server: the server's other databases, as far as they are loaded (`Other.dbo.Orders`, `USE Other`)
+  const foreignCatalogs = useForeignCatalogs(tab.connectionId, catDb, dialect);
   const editorSettings = useSettings((s) => s.settings.editor);
   const usageAll = useSettings((s) => s.settings.ui?.completionUsage as Record<string, Record<string, number>> | undefined);
   const usage = (tab.connectionId && usageAll?.[tab.connectionId]) || EMPTY_USAGE;
@@ -143,6 +145,10 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
     },
     [connectionId, catDb],
   );
+  const requestDatabase = useCallback(
+    (database: string, schema?: string) => { if (connectionId) requestForeignCatalog(connectionId, database, schema); },
+    [connectionId],
+  );
   const onUsageChange = useCallback(
     (u: Record<string, number>) => {
       if (!connectionId) return;
@@ -202,6 +208,8 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
             onOpenObject={onOpenObject}
             requestServerDiagnostics={requestServerDiagnostics}
             requestSchema={requestSchema}
+            foreignCatalogs={foreignCatalogs}
+            requestDatabase={requestDatabase}
             externalDiagnostics={externalDiagnostics}
             theme={theme}
             settings={editorSettings}

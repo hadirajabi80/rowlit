@@ -4,6 +4,7 @@
 import type {
   CatalogSnapshot, CatalogObject, Dialect, ExplainMode, FormatOptions, ObjectRef, RunLabel, ServerDiagnostic, Settings, Snippet, SqlBatch,
 } from '../api/types';
+import type { ForeignCatalogInput } from '../intel';
 
 export interface SqlEditorProps {
   /** Stable id of the editor tab; used as the model URI. */
@@ -31,6 +32,10 @@ export interface SqlEditorProps {
   resolvePublicSynonym?: (name: string) => Promise<CatalogObject | null>;
   /** Called when completion needs a schema that is not loaded yet (user typed `schema.`). */
   requestSchema?: (schema: string) => void;
+  /** T-SQL: the catalogs of the server's other databases loaded so far (`Other.dbo.Orders`, `USE Other`). */
+  foreignCatalogs?: readonly ForeignCatalogInput[];
+  /** T-SQL: completion needs another database's schema list (no schema) or one of its schemas. Load it in the background. */
+  requestDatabase?: (database: string, schema?: string) => void;
   /** Extra markers pushed by the app (e.g. errors from the last execution, Oracle ALL_ERRORS). Lines are document lines. */
   externalDiagnostics?: ServerDiagnostic[];
   readOnly?: boolean;

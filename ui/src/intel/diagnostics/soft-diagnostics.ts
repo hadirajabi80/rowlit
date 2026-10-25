@@ -3,7 +3,8 @@ import type { DiagnosticSeverity, Token } from '../types';
 import type { DialectSpec } from '../dialect/spec';
 import type { CatalogIndex } from '../catalog/index';
 import type { Binder } from '../catalog/binder';
-import type { Scope, StatementModel, TableRef } from '../parse/statement-model';
+import type { NamePart, Scope, StatementModel, TableRef } from '../parse/statement-model';
+import { namePart } from '../parse/partial-parser';
 import type { SplitStatement } from '../split/splitter';
 
 export interface RawDiagnostic { start: number; end: number; severity: DiagnosticSeverity; code: string; message: string }
@@ -46,7 +47,9 @@ function schemaLoaded(index: CatalogIndex, ref: TableRef): boolean {
     return !!index.database && index.keyOf(ref.parts[0].text, ref.parts[0].quoted) === index.keyOfCatalog(index.database) && !!index.schema(ref.parts[1].text, ref.parts[1].quoted);
   }
   if (ref.parts.length === 3 && index.spec.id === 'tsql') {
-    return !!index.database && ref.parts[0].text.toUpperCase() === index.database.toUpperCase() && (ref.parts[1].text === '' ? !!index.defaultSchemaEntry() : !!index.schema(ref.parts[1].text, ref.parts[1].quoted));
+    // `Db.schema.object`: this database or another one of the server, once its catalog (and that schema) has loaded
+    const ix = index.indexOfDatabase(ref.parts[0].text, ref.parts[0].quoted);
+    return !!ix && (ref.parts[1].text === '' ? !!ix.defaultSchemaEntry() : !!ix.schema(ref.parts[1].text, ref.parts[1].quoted));
   }
   return false;
 }
@@ -65,6 +68,21 @@ export function statementDiagnostics(st: SplitStatement, model: StatementModel, 
     out.push({ start: last.start, end: last.end, severity: 'info', code: 'missing-slash', message: "PL/SQL block is not terminated by a '/' line" });
   }
   const catalogReady = !!index.snapshot;
+  if (spec.id === 'tsql' && catalogReady && index.databases.length) {
+    // `USE Nope` / `Nope.dbo.T`: a database the server does not list (soft: it might be created or renamed meanwhile)
+    const unknown = (p: NamePart) => p.text !== '' && !index.resolveDatabase(p.text, p.quoted);
+    const useTok = st.kind === 'use' && first.upper === 'USE' ? model.tokens[1] : null;
+    if (useTok && (useTok.kind === 'ident' || useTok.kind === 'quotedIdent' || useTok.kind === 'keyword')) {
+      const p = namePart(useTok);
+      if (unknown(p)) out.push({ start: useTok.start, end: useTok.end, severity: 'warning', code: 'unknown-database', message: `Unknown database '${p.text}'` });
+    }
+    for (const s of model.scopes) {
+      for (const ref of s.targetTable ? [...s.sources, s.targetTable] : s.sources) {
+        if (ref.kind !== 'table' || ref.remote || ref.parts.length !== 3) continue;
+        if (unknown(ref.parts[0])) out.push({ start: ref.parts[0].range[0], end: ref.parts[0].range[1], severity: 'warning', code: 'unknown-database', message: `Unknown database '${ref.parts[0].text}'` });
+      }
+    }
+  }
   for (const s of model.scopes) {
     // duplicate aliases
     const seen = new Map<string, TableRef>();

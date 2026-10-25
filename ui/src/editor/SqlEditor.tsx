@@ -223,6 +223,10 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     intel.setDocument(uriRef.current, model.getValue());
     if (p.resolvePublicSynonym) intel.setPublicSynonymResolver((n) => propsRef.current.resolvePublicSynonym?.(n) ?? Promise.resolve(null));
     intel.setSchemaRequester((s) => propsRef.current.requestSchema?.(s));
+    if (dialect === 'tsql') {
+      intel.setDatabaseRequester((db, schema) => propsRef.current.requestDatabase?.(db, schema));
+      if (p.foreignCatalogs) intel.setForeignCatalogs(p.foreignCatalogs);
+    }
     intel.setExtraCompletionSources([snippetSource(dialect, () => propsRef.current.snippets ?? getEditorConfig().snippets), postfixSource]);
 
     const ed = monaco.editor.create(host.current, {
@@ -392,6 +396,21 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       refreshSuggest(ed);
     }
   }, [props.catalog]);
+
+  // Other databases of the server (T-SQL `Other.dbo.T`): their catalogs arrive one by one while the user types. Runs after
+  // the catalog effect above, which drops them when the console's database or connection changes.
+  useEffect(() => {
+    const intel = intelRef.current;
+    if (!intel || props.dialect !== 'tsql') return;
+    intel.setForeignCatalogs(props.foreignCatalogs ?? []);
+    refreshSoft();
+    // "Loading Other…" is on screen: show what arrived
+    const b = bindingRef.current, ed = edRef.current;
+    if (b?.suggestLoading && ed) {
+      b.suggestLoading = false;
+      refreshSuggest(ed);
+    }
+  }, [props.foreignCatalogs, props.catalog, props.dialect]);
 
   useEffect(() => {
     monaco.editor.setTheme(props.theme === 'dark' ? THEME_IDS.dark : THEME_IDS.light);

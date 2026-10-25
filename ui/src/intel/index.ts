@@ -8,9 +8,9 @@ import { getSpec, type DialectSpec } from './dialect';
 import { lineStarts, positionAt, relex, tokenize, type TextChange } from './lexer/lexer';
 import { splitStatements, type SplitResult, type SplitStatement } from './split/splitter';
 import { classifyTokens, isDestructive } from './split/classify';
-import { buildModel } from './parse/partial-parser';
-import type { StatementModel, TempTableDef, VarDef } from './parse/statement-model';
-import { CatalogIndex } from './catalog/index';
+import { buildModel, namePart } from './parse/partial-parser';
+import type { NamePart, StatementModel, TempTableDef, VarDef } from './parse/statement-model';
+import { CatalogIndex, type ForeignCatalogInput } from './catalog/index';
 import { Binder, type DocSymbols } from './catalog/binder';
 import { detectContext, findCall } from './context/context';
 import { complete as runComplete, type ExtraCompletionSource } from './complete/completer';
@@ -29,6 +29,7 @@ export { isDestructive } from './split/classify';
 export { needsQuoting, quoteIdent } from './complete/format';
 export { matchScore, sortTextFor } from './complete/ranker';
 export type { ExtraCompletionSource, CompleteEnv } from './complete/completer';
+export type { ForeignCatalogInput, ForeignStatus } from './catalog/index';
 export type { CursorContext } from './context/context';
 
 export interface Intel {
@@ -59,6 +60,13 @@ export interface Intel {
   setPublicSynonymResolver(fn: ((name: string) => Promise<CatalogObject | null>) | null): void;
   /** Called when completion needs a schema that is not loaded. */
   setSchemaRequester(fn: ((schema: string) => void) | null): void;
+  /**
+   * T-SQL: the catalogs of the server's OTHER databases as the host has loaded them so far (`Other.dbo.Orders`). Cheap to
+   * call again with the same objects.
+   */
+  setForeignCatalogs(inputs: readonly ForeignCatalogInput[]): void;
+  /** Called when another database's schema list (no schema) or one of its schemas is needed; each is asked for once. */
+  setDatabaseRequester(fn: ((database: string, schema?: string) => void) | null): void;
   /** Catalog-derived state changed asynchronously (e.g. a PUBLIC synonym resolved). */
   onDidChange(fn: () => void): () => void;
   /** Extra completion sources (WP-H snippets / postfix templates), consulted on every completion. */
@@ -101,6 +109,7 @@ class IntelImpl implements Intel {
   private readonly usage = new UsageStore();
   private readonly listeners = new Set<() => void>();
   private extraSources: readonly ExtraCompletionSource[] = [];
+  private readonly useCache = new WeakMap<SplitResult, { end: number; db: NamePart }[]>();
 
   constructor(dialect: Dialect, opts?: Partial<IntelOptions>) {
     this.dialect = dialect;
@@ -129,6 +138,10 @@ class IntelImpl implements Intel {
   getUsage(): Record<string, number> { return this.usage.toRecord(); }
   setPublicSynonymResolver(fn: ((name: string) => Promise<CatalogObject | null>) | null): void { this.index.publicResolver = fn; }
   setSchemaRequester(fn: ((schema: string) => void) | null): void { this.index.schemaRequester = fn; }
+  setDatabaseRequester(fn: ((database: string, schema?: string) => void) | null): void { this.index.databaseRequester = fn; }
+  setForeignCatalogs(inputs: readonly ForeignCatalogInput[]): void {
+    if (this.index.setForeignCatalogs(inputs)) for (const d of this.docs.values()) d.diags = null;
+  }
   onDidChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -317,8 +330,38 @@ class IntelImpl implements Intel {
     return false;
   }
 
-  private binderFor(d: Doc, st: SplitStatement | null): Binder {
-    return new Binder(this.index, st ? this.symbols(d, st) : undefined);
+  /** `USE db` statements of a split, in order (T-SQL; they apply across GO batches). */
+  private usesOf(split: SplitResult, d: Doc): { end: number; db: NamePart }[] {
+    let uses = this.useCache.get(split);
+    if (uses) return uses;
+    uses = [];
+    for (const st of split.statements) {
+      if (st.kind !== 'use') continue;
+      for (let i = st.tokStart + 1; i < st.tokEnd; i++) {
+        const t = d.tokens[i];
+        if (t.kind === 'ws' || t.kind === 'comment') continue;
+        if (t.kind === 'ident' || t.kind === 'quotedIdent' || t.kind === 'keyword') uses.push({ end: st.end, db: namePart(t) });
+        break;
+      }
+    }
+    this.useCache.set(split, uses);
+    return uses;
+  }
+
+  /**
+   * The catalog statements run against at `offset`: after `USE Other` that database's (statement-level context, so the
+   * rest of the script completes against Other), else the console's own.
+   */
+  private indexAt(d: Doc, offset: number): CatalogIndex {
+    if (this.dialect !== 'tsql') return this.index;
+    const uses = this.usesOf(this.splitOf(d), d);
+    let use: { end: number; db: NamePart } | null = null;
+    for (const u of uses) if (u.end < offset) use = u;
+    return use ? this.index.indexForUse(use.db.text, use.db.quoted) : this.index;
+  }
+
+  private binderFor(d: Doc, st: SplitStatement | null, index: CatalogIndex = this.index): Binder {
+    return new Binder(index, st ? this.symbols(d, st) : undefined);
   }
 
   private inCommentOrString(d: Doc, offset: number, afterNumber = false): boolean {
@@ -354,9 +397,10 @@ class IntelImpl implements Intel {
     if (this.inCommentOrString(d, offset, true)) return empty;
     const st = this.featureStatement(d, offset);
     const model = st ? this.model(d, st) : buildModel([], this.spec, offset, offset);
-    const binder = this.binderFor(d, st);
+    const index = this.indexAt(d, offset);
+    const binder = this.binderFor(d, st, index);
     const ctx = detectContext(model, offset, this.spec, d.text);
-    return runComplete(ctx, { spec: this.spec, index: this.index, binder, opts: this.opts, usage: this.usage, text: d.text, statementEnd: st?.end ?? offset, extraSources: this.spec.complete ? [this.spec.complete, ...this.extraSources] : this.extraSources });
+    return runComplete(ctx, { spec: this.spec, index, binder, opts: this.opts, usage: this.usage, text: d.text, statementEnd: st?.end ?? offset, extraSources: this.spec.complete ? [this.spec.complete, ...this.extraSources] : this.extraSources });
   }
 
   resolveItem(item: CompletionItem): CompletionItem { return item; }
@@ -370,8 +414,9 @@ class IntelImpl implements Intel {
     const st = this.featureStatement(d, offset);
     if (!st) return null;
     const m = this.model(d, st);
-    const sym = symbolAt(m, offset, this.binderFor(d, st), this.spec, this.index);
-    return sym ? hoverFor(sym, this.spec, this.index) : null;
+    const index = this.indexAt(d, st.start);
+    const sym = symbolAt(m, offset, this.binderFor(d, st, index), this.spec, index);
+    return sym ? hoverFor(sym, this.spec, index) : null;
   }
 
   definition(uri: string, offset: number): DefinitionResult | null {
@@ -379,8 +424,9 @@ class IntelImpl implements Intel {
     const st = this.featureStatement(d, offset);
     if (!st) return null;
     const m = this.model(d, st);
-    const sym = symbolAt(m, offset, this.binderFor(d, st), this.spec, this.index);
-    return sym ? definitionFor(sym, this.index) : null;
+    const index = this.indexAt(d, st.start);
+    const sym = symbolAt(m, offset, this.binderFor(d, st, index), this.spec, index);
+    return sym ? definitionFor(sym, index) : null;
   }
 
   signatureHelp(uri: string, offset: number): SignatureHelpInfo | null {
@@ -396,7 +442,7 @@ class IntelImpl implements Intel {
       call = findCall(m.tokens, (k < 0 ? m.tokens.length : k) - 1, offset, this.spec);
     }
     if (!call) return null;
-    return runSignature(call, this.spec, this.index);
+    return runSignature(call, this.spec, this.indexAt(d, st.start));
   }
 
   softDiagnostics(uri: string): Diagnostic[] {
@@ -406,7 +452,8 @@ class IntelImpl implements Intel {
     const raw: RawDiagnostic[] = lexicalDiagnostics(d.tokens, split.statements);
     for (const st of split.statements) {
       const m = this.model(d, st);
-      raw.push(...statementDiagnostics(st, m, this.binderFor(d, st), this.index, this.spec));
+      const index = this.indexAt(d, st.start);
+      raw.push(...statementDiagnostics(st, m, this.binderFor(d, st, index), index, this.spec));
     }
     d.diags = raw.map((r) => {
       const a = this.pos(d, r.start), b = this.pos(d, Math.max(r.end, r.start));

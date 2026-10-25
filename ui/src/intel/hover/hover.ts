@@ -32,7 +32,13 @@ function columnTable(cols: ColumnDef[], entry: ObjectEntry | null): string {
   return '| column | type | |\n|---|---|---|\n' + rows.join('\n') + more;
 }
 
-export function objectMarkdown(entry: ObjectEntry, spec: DialectSpec, synonym: ObjectEntry | null): string {
+/** `Other.dbo.Orders` for an object of another database of the server, else `dbo.Orders`. */
+export function shownName(entry: ObjectEntry, homeDb: string | null): string {
+  return entry.database && homeDb && entry.database.toUpperCase() !== homeDb.toUpperCase() ? `${entry.database}.${entry.qualifiedName}` : entry.qualifiedName;
+}
+
+export function objectMarkdown(entry: ObjectEntry, spec: DialectSpec, synonym: ObjectEntry | null, homeDb: string | null = null): string {
+  const qn = shownName(entry, homeDb);
   if (spec.id === 'pgsql' && entry.type === 'type') {
     // enum labels / domain base type / composite attributes
     const d = typeDetail(entry);
@@ -42,8 +48,8 @@ export function objectMarkdown(entry: ObjectEntry, spec: DialectSpec, synonym: O
     return parts.join('\n\n');
   }
   const head = synonym
-    ? `**synonym** \`${synonym.qualifiedName}\` → \`${entry.qualifiedName}\` (${objectTypeLabel(entry.type)})`
-    : `\`${entry.qualifiedName}\` (${objectTypeLabel(entry.type)})`;
+    ? `**synonym** \`${synonym.qualifiedName}\` → \`${qn}\` (${objectTypeLabel(entry.type)})`
+    : `\`${qn}\` (${objectTypeLabel(entry.type)})`;
   const parts = [head];
   if (entry.obj.cm) parts.push(entry.obj.cm);
   if (entry.type === 'synonym' && entry.obj.target) parts.push(`→ ${entry.obj.target.s ? entry.obj.target.s + '.' : ''}${entry.obj.target.n}`);
@@ -64,11 +70,11 @@ export function hoverFor(sym: SymbolInfo, spec: DialectSpec, index: CatalogIndex
     case 'alias': {
       const src = sym.src;
       const cols = src.columns();
-      const what = src.entry ? `\`${src.entry.qualifiedName}\` (${objectTypeLabel(src.entry.type)})` : src.cte ? `cte \`${src.cte.name}\`` : `\`${src.display}\``;
+      const what = src.entry ? `\`${shownName(src.entry, index.database)}\` (${objectTypeLabel(src.entry.type)})` : src.cte ? `cte \`${src.cte.name}\`` : `\`${src.display}\``;
       const head = `alias \`${src.label}\` → ${what}, ${cols.length} column${cols.length === 1 ? '' : 's'}`;
       return { range: sym.range, markdown: head + '\n\n' + columnTable(cols, src.entry) };
     }
-    case 'object': return { range: sym.range, markdown: objectMarkdown(sym.entry, spec, sym.synonym) };
+    case 'object': return { range: sym.range, markdown: objectMarkdown(sym.entry, spec, sym.synonym, index.database) };
     case 'column': {
       const c = sym.col;
       const badges: string[] = [];
@@ -94,9 +100,10 @@ export function hoverFor(sym: SymbolInfo, spec: DialectSpec, index: CatalogIndex
       return { range: sym.range, markdown: '```sql\n' + lines.join('\n') + '\n```' };
     }
     case 'schema': {
-      const sp = index.searchPathIndex(sym.name);
-      return { range: sym.range, markdown: `schema \`${sym.name}\` (${sym.count} objects)${sp ? `, on search_path (#${sp})` : ''}` };
+      const sp = sym.database ? 0 : index.searchPathIndex(sym.name);
+      return { range: sym.range, markdown: `schema \`${sym.database ? sym.database + '.' : ''}${sym.name}\` (${sym.count} objects)${sp ? `, on search_path (#${sp})` : ''}` };
     }
+    case 'database': return { range: sym.range, markdown: `database \`${sym.name}\`${sym.current ? ' (current database)' : ''}` };
     case 'operator': return { range: sym.range, markdown: `\`${sym.op.op}\` — ${sym.op.doc}` };
     case 'sequenceOp': return { range: sym.range, markdown: `\`${sym.seq.qualifiedName}.${sym.op}\` — ${sym.op === 'NEXTVAL' ? 'increments the sequence and returns the new value' : 'returns the current value of the sequence in this session'}` };
   }

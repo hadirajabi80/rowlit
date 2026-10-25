@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { api, errorMessage } from '../api/client';
 import type { CatalogSchema, CatalogSnapshot, DatabasesResponse, Dialect, SchemasResponse, WsEventOf } from '../api/types';
+import type { ForeignCatalogInput } from '../intel';
 
 /**
  * Catalog cache, keyed by connectionId and database. Every connection has its own lazily loaded tree;
@@ -328,4 +330,81 @@ export const useCatalog = create<CatalogState>((set, get) => {
 
 export function useSnapshot(connectionId: string | null | undefined, database: string | null | undefined): CatalogSnapshot | null {
   return useCatalog((s) => (connectionId ? s.dbs[dbKey(connectionId, database)]?.snapshot ?? null : null));
+}
+
+// ---------------------------------------------------------------- other databases of the server (T-SQL `Other.dbo.T`)
+
+/**
+ * IntelliSense input for the catalog of ANOTHER database of the connection (a console completes `Other.dbo.Orders`):
+ * what the store has loaded for (connection, Other), whoever loaded it (the explorer, an object tab, a completion
+ * request). `snapshot` carries the schema names as soon as the schema list is here; `failed` lists the schemas whose load
+ * failed or came back empty. The result is cached per cache entry, so an untouched database keeps the same object.
+ */
+const foreignInputs = new WeakMap<DbCatalog, ForeignCatalogInput>();
+const listSnapshots = new WeakMap<SchemasResponse, CatalogSnapshot>();
+
+export function foreignCatalogInput(d: DbCatalog, dialect: Dialect): ForeignCatalogInput | null {
+  if (!d.database) return null;
+  const hit = foreignInputs.get(d);
+  if (hit) return hit;
+  const status = d.schemasStatus === 'ready' ? 'ready' : d.schemasStatus === 'error' ? 'error' : 'loading';
+  let snapshot = d.snapshot;
+  if (!snapshot && d.schemasResp && status === 'ready') {
+    // the schema list without any objects yet
+    snapshot = listSnapshots.get(d.schemasResp) ?? null;
+    if (!snapshot) {
+      snapshot = {
+        connectionId: d.connectionId, dialect: d.dialect ?? dialect, database: d.database, defaultSchema: d.schemasResp.defaultSchema ?? d.defaultSchema ?? 'dbo',
+        version: 0, databases: [], schemas: [], schemaNames: d.schemasResp.schemas.map((s) => s.name),
+      };
+      listSnapshots.set(d.schemasResp, snapshot);
+    }
+  }
+  const failed = Object.keys(d.schemaStatus).filter((n) => d.schemaStatus[n] === 'error' || (d.schemaStatus[n] === 'ready' && !d.loaded[n]));
+  const input: ForeignCatalogInput = { database: d.database, status, snapshot, ...(failed.length ? { failed } : {}) };
+  foreignInputs.set(d, input);
+  return input;
+}
+
+/** The cached catalogs of the connection's other databases (not `exceptDb`, the console's own) as IntelliSense input. */
+export function foreignCatalogInputs(dbs: Record<string, DbCatalog>, connectionId: string, exceptDb: string | null | undefined, dialect: Dialect): ForeignCatalogInput[] {
+  const out: ForeignCatalogInput[] = [];
+  const except = exceptDb?.toLowerCase();
+  for (const d of Object.values(dbs)) {
+    if (d.connectionId !== connectionId || !d.database || d.database.toLowerCase() === except) continue;
+    const input = foreignCatalogInput(d, dialect);
+    if (input) out.push(input);
+  }
+  return out;
+}
+
+const NO_FOREIGN: ForeignCatalogInput[] = [];
+
+/** `foreignCatalogInputs` as a hook: re-renders only when one of those inputs changes. SQL Server consoles only. */
+export function useForeignCatalogs(connectionId: string | null | undefined, exceptDb: string | null | undefined, dialect: Dialect | null | undefined): ForeignCatalogInput[] {
+  return useCatalog(useShallow((s) => (connectionId && dialect === 'tsql' ? foreignCatalogInputs(s.dbs, connectionId, exceptDb, dialect) : NO_FOREIGN)));
+}
+
+/** Requests are coalesced for this long: typing `Other.` and a few more characters asks the server once. */
+export const FOREIGN_REQUEST_DELAY_MS = 80;
+const foreignPending = new Set<string>();
+
+/**
+ * Load another database's schema list (no `schema`) or one of its schemas for IntelliSense, in the background, without
+ * touching the console's own database. A no-op for what is loaded or loading already.
+ */
+export function requestForeignCatalog(connectionId: string, database: string, schema?: string, delay = FOREIGN_REQUEST_DELAY_MS): void {
+  const key = `${dbKey(connectionId, database)}\u0001${schema ?? ''}`.toLowerCase();
+  if (foreignPending.has(key)) return;
+  foreignPending.add(key);
+  setTimeout(() => {
+    foreignPending.delete(key);
+    void (async () => {
+      const cat = useCatalog.getState();
+      await cat.loadSchemas(connectionId, database);
+      if (!schema) return;
+      const known = useCatalog.getState().dbs[dbKey(connectionId, database)]?.schemasResp?.schemas.find((s) => s.name.toLowerCase() === schema.toLowerCase());
+      if (known) await cat.loadSchema(connectionId, database, known.name);
+    })();
+  }, delay);
 }

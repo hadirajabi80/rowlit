@@ -1,6 +1,6 @@
 // Name binding over the statement model + catalog index: sources, output columns, qualifiers, variables.
 import type { CatalogObjectType } from '../../api/types';
-import type { CatalogIndex, NameRef, ObjectEntry, SchemaEntry } from './index';
+import type { CatalogIndex, DatabaseRef, NameRef, ObjectEntry, SchemaEntry } from './index';
 import type { ColumnDef, CteDef, NamePart, Scope, TableRef, TempTableDef, VarDef } from '../parse/statement-model';
 
 export interface DocSymbols {
@@ -35,8 +35,9 @@ export type QualifierTarget =
   | { kind: 'source'; src: ResolvedSource }
   | { kind: 'record'; name: string; columns: ColumnDef[]; variable: VarDef }
   | { kind: 'object'; entry: ObjectEntry }
-  | { kind: 'schema'; schema: SchemaEntry | null; name: string; database?: string }
-  | { kind: 'database'; name: string }
+  /** `index`: the catalog `schema` belongs to when it is another database's (T-SQL `Other.dbo.`); `db`: that database. */
+  | { kind: 'schema'; schema: SchemaEntry | null; name: string; database?: string; index?: CatalogIndex | null; db?: DatabaseRef }
+  | { kind: 'database'; name: string; db: DatabaseRef }
   | { kind: 'package'; entry: ObjectEntry }
   | { kind: 'sequence'; entry: ObjectEntry };
 
@@ -339,9 +340,8 @@ export class Binder {
       if (obj && obj.type === 'package') return { kind: 'package', entry: obj };
       if (obj && obj.type === 'sequence') return { kind: 'sequence', entry: obj };
       if (sch) return { kind: 'schema', schema: sch, name: sch.name };
-      if (idx.spec.id === 'tsql' && idx.databases.some((d) => idx.keyOf(d, true) === idx.keyOf(q.text, q.quoted))) {
-        return { kind: 'database', name: q.text };
-      }
+      const db = idx.spec.id === 'tsql' ? idx.resolveDatabase(q.text, q.quoted) : null;
+      if (db) return { kind: 'database', name: q.text, db };
       if (obj) return { kind: 'object', entry: obj };
       const temp = this.symbols.tables.get(q.text.toUpperCase());
       if (temp) return { kind: 'record', name: temp.name, columns: this.tempColumns(temp), variable: { name: temp.name, kind: 'tableVar', type: 'TABLE', range: temp.defRange } };
@@ -349,11 +349,7 @@ export class Binder {
     }
     if (parts.length === 2) {
       const [a, b] = parts;
-      if (idx.spec.id === 'tsql' && b.text === '') {
-        // db..  → default schema of that database
-        return { kind: 'schema', schema: idx.defaultSchemaEntry() ?? null, name: idx.defaultSchema, database: a.text };
-      }
-      const sch = idx.schema(a.text, a.quoted);
+      const sch = b.text === '' && idx.spec.id === 'tsql' ? undefined : idx.schema(a.text, a.quoted);
       if (sch) {
         const obj = idx.resolve([a, b], (e) => e.type === 'package' || e.type === 'sequence' || e.isTabular);
         if (obj?.type === 'package') return { kind: 'package', entry: obj };
@@ -361,10 +357,12 @@ export class Binder {
         if (obj) return { kind: 'object', entry: obj };
         return null;
       }
-      if (idx.spec.id === 'tsql' && idx.databases.some((d) => idx.keyOf(d, true) === idx.keyOf(a.text, a.quoted))) {
-        const local = idx.database && idx.keyOf(a.text, a.quoted) === idx.keyOfCatalog(idx.database);
-        const s2 = local ? idx.schema(b.text, b.quoted) ?? null : null;
-        return { kind: 'schema', schema: s2, name: b.text, database: a.text };
+      const db = idx.spec.id === 'tsql' ? idx.resolveDatabase(a.text, a.quoted) : null;
+      if (db) {
+        // `db.schema.` / `db..` (the database's default schema): that database's catalog, which may not be loaded yet
+        const ix = db.index;
+        if (b.text === '') return { kind: 'schema', schema: ix?.defaultSchemaEntry() ?? null, name: ix?.defaultSchema ?? '', database: a.text, index: ix, db };
+        return { kind: 'schema', schema: ix?.schema(b.text, b.quoted) ?? null, name: b.text, database: a.text, index: ix, db };
       }
       return null;
     }

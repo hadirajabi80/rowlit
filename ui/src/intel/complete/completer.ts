@@ -213,7 +213,7 @@ function kindOfObject(t: CatalogObjectType): CompletionKind {
 }
 
 export function objectRef(index: CatalogIndex, e: ObjectEntry): ObjectRef {
-  return { database: index.database, schema: e.schema, name: e.name, type: e.type };
+  return { database: e.database ?? index.database, schema: e.schema, name: e.name, type: e.type };
 }
 
 function colDetail(label: string, src: ResolvedSource): string {
@@ -310,6 +310,12 @@ export function complete(c: CursorContext, env: CompleteEnv): CompletionResult {
     statementStartItems(items, c, env);
   } else if (!followerItems(items, c, env)) {
     isIncomplete = clauseItems(items, c, env) || isIncomplete;
+  }
+
+  // after `USE Other`: that database's catalog (or its default schema) is still on its way
+  if (env.index.isLoadingDatabase && !items.list.some((i) => i.loading)) {
+    loadingItem(items, c, env.index.database ?? '');
+    isIncomplete = true;
   }
 
   // Oracle: unknown identifiers might be PUBLIC synonyms (lazy)
@@ -990,6 +996,8 @@ function resolveRoutine(parts: NamePart[], env: CompleteEnv): { entry: ObjectEnt
   if (parts.length === 3) {
     const pkg = index.resolve(parts.slice(0, 2), (e) => e.type === 'package');
     if (pkg) return { entry: pkg, member: parts[2].text };
+    // `Db.schema.proc` / `Db..proc` (T-SQL; the database may be another one of the server)
+    return { entry: index.resolve(parts, (e) => e.type === 'proc' || e.type === 'func' || e.type === 'tablefunc') };
   }
   return { entry: null };
 }
@@ -1214,11 +1222,20 @@ function qualifierItems(items: Items, c: CursorContext, env: CompleteEnv): boole
     case 'schema': {
       const sc: SchemaEntry | null = t.schema;
       if (!sc) {
-        // another database's schema: its catalog is not loaded here (nothing to offer, no empty box: auto-triggered)
-        const local = !t.database || (!!index.database && index.keyOfCatalog(t.database) === index.keyOfCatalog(index.database));
-        if (!local) return true;
-        index.requestSchema(t.name);
-        if (index.isUnloadedSchema(t.name, true) || !t.database) loadingItem(items, c, t.name);
+        const db = t.db;
+        if (db && !db.home) {
+          // another database of the server: its schema list, then the schema's objects, load on demand
+          if (!db.index) {
+            if (db.status === 'loading') loadingItem(items, c, db.name);
+          } else if (db.index.isUnloadedSchema(t.name, true)) {
+            db.index.requestSchema(t.name);
+            loadingItem(items, c, `${db.name}.${t.name}`);
+          }
+          return true;
+        }
+        const own = db?.index ?? index;
+        own.requestSchema(t.name);
+        if (own.isUnloadedSchema(t.name, true) || !t.database) loadingItem(items, c, t.name);
         return true;
       }
       const inExec = c.clause === 'exec';
@@ -1243,10 +1260,12 @@ function qualifierItems(items: Items, c: CursorContext, env: CompleteEnv): boole
       return false;
     }
     case 'database': {
-      if (index.database && t.name.toUpperCase() === index.database.toUpperCase()) {
-        for (const sc of index.schemas.values()) items.add({ label: sc.name, kind: 'schema', group: 9, insertText: formatIdent(sc.name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
-        for (const name of index.unloadedSchemaNames()) items.add({ label: name, kind: 'schema', group: 9, insertText: formatIdent(name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
-      }
+      // `Db.` → that database's schemas (the console's own, or another database of the server once its list has loaded)
+      const ix = t.db.index;
+      if (ix) {
+        for (const sc of ix.schemas.values()) items.add({ label: sc.name, kind: 'schema', group: 9, insertText: formatIdent(sc.name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
+        for (const name of ix.unloadedSchemaNames()) items.add({ label: name, kind: 'schema', group: 9, insertText: formatIdent(name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
+      } else if (t.db.status === 'loading') loadingItem(items, c, t.db.name);
       return true;
     }
     case 'package': {

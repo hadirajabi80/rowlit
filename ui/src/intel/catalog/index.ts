@@ -15,6 +15,39 @@ export interface FkEdge {
   toCols: string[];
 }
 
+/** Load state of another database's catalog. */
+export type ForeignStatus = 'loading' | 'ready' | 'error';
+
+/**
+ * Catalog of ANOTHER database of the same server (T-SQL `Other.dbo.Orders`), loaded lazily by the host: the schema list
+ * first (`status`), then the objects of the schemas that are used. `snapshot` carries the schemas loaded so far (and
+ * `schemaNames`, every schema of that database); null until the host has the schema list.
+ */
+export interface ForeignCatalogInput {
+  database: string;
+  status: ForeignStatus;
+  snapshot: CatalogSnapshot | null;
+  /** Schemas whose load failed or came back empty: never shown as "Loading…". */
+  failed?: readonly string[];
+}
+
+interface ForeignDb {
+  name: string;
+  index: CatalogIndex;
+  status: ForeignStatus;
+  snapshot: CatalogSnapshot | null;
+}
+
+/** A database named in SQL: the console's own, or another one with its (maybe not yet loaded) catalog. */
+export interface DatabaseRef {
+  /** The spelling the server lists. */
+  name: string;
+  home: boolean;
+  /** The database's index once its schema list is loaded (the console's own index for `home`). */
+  index: CatalogIndex | null;
+  status: ForeignStatus;
+}
+
 export class ObjectEntry {
   readonly schema: string;
   readonly name: string;
@@ -22,13 +55,16 @@ export class ObjectEntry {
   readonly obj: CatalogObject;
   /** Built-in object (Oracle DUAL, supplied packages): not from the snapshot. */
   readonly builtin: boolean;
+  /** Database the object was loaded from; null for built-ins and for catalogs that name no database. */
+  readonly database: string | null;
   readonly fksOut: FkEdge[] = [];
   readonly fksIn: FkEdge[] = [];
   private cols: ColumnDef[] | null = null;
   private colMap: Map<string, ColumnDef> | null = null;
   private readonly fold: (s: string) => string;
 
-  constructor(schema: string, obj: CatalogObject, fold: (s: string) => string, builtin = false) {
+  constructor(schema: string, obj: CatalogObject, fold: (s: string) => string, builtin = false, database: string | null = null) {
+    this.database = database;
     this.schema = schema;
     this.name = obj.n;
     this.type = obj.t;
@@ -110,7 +146,20 @@ export class CatalogIndex {
   snapshot: CatalogSnapshot | null = null;
   defaultSchema = '';
   database: string | null = null;
-  databases: string[] = [];
+  private dbNames: string[] = [];
+  /** Databases of the server: the console's list, shared by the catalogs of the other databases. */
+  get databases(): string[] { return this.home === this ? this.dbNames : this.home.dbNames; }
+  set databases(v: string[]) { this.dbNames = v; }
+  /** The console's own index; the index of another database points to it (the console's own points to itself). */
+  home: CatalogIndex = this;
+  /** Other databases of the server (T-SQL) by folded name, loaded lazily by the host. Home index only. */
+  private readonly foreign = new Map<string, ForeignDb>();
+  /** Called when a database that is not loaded is needed: its schema list (no schema) or one of its schemas. */
+  databaseRequester: ((database: string, schema?: string) => void) | null = null;
+  private readonly requestedForeign = new Set<string>();
+  /** Schemas whose load failed or came back empty (the catalog of another database). */
+  private failedSchemas = new Set<string>();
+  private foreignSelf: ForeignDb | null = null;
   readonly schemas = new Map<string, SchemaEntry>();
   /** Folded name → objects across all schemas. */
   private readonly all = new Map<string, ObjectEntry[]>();
@@ -167,6 +216,8 @@ export class CatalogIndex {
     if (!snap) {
       this.snapshot = null;
       this.schemas.clear();
+      this.foreign.clear();
+      this.requestedForeign.clear();
       this.knownSchemaNames = [];
       this.all.clear();
       this.colIndex = null;
@@ -178,7 +229,8 @@ export class CatalogIndex {
     this.defaultSchema = snap.defaultSchema;
     this.searchPath = this.spec.id === 'pgsql' && snap.searchPath?.length ? snap.searchPath.slice() : [snap.defaultSchema];
     this.database = snap.database;
-    this.databases = snap.databases ?? [];
+    this.dbNames = snap.databases ?? [];
+    if (!sameConn) { this.foreign.clear(); this.requestedForeign.clear(); }
     const names = snap.schemaNames ?? [];
     let changed = !sameConn;
     if (names.join('\u0001') !== this.knownSchemaNames.join('\u0001')) {
@@ -213,7 +265,7 @@ export class CatalogIndex {
     const byName = new Map<string, ObjectEntry[]>();
     const objects: ObjectEntry[] = new Array(sc.objects.length);
     for (let i = 0; i < sc.objects.length; i++) {
-      const e = new ObjectEntry(sc.name, sc.objects[i], this.foldColumn, builtin);
+      const e = new ObjectEntry(sc.name, sc.objects[i], this.foldColumn, builtin, builtin ? null : this.database);
       objects[i] = e;
       const k = this.keyOfCatalog(e.name);
       const arr = byName.get(k);
@@ -403,9 +455,12 @@ export class CatalogIndex {
         return pick(this.lookupIn(sch.text, name, sch.quoted));
       }
       if (this.spec.id === 'tsql') {
-        if (this.database && this.keyOf(db.text, db.quoted) !== this.keyOfCatalog(this.database)) return null;
-        const schemaName = sch.text === '' ? { text: this.defaultSchema, quoted: true } : sch;
-        return pick(this.lookupIn(schemaName.text, name, schemaName.quoted));
+        // `db.schema.object` / `db..object`: this database, or another one of the server (its catalog loads on demand)
+        const ix = this.indexOfDatabase(db.text, db.quoted);
+        if (!ix) return null;
+        const schemaName = sch.text === '' ? { text: ix.defaultSchema, quoted: true } : sch;
+        if (ix !== this && ix.isUnloadedSchema(schemaName.text, schemaName.quoted)) ix.requestSchema(schemaName.text);
+        return pick(ix.lookupIn(schemaName.text, name, schemaName.quoted));
       }
       return null;
     }
@@ -486,6 +541,11 @@ export class CatalogIndex {
 
   requestSchema(name: string): void {
     if (this.builtinSchemas.has(this.keyOfCatalog(name))) return;
+    if (this.home !== this) {
+      // another database: its schemas load through the host's database requester
+      if (this.database) this.home.requestDatabase(this.database, name);
+      return;
+    }
     const k = name.toUpperCase();
     if (this.requestedSchemas.has(k)) return;
     this.requestedSchemas.add(k);
@@ -505,7 +565,119 @@ export class CatalogIndex {
   /** A schema of this database that exists but is not loaded yet (`name.` then shows "Loading name…"). */
   isUnloadedSchema(name: string, quoted = false): boolean {
     const k = this.keyOf(name, quoted);
-    if (this.schemas.has(k) || this.builtinSchemas.has(k)) return false;
+    if (this.schemas.has(k) || this.builtinSchemas.has(k) || this.failedSchemas.has(k)) return false;
     return this.knownSchemaNames.some((n) => this.keyOfCatalog(n) === k);
+  }
+
+  // ---------------- other databases of the server (T-SQL `Other.dbo.Orders`)
+
+  /** The spelling the server lists for a database name typed in SQL (case-insensitive), or null if the server has none. */
+  listedDatabase(text: string, quoted: boolean): string | null {
+    const home = this.home;
+    const k = home.keyOf(text, quoted);
+    if (home.database && home.keyOfCatalog(home.database) === k) return home.database;
+    return home.databases.find((d) => home.keyOfCatalog(d) === k) ?? null;
+  }
+
+  /**
+   * What `name` refers to as a database: this console's own, another database of the server (T-SQL; its catalog loads
+   * on demand: the first lookup asks the host for it), or null when the server lists no such database. Works from any
+   * index of the same server.
+   */
+  resolveDatabase(text: string, quoted: boolean): DatabaseRef | null {
+    const home = this.home;
+    if (home.spec.id !== 'tsql') return null;
+    const name = this.listedDatabase(text, quoted);
+    if (!name) return null;
+    const k = home.keyOfCatalog(name);
+    if (!home.database) return { name, home: false, index: null, status: 'error' }; // own database unknown: cannot tell
+    if (home.keyOfCatalog(home.database) === k) return { name: home.database, home: true, index: home, status: 'ready' };
+    let f = home.foreign.get(k);
+    if (!f) f = home.makeForeign(name);
+    if (f.status === 'loading') {
+      if (home.databaseRequester) home.requestDatabase(name);
+      else f.status = 'error'; // nobody loads other databases here
+    }
+    return { name: f.name, home: false, index: f.status === 'ready' && f.index.snapshot ? f.index : null, status: f.status };
+  }
+
+  /** Index of a database for name resolution: this console's own or another database whose schema list is loaded. */
+  indexOfDatabase(text: string, quoted: boolean): CatalogIndex | null {
+    const home = this.home;
+    // a catalog that names no database cannot tell its own from another: every name is its own
+    if (!home.database && home.spec.id === 'tsql') return home;
+    return this.resolveDatabase(text, quoted)?.index ?? null;
+  }
+
+  /**
+   * The index statements run against after `USE name`: the database's catalog (empty until it has loaded; it is
+   * requested here). The console's own index when `name` is its database, or not a database of the server.
+   */
+  indexForUse(text: string, quoted: boolean): CatalogIndex {
+    const home = this.home;
+    const r = home.resolveDatabase(text, quoted);
+    if (!r || r.home) return home;
+    const f = home.foreign.get(home.keyOfCatalog(r.name));
+    if (!f) return home;
+    // the default schema's objects are the first thing a script after `USE` needs
+    const ix = f.index;
+    if (f.status === 'ready' && ix.snapshot && ix.defaultSchema && ix.isUnloadedSchema(ix.defaultSchema, true)) ix.requestSchema(ix.defaultSchema);
+    return ix;
+  }
+
+  /** This is the catalog of another database whose schema list or default schema is still loading. */
+  get isLoadingDatabase(): boolean {
+    const f = this.foreignSelf;
+    if (!f) return false;
+    if (f.status === 'loading') return !!this.home.databaseRequester;
+    return f.status === 'ready' && !!this.snapshot && !!this.defaultSchema && this.isUnloadedSchema(this.defaultSchema, true);
+  }
+
+  private makeForeign(name: string): ForeignDb {
+    const ix = new CatalogIndex(this.spec);
+    ix.home = this;
+    ix.database = name;
+    const f: ForeignDb = { name, index: ix, status: 'loading', snapshot: null };
+    ix.foreignSelf = f;
+    ix.onChange = () => this.onChange?.();
+    this.foreign.set(this.keyOfCatalog(name), f);
+    return f;
+  }
+
+  /** Ask the host for a database's schema list (no schema) or for one of its schemas, once. */
+  requestDatabase(database: string, schema?: string): void {
+    const home = this.home;
+    if (!home.databaseRequester) return;
+    const k = home.keyOfCatalog(database) + (schema ? '\u0000' + home.keyOfCatalog(schema) : '');
+    if (home.requestedForeign.has(k)) return;
+    home.requestedForeign.add(k);
+    home.databaseRequester(database, schema);
+  }
+
+  /**
+   * The catalogs of the server's other databases as the host has them so far. Returns true when anything changed.
+   * Databases the host does not list yet stay as they are (a `USE` or a three-part name may be waiting for them).
+   */
+  setForeignCatalogs(inputs: readonly ForeignCatalogInput[]): boolean {
+    const home = this.home;
+    let changed = false;
+    for (const input of inputs) {
+      const k = home.keyOfCatalog(input.database);
+      if (home.database && k === home.keyOfCatalog(home.database)) continue;
+      let f = home.foreign.get(k);
+      if (!f) { f = home.makeForeign(input.database); changed = true; }
+      if (f.status !== input.status) { f.status = input.status; changed = true; }
+      const failed = new Set((input.failed ?? []).map((n) => f!.index.keyOfCatalog(n)));
+      if ([...failed].join('\u0001') !== [...f.index.failedSchemas].join('\u0001')) { f.index.failedSchemas = failed; changed = true; }
+      if (input.snapshot && input.snapshot !== f.snapshot) {
+        f.snapshot = input.snapshot;
+        const notify = f.index.onChange;
+        f.index.onChange = null; // one notification for the whole batch
+        try { f.index.setSnapshot(input.snapshot); } finally { f.index.onChange = notify; }
+        changed = true;
+      }
+    }
+    if (changed) { this.version++; this.onChange?.(); }
+    return changed;
   }
 }
