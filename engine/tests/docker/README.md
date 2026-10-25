@@ -259,3 +259,10 @@ dotnet test engine/tests/DbStudio.Providers.Cassandra.Tests
 
 Without the variables the suite starts its own `cassandra:5` container (MAX_HEAP_SIZE=512M, HEAP_NEWSIZE=128M, random
 port) and seeds it through a provider session.
+
+### Import Wizard tests
+
+`engine/tests/DbStudio.Import.Tests` imports a CSV into the running sample servers (SQL Server 14333, PostgreSQL 15432, MySQL 13306,
+MariaDB 13307, Oracle 15211, ClickHouse 18123 with the credentials above; MySQL/MariaDB as `root`/`shop`): create table, append,
+truncate, upsert, update-only, bad rows with skip and with rollback. A server that does not answer on its port is skipped;
+`DBSTUDIO_IT=0` skips all of them. The parser, type inference, SQL generation and SQLite end-to-end tests always run.
