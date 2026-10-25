@@ -49,6 +49,9 @@ export const IPC = {
   // ---- notifications
   /** renderer -> main (send): an OS notification while the window is not focused */
   notify: 'dbstudio:notify',
+  // ---- keyboard shortcuts
+  /** renderer -> main (send): the menu accelerators after the user's keymap */
+  setMenuShortcuts: 'dbstudio:set-menu-shortcuts',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

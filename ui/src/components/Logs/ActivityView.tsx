@@ -10,7 +10,7 @@ import type { ActivityPollItem, ActivityRow, StreamEvent } from '../../api/types
 import { engineSocket } from '../../api/ws';
 import { newConsole } from '../../app/actions';
 import type { ContextEntry } from '../../commands/menuModel';
-import { getCommand, runCommand } from '../../commands/registry';
+import { getCommand, primaryShortcut, runCommand } from '../../commands/registry';
 import { isRelational } from '../../store/connections';
 import { toast } from '../../store/ui';
 import { showContextMenu } from '../common/Menu';
@@ -359,7 +359,7 @@ export function ActivityView(p: ActivityViewProps) {
             className="input"
             placeholder="Filter sessions…"
             aria-label="Filter sessions"
-            title={withShortcut('Filter sessions', getCommand('logs.search')?.shortcut)}
+            title={withShortcut('Filter sessions', primaryShortcut('logs.search'))}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {

@@ -5,7 +5,7 @@ import { useCatalog } from '../store/catalog';
 import { useResults } from '../store/results';
 import { useSessions } from '../store/sessions';
 import { useTabs } from '../store/tabs';
-import { advertisedShortcuts, commandsVersion, getCommand, isEnabled, runCommand, subscribeCommands, type Command } from './registry';
+import { advertisedShortcuts, commandsVersion, getCommand, isEnabled, primaryShortcut, runCommand, subscribeCommands, type Command } from './registry';
 import { displayShortcut, tooltipWithShortcut } from './keys';
 
 /** Registry version (changes on register/unregister). */
@@ -50,7 +50,7 @@ export function commandView(id: string, args?: unknown, titleOverride?: string):
     id,
     command: c,
     title,
-    shortcut: c?.shortcut,
+    shortcut: c ? primaryShortcut(c) : undefined,
     shortcuts,
     tooltip: tooltipWithShortcut(title, shortcuts.map((k) => displayShortcut(k)).join(' or ')),
     enabled: !!c && isEnabled(id, args),

@@ -5,6 +5,7 @@ import { handleMenuCommand } from './app/commands';
 import { useUpdateWiring } from './app/updates';
 import { windowTitle } from './app/windowTitle';
 import { installKeyDispatcher } from './commands/dispatcher';
+import { installKeymap } from './commands/keymapSettings';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ConnectionDialogHost } from './components/ConnectionDialog/ConnectionDialog';
 import { ConnectionSwitcher } from './components/ConnectionsPanel/ConnectionSwitcher';
@@ -93,9 +94,11 @@ function Shell() {
 
   useEffect(() => {
     const off = installKeyDispatcher();
+    const offKeymap = installKeymap();
     const offMenu = getPlatform().onMenuCommand(handleMenuCommand);
     return () => {
       off();
+      offKeymap();
       offMenu();
     };
   }, []);

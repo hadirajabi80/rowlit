@@ -10,7 +10,7 @@ import { isEditDirty, peekEditSession } from '../../designer/editSession';
 import { useDesignerUi } from '../../designer/store';
 import { ariaKeyShortcuts, displayShortcut, tooltipWithShortcut } from '../../commands/keys';
 import type { ContextEntry } from '../../commands/menuModel';
-import { getCommand, hasCommand, runCommand } from '../../commands/registry';
+import { getCommand, hasCommand, keyHint, primaryShortcut, runCommand, shortcutLabelOf } from '../../commands/registry';
 import { commandView, useCommandContext } from '../../commands/useCommands';
 import { formatCount, formatDuration } from '../../lib/format';
 import { dbKey, useCatalog } from '../../store/catalog';
@@ -157,10 +157,10 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
   // Explain and Format look like every other enabled toolbar button; they are dimmed only when they truly cannot
   // act, and then say why (user-01).
   const empty = !tab.text.trim();
-  const explainReason = !conn ? `choose a connection first (${displayShortcut('Mod+Shift+K')})` : empty ? 'type a statement to explain' : null;
+  const explainReason = !conn ? `choose a connection first${keyHint('connections.change', ' (', ')')}` : empty ? 'type a statement to explain' : null;
   const formatReason = empty ? 'the editor is empty' : null;
 
-  const runShortcuts = [run.shortcut, getCommand('run.script')?.shortcut].filter((k): k is string => !!k).map((k) => displayShortcut(k)).join(' or ');
+  const runShortcuts = [run.shortcut, primaryShortcut('run.script')].filter((k): k is string => !!k).map((k) => displayShortcut(k)).join(' or ');
   const items: OverflowItem[] = [
     routineEdit ? {
       id: 'run',
@@ -240,9 +240,9 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
               runCommand('file.save');
               refocus();
             }}
-            title={tooltipWithShortcut(`Save the query ${tab.savedQuery.name}`, displayShortcut('Mod+S')) + (queryDirty ? ' — unsaved changes' : '')}
+            title={tooltipWithShortcut(`Save the query ${tab.savedQuery.name}`, shortcutLabelOf('file.save')) + (queryDirty ? ' — unsaved changes' : '')}
             aria-label={queryDirty ? 'Save query, unsaved changes' : 'Save query'}
-            aria-keyshortcuts={ariaKeyShortcuts('Mod+S')}
+            aria-keyshortcuts={ariaKeyShortcuts(primaryShortcut('file.save'))}
             data-command="file.save"
             data-dirty={queryDirty || undefined}
           >
@@ -266,8 +266,8 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
         <button
           className="btn btn-ghost tb-text-btn"
           aria-haspopup="menu"
-          title={tooltipWithShortcut(tab.filePath ? 'Save the .sql file, or the query to a schema' : 'Save the query to a schema, or to a .sql file', displayShortcut('Mod+S'))}
-          aria-keyshortcuts={ariaKeyShortcuts('Mod+S')}
+          title={tooltipWithShortcut(tab.filePath ? 'Save the .sql file, or the query to a schema' : 'Save the query to a schema, or to a .sql file', shortcutLabelOf('file.save'))}
+          aria-keyshortcuts={ariaKeyShortcuts(primaryShortcut('file.save'))}
           onClick={(e) => showMenuBelow(e.currentTarget, commandMenuItems(saveEntries(!!tab.filePath)))}
         >
           <Save size={16} strokeWidth={1.5} /> <span className="btn-text">Save</span> <ChevronDown size={14} />
@@ -298,10 +298,10 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
       <button
         className="conn-pill"
         onClick={(e) => openSwitcher('connection', e.currentTarget)}
-        title={`${conn ? `Connection: ${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}` : 'Choose a connection'} — change with ${displayShortcut('Mod+Shift+K')}`}
+        title={`${conn ? `Connection: ${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}` : 'Choose a connection'}${keyHint('connections.change', ' — change with ')}`}
         aria-label={conn ? `Connection ${conn.name}, change` : 'Choose a connection'}
         aria-haspopup="dialog"
-        aria-keyshortcuts={ariaKeyShortcuts('Mod+Shift+K')}
+        aria-keyshortcuts={ariaKeyShortcuts(primaryShortcut('connections.change'))}
         style={conn?.color ? ({ ['--conn-color' as string]: connColorCss(conn.color) }) : undefined}
       >
         {conn ? <ProviderLogo providerId={conn.providerId} size={16} /> : <Sparkles size={16} strokeWidth={1.5} />}
@@ -320,10 +320,10 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
         <button
           className={`db-pill${scopeCss ? ' has-scope-color' : ''}`}
           onClick={(e) => openSwitcher('database', e.currentTarget)}
-          title={`${singleLevel ? `Current ${dbLabel}` : 'Database'}${scopeHex ? ` (${scopeColorName(scopeHex)})` : ''} — change with ${displayShortcut('Mod+Shift+D')}`}
+          title={`${singleLevel ? `Current ${dbLabel}` : 'Database'}${scopeHex ? ` (${scopeColorName(scopeHex)})` : ''}${keyHint('connections.changeDatabase', ' — change with ')}`}
           aria-label={`${singleLevel ? dbLabel[0].toUpperCase() + dbLabel.slice(1) : 'Database'} ${current ?? ''}${scopeHex ? `, colour ${scopeColorName(scopeHex)}` : ''}, change`}
           aria-haspopup="dialog"
-          aria-keyshortcuts={ariaKeyShortcuts('Mod+Shift+D')}
+          aria-keyshortcuts={ariaKeyShortcuts(primaryShortcut('connections.changeDatabase'))}
           style={scopeCss ? ({ ['--scope-color' as string]: scopeCss }) : undefined}
         >
           {scopeCss ? <span className="scope-dot" aria-hidden="true" /> : null}
@@ -455,8 +455,8 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
         className={`icon-btn tb-results${resultsShown && !resultsInTab ? ' on' : ''}`}
         aria-pressed={resultsInTab ? undefined : resultsShown}
         aria-label={resultsInTab ? 'Show the results tab' : resultsShown ? 'Hide results' : exec ? 'Show results, there is output' : 'Show results'}
-        title={tooltipWithShortcut(resultsInTab ? 'The results are in a tab: show it' : resultsShown ? 'Hide the results' : exec ? 'Show the results (the last run has output)' : 'Show the results', displayShortcut('Mod+R'))}
-        aria-keyshortcuts={ariaKeyShortcuts('Mod+R')}
+        title={tooltipWithShortcut(resultsInTab ? 'The results are in a tab: show it' : resultsShown ? 'Hide the results' : exec ? 'Show the results (the last run has output)' : 'Show the results', shortcutLabelOf('view.toggleResults'))}
+        aria-keyshortcuts={ariaKeyShortcuts(primaryShortcut('view.toggleResults'))}
         data-command="view.toggleResults"
         onClick={() => runCommand('view.toggleResults', { kind: 'tab', tabId: tab.id })}
       >

@@ -5,7 +5,7 @@
 import { ExternalLink, PanelBottom, PanelLeft, PanelRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { displayShortcut } from '../../commands/keys';
-import { getCommand, runCommand } from '../../commands/registry';
+import { primaryShortcut, runCommand } from '../../commands/registry';
 import { useSettings } from '../../store/settings';
 import { showMenuBelow, type MenuItem } from '../common/Menu';
 import { autoOpenFrom, dockFrom, hasEditDock, isEditConsole, type ResultsDock } from './dock';
@@ -24,7 +24,7 @@ export function dockMenuItems(tabId: string, inTab: boolean): MenuItem[] {
   const edit = isEditConsole(tabId);
   const dock = dockFrom(ui, edit);
   const target = { kind: 'tab', tabId };
-  const hide = getCommand('view.toggleResults')?.shortcut;
+  const hide = primaryShortcut('view.toggleResults');
   const items: MenuItem[] = [
     { id: 'results.dock.head', label: edit ? 'Position in Edit: consoles' : 'Position in query consoles', disabled: true },
     ...(['bottom', 'right', 'left'] as ResultsDock[]).map((d): MenuItem => ({

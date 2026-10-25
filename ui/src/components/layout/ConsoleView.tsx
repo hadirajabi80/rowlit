@@ -16,7 +16,7 @@ import { useSettings } from '../../store/settings';
 import { useTabs, type ConsoleTab } from '../../store/tabs';
 import { toast, useUi } from '../../store/ui';
 import { TipStrip } from '../Onboarding/TipStrip';
-import { Kbd } from '../Shortcuts/Kbd';
+import { CommandKbd } from '../Shortcuts/Kbd';
 import { runCommand } from '../../commands/registry';
 import type { EffectiveTheme } from '../../theme/useTheme';
 import { ErrorBoundary } from '../common/ErrorBoundary';
@@ -237,7 +237,7 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
         <div className="editor-hint">
           <Plug size={16} strokeWidth={1.5} /> This console has no connection.
           <button className="btn btn-xs btn-primary" onClick={() => runCommand('connections.change')}>
-            Choose connection <Kbd shortcut="Mod+Shift+K" className="on-accent" />
+            Choose connection <CommandKbd command="connections.change" className="on-accent" />
           </button>
         </div>
       )}

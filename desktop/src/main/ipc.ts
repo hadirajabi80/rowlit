@@ -14,6 +14,7 @@ import {
   validateFileContent,
   validateFilePath,
   validateMenuPosition,
+  validateMenuShortcuts,
   validateOpenDialogArgs,
   validateSaveDialogArgs,
   validateTitle,
@@ -36,6 +37,8 @@ export interface IpcDeps {
   updates?(): Promise<UpdateController>;
   /** Applies the renderer's theme to the window chrome (caption-button overlay, native light/dark mode). */
   onTitleBarTheme?(win: BrowserWindow, theme: TitleBarThemeArgs): void;
+  /** The renderer's keymap for the menu items it rebound ({ commandId: shortcut | null }); the menu is rebuilt with it. */
+  onMenuShortcuts?(shortcuts: Record<string, string | null>): void;
 }
 
 function assertTrustedSender(e: IpcMainInvokeEvent | IpcMainEvent, devUrl?: string): void {
@@ -157,6 +160,9 @@ export function registerIpc(deps: IpcDeps): void {
     const p = validateMenuPosition(pos);
     Menu.getApplicationMenu()?.popup({ window: win, x: p.x, y: p.y });
   });
+
+  // ---- keyboard shortcuts: the renderer's keymap changes the native menu's accelerators
+  on(IPC.setMenuShortcuts, (_e, _win, shortcuts) => deps.onMenuShortcuts?.(validateMenuShortcuts(shortcuts)));
 
   // ---- notifications
   // An OS notification (update available / ready) only while the window is in the background; a click brings it back.

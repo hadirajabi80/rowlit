@@ -2,7 +2,7 @@ import { Keyboard, Menu as MenuIcon, Moon, PanelLeft, Plus, Search, Settings, Sq
 import { APP_NAME } from '../../app/brand';
 import { ariaKeyShortcuts, isMac } from '../../commands/keys';
 import { menuCommandIds, MENUS, type MenuEntry } from '../../commands/menuModel';
-import { getCommand } from '../../commands/registry';
+import { primaryShortcut } from '../../commands/registry';
 import { useCommandContext } from '../../commands/useCommands';
 import { getPlatform } from '../../platform';
 import { useSettings } from '../../store/settings';
@@ -42,7 +42,7 @@ export function TopBar({ theme }: { theme: EffectiveTheme }) {
   const nativeMenuPopup = !browser && window.dbstudioPlatform?.titleBar === 'overlay' && typeof platform.showAppMenu === 'function';
   const nextTheme = pref === 'system' ? (theme === 'dark' ? 'light' : 'dark') : pref === 'dark' ? 'light' : 'system';
   const ThemeIcon = pref === 'system' ? SunMoon : theme === 'dark' ? Moon : Sun;
-  const gotoShortcut = getCommand('view.goToObject')?.shortcut;
+  const gotoShortcut = primaryShortcut('view.goToObject');
 
   return (
     <header className="topbar" aria-label="Application">

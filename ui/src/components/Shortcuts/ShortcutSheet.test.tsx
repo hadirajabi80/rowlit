@@ -8,7 +8,7 @@ import { useUi } from '../../store/ui';
 import {
   bindingsWithModifiers, classifyKeyDown, eventModifiers, hintAnnouncement, HINT_DELAY_MS, searchStroke, spokenShortcut, type KeyContext,
 } from './keySearch';
-import { ShortcutSheet } from './ShortcutSheet';
+import { KeymapEditor as ShortcutSheet } from './KeymapEditor';
 
 const ctx = (o: Partial<KeyContext> = {}): KeyContext => ({ textField: false, recording: false, chordPending: false, altGraph: false, ...o });
 const ev = (o: Partial<KeyboardEvent>) => ({ key: 'l', code: 'KeyL', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...o });

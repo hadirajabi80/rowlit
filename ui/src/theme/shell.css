@@ -1331,7 +1331,7 @@ html.native-material .topbar {
 .shortcut-sheet .sheet-body {
   columns: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   column-gap: var(--space-6);
   align-items: start;
   overflow-x: hidden;
