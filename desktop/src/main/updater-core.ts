@@ -3,6 +3,8 @@
 //
 //   idle --check--> checking --> up-to-date
 //                            \-> install mode: downloading --> ready  (Windows, signed macOS: Restart now / Later)
+//                                                  \-- stopDownload() --> available (downloadStopped): no automatic check or
+//                                                       timer restarts that version; a manual check resumes it
 //                            \-> notify mode:  available             (ad-hoc signed macOS: open the release page)
 //   any --error--> error (logged; a manual check reports it gently, automatic checks stay silent)
 //   disabled: dev runs, unpackaged builds, Linux, smoke tests. Nothing is ever checked.
@@ -32,6 +34,13 @@ export interface UpdaterLike {
   on(event: string, listener: (...args: never[]) => void): unknown;
   checkForUpdates(): Promise<{ isUpdateAvailable?: boolean; updateInfo?: { version?: string } } | null>;
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
+  /** Install mode downloads explicitly (autoDownload is off) so the controller owns the CancellationToken. */
+  downloadUpdate?(cancellationToken?: CancellationTokenLike): Promise<unknown>;
+}
+
+/** The part of builder-util-runtime's CancellationToken the controller uses. */
+export interface CancellationTokenLike {
+  cancel(): void;
 }
 
 export interface Timers {
@@ -59,6 +68,8 @@ export interface UpdateControllerOptions {
   log(message: string): void;
   /** Windows: quitAndInstall(isSilent, isForceRunAfter) runs the NSIS installer silently and restarts the app. */
   silentInstall?: boolean;
+  /** A fresh CancellationToken per download (updater.ts: builder-util-runtime). Without it a download cannot be stopped. */
+  createCancellationToken?(): CancellationTokenLike;
   timers?: Timers;
   now?(): number;
   initialDelayMs?: number;
@@ -79,6 +90,12 @@ export class UpdateController {
   private intervalTimer: unknown = null;
   private inflight: Promise<UpdateStatus> | null = null;
   private autoCheck = false;
+  /** The download in flight (install mode), or null. */
+  private download: { token: CancellationTokenLike; version?: string } | null = null;
+  /** Settles once the last download has unwound (electron-updater joins a new download to an old one until then). */
+  private unwinding: Promise<void> = Promise.resolve();
+  /** Versions whose download the user stopped this session; automatic checks leave them alone, a manual check clears this. */
+  private readonly stopped = new Set<string>();
 
   constructor(private readonly o: UpdateControllerOptions) {
     this.timers = o.timers ?? realTimers;
@@ -91,15 +108,15 @@ export class UpdateController {
     if (!u) return;
     // Windows / signed macOS: download in the background and install on quit unless the user restarts first.
     // Ad-hoc signed macOS (Squirrel.Mac refuses unsigned updates): only announce the release.
-    u.autoDownload = o.mode === 'install';
+    // Install mode starts the download itself (startDownload) so that it can be stopped.
+    u.autoDownload = false;
     u.autoInstallOnAppQuit = o.mode === 'install';
     u.allowPrerelease = false;
     u.on('checking-for-update', () => this.set({ state: 'checking' }));
     u.on('update-available', (info: { version?: string }) => {
       const version = info?.version;
       this.o.log(`update available: ${version} (${o.mode})`);
-      if (o.mode === 'install') this.set({ state: 'downloading', version, percent: 0 });
-      else this.set({ state: 'available', version, releaseUrl: releasePageUrl(version) });
+      this.onAvailable(version);
     });
     u.on('update-not-available', () => this.set({ state: 'up-to-date' }));
     u.on('download-progress', (p: { percent?: number }) => {
@@ -148,6 +165,8 @@ export class UpdateController {
     if (!u) return Promise.resolve(this.current);
     if (this.current.state === 'ready' || this.current.state === 'downloading') return Promise.resolve(this.current);
     if (this.inflight) return this.inflight;
+    // A manual check is the user asking for the update again: it overrides a stopped download.
+    if (opts.manual) this.stopped.clear();
     this.o.log(`checking for updates (${opts.manual ? 'manual' : 'automatic'})`);
     this.inflight = (async () => {
       try {
@@ -157,8 +176,7 @@ export class UpdateController {
         if (this.current.state === 'checking') {
           const version = r?.updateInfo?.version;
           if (!r || !r.isUpdateAvailable) this.set({ state: 'up-to-date' });
-          else if (this.o.mode === 'install') this.set({ state: 'downloading', version, percent: 0 });
-          else this.set({ state: 'available', version, releaseUrl: releasePageUrl(version) });
+          else this.onAvailable(version);
         }
       } catch (e) {
         this.fail(e);
@@ -168,6 +186,27 @@ export class UpdateController {
       return this.current;
     })();
     return this.inflight;
+  }
+
+  /**
+   * Stops the download in flight (install mode). The status becomes 'available' with downloadStopped set; electron-updater
+   * removes the partial file when its CancellationToken fires. Automatic checks do not restart that version; a manual
+   * check (the UI's Download / Resume) does. False when nothing is downloading.
+   */
+  stopDownload(): boolean {
+    const d = this.download;
+    if (!this.o.updater || this.current.state !== 'downloading' || !d) return false;
+    this.download = null;
+    if (d.version) this.stopped.add(d.version);
+    this.o.log(`update download stopped: ${d.version}`);
+    // Report the stopped state first: cancelling may emit events synchronously.
+    this.set({ state: 'available', version: d.version, releaseUrl: releasePageUrl(d.version), downloadStopped: true });
+    try {
+      d.token.cancel();
+    } catch (e) {
+      this.o.log(`update download cancel failed: ${messageOf(e)}`);
+    }
+    return true;
   }
 
   /** Restart now: only once an update is downloaded (install mode). */
@@ -183,6 +222,36 @@ export class UpdateController {
 
   dispose(): void {
     this.clearTimers();
+  }
+
+  /** A newer version was found: download it (install mode, unless the user stopped it) or only announce it (notify mode). */
+  private onAvailable(version: string | undefined): void {
+    if (this.o.mode !== 'install') {
+      this.set({ state: 'available', version, releaseUrl: releasePageUrl(version) });
+    } else if (version && this.stopped.has(version)) {
+      this.set({ state: 'available', version, releaseUrl: releasePageUrl(version), downloadStopped: true });
+    } else {
+      this.startDownload(version);
+    }
+  }
+
+  private startDownload(version: string | undefined): void {
+    const u = this.o.updater;
+    this.set({ state: 'downloading', version, percent: 0 });
+    if (!u?.downloadUpdate || this.download) return;
+    const token = this.o.createCancellationToken?.() ?? { cancel: () => undefined };
+    const mine = { token, version };
+    this.download = mine;
+    const run = this.unwinding.then(() => (this.download === mine ? u.downloadUpdate!(token) : undefined));
+    // A stopped download rejects with a CancellationError (electron-updater emits no 'error' for it): not a failure.
+    this.unwinding = run.then(
+      () => { if (this.download === mine) this.download = null; },
+      (e: unknown) => {
+        if (this.download !== mine) return;
+        this.download = null;
+        this.fail(e);
+      },
+    );
   }
 
   private fail(e: unknown): void {

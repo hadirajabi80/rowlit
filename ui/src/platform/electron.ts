@@ -49,5 +49,7 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
     ...(typeof b.showNotification === 'function' ? { showNotification: (o: NotificationOptions) => b.showNotification!(o) } : {}),
     // ---- file drops
     ...(typeof b.getPathForFile === 'function' ? { getFilePath: (f: File) => b.getPathForFile!(f) || null } : {}),
+    // ---- stop the update download
+    ...(typeof b.cancelUpdateDownload === 'function' ? { cancelUpdateDownload: () => b.cancelUpdateDownload!() } : {}),
   };
 }

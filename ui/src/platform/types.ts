@@ -48,4 +48,7 @@ export interface Platform {
   // ---- file drops
   /** Desktop only: the file-system path of a dropped File (null in the browser, which has no paths). */
   getFilePath?(file: File): string | null;
+  // ---- stop the update download
+  /** Desktop only: stops the update download in progress (false when nothing is downloading). */
+  cancelUpdateDownload?(): Promise<boolean>;
 }

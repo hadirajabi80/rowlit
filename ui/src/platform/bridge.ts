@@ -93,6 +93,13 @@ export interface DbStudioBridge {
    * (Electron webUtils.getPathForFile; File.path was removed in Electron 32). Empty string when the file has no path.
    */
   getPathForFile?(file: File): string;
+
+  // ---- stop the update download
+  /**
+   * Additive (optional, older preloads lack it): stops the update download in progress. The status becomes 'available'
+   * with downloadStopped set (a manual check starts it again); false when nothing is downloading.
+   */
+  cancelUpdateDownload?(): Promise<boolean>;
 }
 
 // ---- notifications
@@ -114,6 +121,8 @@ export interface UpdateStatus {
   version?: string;
   /** Download progress 0–100 (downloading). */
   percent?: number;
+  /** available (install mode): the user stopped the download; a manual check (Download / Resume) starts it again. */
+  downloadStopped?: boolean;
   /** GitHub release page of `version`. */
   releaseUrl?: string;
   /** Why updates are disabled, or the (logged) error. */

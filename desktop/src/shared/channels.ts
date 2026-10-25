@@ -49,6 +49,8 @@ export const IPC = {
   // ---- notifications
   /** renderer -> main (send): an OS notification while the window is not focused */
   notify: 'dbstudio:notify',
+  // ---- stop the update download
+  updatesCancelDownload: 'dbstudio:updates-cancel-download',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

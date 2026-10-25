@@ -20,6 +20,7 @@ const PHASE1 = `(async () => {
   r.readRelativeRejected = await b.readTextFile('relative.sql').then(() => false, () => true);
   r.updateStatus = await b.getUpdateStatus();
   r.manualCheck = await b.checkForUpdates({ manual: true });
+  r.cancelDownload = await b.cancelUpdateDownload();
   r.badUpdateConfigRejected = await b.configureUpdates({ autoCheck: 'yes' }).then(() => false, () => true);
   await b.configureUpdates({ autoCheck: true });
   b.setTitleBarTheme({ theme: 'system', color: 'url(javascript:alert(1))', symbolColor: '#000000' });

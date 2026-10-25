@@ -25,6 +25,24 @@ class FakeUpdater extends EventEmitter {
     return this.script(this);
   }
   quitAndInstall(...args) { this.installs.push(args); }
+  /** One entry per download (resolve / reject end it), a cancelled token rejects it like electron-updater's CancellationError. */
+  downloads = [];
+  downloadUpdate(token) {
+    const d = { token, settled: false };
+    d.promise = new Promise((resolve, reject) => {
+      d.resolve = (v) => { d.settled = true; resolve(v); };
+      d.reject = (e) => { d.settled = true; reject(e); };
+      token.onCancel = () => d.reject(Object.assign(new Error('cancelled'), { name: 'CancellationError' }));
+    });
+    this.downloads.push(d);
+    return d.promise;
+  }
+}
+
+/** builder-util-runtime's CancellationToken, as far as the controller uses it. */
+class FakeToken {
+  cancelled = false;
+  cancel() { this.cancelled = true; this.onCancel?.(); }
 }
 
 function fakeTimers() {
@@ -61,6 +79,7 @@ function setup({ mode = 'install', updater = new FakeUpdater(), silentInstall = 
   const c = new u.UpdateController({
     updater, mode, currentVersion: '0.2.0', silentInstall,
     send: (s) => sent.push(s), log: (m) => logs.push(m), timers: t.timers, now: t.now,
+    createCancellationToken: () => new FakeToken(),
   });
   return { c, t, sent, logs, updater, states: () => sent.map((s) => s.state) };
 }
@@ -114,9 +133,9 @@ describe('update scheduling', () => {
 });
 
 describe('install mode (Windows, Developer ID signed macOS)', () => {
-  it('configures electron-updater for background download and install on quit', () => {
+  it('configures electron-updater for explicit (stoppable) download and install on quit', () => {
     const { updater } = setup();
-    assert.equal(updater.autoDownload, true);
+    assert.equal(updater.autoDownload, false, 'the controller starts the download itself so it owns the CancellationToken');
     assert.equal(updater.autoInstallOnAppQuit, true, '"Later" installs on quit');
     assert.equal(updater.allowPrerelease, false);
   });
@@ -165,6 +184,133 @@ describe('install mode (Windows, Developer ID signed macOS)', () => {
     release({ isUpdateAvailable: false, updateInfo: { version: '0.2.0' } });
     assert.equal((await a).state, 'up-to-date', 'derived from the result when no event came');
     assert.equal(updater.checks, 1);
+  });
+});
+
+describe('stopping the download (install mode)', () => {
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  it('starts the download explicitly with a cancellation token', async () => {
+    const { c, updater } = setup();
+    updater.script = available('0.3.0');
+    assert.equal((await c.check()).state, 'downloading');
+    await flush();
+    assert.equal(updater.downloads.length, 1);
+    assert.ok(updater.downloads[0].token instanceof FakeToken);
+  });
+
+  it('stop cancels the token and reports "available" with downloadStopped; the cancel rejection is not an error', async () => {
+    const { c, updater, sent, logs } = setup();
+    updater.script = available('0.3.0');
+    await c.check();
+    await flush();
+    updater.emit('download-progress', { percent: 30 });
+    assert.equal(c.stopDownload(), true);
+    assert.equal(updater.downloads[0].token.cancelled, true);
+    assert.equal(c.status.state, 'available');
+    assert.equal(c.status.downloadStopped, true);
+    assert.equal(c.status.version, '0.3.0');
+    assert.equal(c.status.percent, undefined);
+    assert.equal(c.status.releaseUrl, 'https://github.com/hadirajabi80/rowlit/releases/tag/v0.3.0');
+    await flush();
+    assert.equal(c.status.state, 'available', 'the CancellationError did not become an error status');
+    assert.ok(!sent.some((s) => s.state === 'error'));
+    assert.ok(logs.some((l) => l.includes('stopped')));
+    // late progress of the cancelled download is ignored
+    updater.emit('download-progress', { percent: 31 });
+    assert.equal(c.status.state, 'available');
+    assert.equal(c.stopDownload(), false, 'nothing left to stop');
+    assert.equal(c.quitAndInstall(), false);
+  });
+
+  it('stop does nothing unless a download is in progress', () => {
+    const { c, updater } = setup();
+    assert.equal(c.stopDownload(), false);
+    updater.emit('update-downloaded', { version: '0.3.0' });
+    assert.equal(c.stopDownload(), false, 'a finished download stays');
+    assert.equal(c.status.state, 'ready');
+    const off = new u.UpdateController({ updater: null, mode: 'disabled', currentVersion: '0.2.0', send: () => {}, log: () => {} });
+    assert.equal(off.stopDownload(), false);
+  });
+
+  it('automatic checks (timer) do not restart a stopped download; a manual check does', async () => {
+    const { c, t, updater } = setup();
+    updater.script = available('0.3.0');
+    c.configure({ autoCheck: true });
+    await t.advance(u.INITIAL_CHECK_DELAY_MS);
+    await flush();
+    assert.equal(c.status.state, 'downloading');
+    assert.equal(updater.downloads.length, 1);
+    c.stopDownload();
+    await flush();
+    await t.advance(u.CHECK_INTERVAL_MS);
+    await t.advance(u.CHECK_INTERVAL_MS);
+    assert.ok(updater.checks >= 3, 'the timer still checks');
+    assert.equal(updater.downloads.length, 1, 'but never downloads the stopped version again');
+    assert.equal(c.status.state, 'available');
+    assert.equal(c.status.downloadStopped, true);
+    assert.equal((await c.check()).state, 'available', 'an explicit automatic check also leaves it');
+    assert.equal(updater.downloads.length, 1);
+    // manual "Download / Resume": a fresh token, a fresh download
+    const r = await c.check({ manual: true });
+    assert.equal(r.state, 'downloading');
+    assert.equal(r.downloadStopped, undefined);
+    assert.equal(r.percent, 0);
+    await flush();
+    assert.equal(updater.downloads.length, 2);
+    assert.notEqual(updater.downloads[1].token, updater.downloads[0].token);
+    assert.equal(updater.downloads[1].token.cancelled, false);
+    updater.emit('update-downloaded', { version: '0.3.0' });
+    assert.equal(c.status.state, 'ready');
+  });
+
+  it('a newer version than the stopped one downloads automatically', async () => {
+    const { c, updater } = setup();
+    updater.script = available('0.3.0');
+    await c.check();
+    await flush();
+    c.stopDownload();
+    await flush();
+    updater.script = available('0.4.0');
+    assert.equal((await c.check()).state, 'downloading');
+    assert.equal(c.status.version, '0.4.0');
+  });
+
+  it('resuming while the cancelled download is still unwinding waits for it', async () => {
+    const { c, updater } = setup();
+    updater.script = available('0.3.0');
+    await c.check();
+    await flush();
+    const first = updater.downloads[0];
+    first.token.onCancel = () => undefined; // electron-updater is still removing the partial file
+    c.stopDownload();
+    await c.check({ manual: true });
+    await flush();
+    assert.equal(updater.downloads.length, 1, 'electron-updater would join the old download: wait until it has settled');
+    first.reject(Object.assign(new Error('cancelled'), { name: 'CancellationError' }));
+    await flush();
+    assert.equal(updater.downloads.length, 2);
+    assert.equal(c.status.state, 'downloading');
+  });
+
+  it('a real download failure is still an error', async () => {
+    const { c, updater } = setup();
+    updater.script = available('0.3.0');
+    await c.check();
+    await flush();
+    updater.downloads[0].reject(new Error('net::ERR_CONNECTION_RESET'));
+    await flush();
+    assert.equal(c.status.state, 'error');
+    assert.equal(c.status.message, 'net::ERR_CONNECTION_RESET');
+  });
+
+  it('notify mode never downloads, so there is nothing to stop', async () => {
+    const { c, updater } = setup({ mode: 'notify' });
+    updater.script = available('0.3.1');
+    await c.check({ manual: true });
+    await flush();
+    assert.equal(updater.downloads.length, 0);
+    assert.equal(c.stopDownload(), false);
   });
 });
 

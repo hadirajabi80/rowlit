@@ -297,10 +297,49 @@ describe('Settings › Updates', () => {
     useUi.setState({ settingsOpen: false });
   });
 
+  it('Stop download while downloading; Resume download after it starts the download again', async () => {
+    const stoppedStatus = status({ state: 'available', version: '0.3.0', downloadStopped: true });
+    const { b } = fakeBridge({
+      cancelUpdateDownload: vi.fn(async () => true),
+      getUpdateStatus: vi.fn(async () => stoppedStatus),
+      checkForUpdates: vi.fn(async () => status({ state: 'downloading', version: '0.3.0', percent: 0 })),
+    });
+    setPlatform(createElectronPlatform(b));
+    useUi.setState({ settingsOpen: true });
+    useSettingsNav.setState({ section: 'updates' });
+    render(<SettingsDialog />);
+    act(() => useUpdates.getState().setStatus(status({ state: 'downloading', version: '0.3.0', percent: 55 })));
+    expect(screen.queryByRole('button', { name: 'Check for updates' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop download' }));
+    await act(async () => undefined);
+    expect(b.cancelUpdateDownload).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Download stopped — Rowlit 0.3.0 is available.');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop download' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume download' }));
+    await act(async () => undefined);
+    expect(b.checkForUpdates).toHaveBeenCalledWith({ manual: true });
+    expect(screen.getByRole('status')).toHaveTextContent('Downloading Rowlit 0.3.0… 0%');
+    expect(screen.getByRole('button', { name: 'Stop download' })).toBeInTheDocument();
+    useUi.setState({ settingsOpen: false });
+  });
+
+  it('shows no Stop download without the bridge method', () => {
+    setPlatform(createElectronPlatform(fakeBridge().b));
+    useUi.setState({ settingsOpen: true });
+    useSettingsNav.setState({ section: 'updates' });
+    render(<SettingsDialog />);
+    act(() => useUpdates.getState().setStatus(status({ state: 'downloading', version: '0.3.0', percent: 5 })));
+    expect(screen.queryByRole('button', { name: 'Stop download' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
+    useUi.setState({ settingsOpen: false });
+  });
+
   it('describes every state in one line', () => {
     expect(describeUpdate(null).chip).toBeNull();
     expect(describeUpdate(status({ state: 'available', mode: 'notify', version: '2.0.0' })).text).toMatch(/available to download/);
     expect(describeUpdate(status({ state: 'downloading', version: '2.0.0', percent: 140 })).percent).toBe(100);
     expect(describeUpdate(status({ state: 'error', message: 'offline' })).text).toMatch(/offline/);
+    expect(describeUpdate(status({ state: 'available', version: '2.0.0', downloadStopped: true }))).toMatchObject({ chip: 'Download stopped', stopped: true });
   });
 });

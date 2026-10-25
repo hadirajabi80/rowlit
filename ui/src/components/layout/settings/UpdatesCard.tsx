@@ -1,9 +1,9 @@
 // Settings › Updates: the installed version, "Check for updates", the update state (the same state machine as the
 // status bar chip: checking / up to date / available / downloading x% / ready → Restart now), automatic checks and
 // the release notes. The browser build has no updater: it links to the releases page.
-import { CircleAlert, CircleCheck, Download, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react';
+import { CircleAlert, CircleCheck, Download, ExternalLink, LoaderCircle, RefreshCw, Square } from 'lucide-react';
 import { APP_NAME } from '../../../app/brand';
-import { checkForUpdatesNow, describeUpdate, openReleasePage, RELEASES_URL, restartToUpdate } from '../../../app/updates';
+import { canStopUpdateDownload, checkForUpdatesNow, describeUpdate, openReleasePage, RELEASES_URL, restartToUpdate, resumeUpdateDownload, stopUpdateDownload } from '../../../app/updates';
 import { getPlatform } from '../../../platform';
 import { AUTO_CHECK_UPDATES_KEY, autoCheckUpdates, useSettings } from '../../../store/settings';
 import { useUpdates } from '../../../store/updates';
@@ -19,6 +19,8 @@ export function UpdatesCard() {
   const busy = status?.state === 'checking' || status?.state === 'downloading';
   const ready = status?.state === 'ready' && status.mode === 'install';
   const notifyAvailable = status?.state === 'available' && status.mode === 'notify';
+  const downloading = status?.state === 'downloading' && canStopUpdateDownload();
+  const stopped = d.stopped === true;
   const version = status?.currentVersion ?? p.appVersion;
   const Icon = status?.state === 'checking' || status?.state === 'downloading' ? LoaderCircle
     : ready ? RefreshCw : status?.state === 'available' ? Download : status?.state === 'error' ? CircleAlert : CircleCheck;
@@ -61,6 +63,14 @@ export function UpdatesCard() {
               ) : notifyAvailable ? (
                 <button type="button" className="btn btn-primary" onClick={() => void openReleasePage(status?.releaseUrl)}>
                   <Download size={16} /> Download
+                </button>
+              ) : downloading ? (
+                <button type="button" className="btn" onClick={() => void stopUpdateDownload()}>
+                  <Square size={14} /> Stop download
+                </button>
+              ) : stopped ? (
+                <button type="button" className="btn btn-primary" onClick={() => void resumeUpdateDownload()}>
+                  <Download size={16} /> Resume download
                 </button>
               ) : desktop ? (
                 <button type="button" className="btn" disabled={busy} onClick={() => void checkForUpdatesNow()}>

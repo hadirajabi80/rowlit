@@ -138,6 +138,8 @@ export function registerIpc(deps: IpcDeps): void {
     (await updates()).configure(o);
   });
   handle(IPC.updatesQuitAndInstall, async () => (await updates()).quitAndInstall());
+  // ---- stop the update download (no arguments to validate)
+  handle(IPC.updatesCancelDownload, async () => (await updates()).stopDownload());
 
   // Fire-and-forget channels: bad input is ignored.
   const on = (channel: string, fn: (e: IpcMainEvent, win: BrowserWindow, ...args: unknown[]) => void) => {

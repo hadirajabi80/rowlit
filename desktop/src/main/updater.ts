@@ -53,6 +53,7 @@ export async function createUpdater(deps: UpdaterDeps): Promise<UpdateController
     const signature = deps.os === 'darwin' ? await macSignature() : undefined;
     const mode = updateModeFor(deps.os, signature);
     const { autoUpdater } = await import('electron-updater');
+    const { CancellationToken } = await import('builder-util-runtime');
     const prefix = (level: string) => (...args: unknown[]) => deps.log(`[${level}] ${args.map(String).join(' ')}`);
     autoUpdater.logger = { info: prefix('info'), warn: prefix('warn'), error: prefix('error'), debug: () => undefined };
     deps.log(`updates: ${mode} mode${signature ? ` (codesign: ${signature})` : ''}, current ${currentVersion}`);
@@ -62,6 +63,7 @@ export async function createUpdater(deps: UpdaterDeps): Promise<UpdateController
       currentVersion,
       send: broadcast,
       log: deps.log,
+      createCancellationToken: () => new CancellationToken(),
       silentInstall: deps.os === 'win32',
     });
   } catch (e) {

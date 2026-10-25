@@ -28,7 +28,7 @@ export function resetUpdateAnnouncements(): void {
  */
 export function announceUpdate(prev: UpdateStatus | null, next: UpdateStatus): void {
   const v = next.version;
-  if (!v || (prev?.state === next.state && prev?.version === v)) return;
+  if (!v || next.downloadStopped || (prev?.state === next.state && prev?.version === v)) return;
   const once = (key: string) => {
     if (announced.has(`${key}:${v}`)) return false;
     announced.add(`${key}:${v}`);
@@ -85,8 +85,7 @@ function report(s: UpdateStatus): void {
       if (s.version && announced.has(`arrived:${s.version}`)) break;
       if (s.version) announced.add(`arrived:${s.version}`);
       toast('info', s.version ? `Downloading Rowlit ${s.version}…` : 'Downloading the update…', "You'll be asked to restart when it is ready.");
-      break;
-    case 'disabled':
+      break;    case 'disabled':
       toast('info', 'Updates are not checked in this build', s.message);
       break;
     case 'error':
@@ -128,6 +127,33 @@ export async function restartToUpdate(): Promise<void> {
   if (!ok) toast('warning', 'The update could not be installed now', 'It will be installed when Rowlit quits.');
 }
 
+/** Whether this build can stop an update download (desktop with a preload that has cancelUpdateDownload). */
+export function canStopUpdateDownload(): boolean {
+  return typeof getPlatform().cancelUpdateDownload === 'function';
+}
+
+/** "Stop download" (install mode, while downloading). The main process then reports 'available' with downloadStopped. */
+export async function stopUpdateDownload(): Promise<void> {
+  const p = getPlatform();
+  try {
+    await p.cancelUpdateDownload?.();
+  } catch (e) {
+    console.warn('[updates] stop download failed', e);
+  }
+  // The pushed status normally arrives first; this covers a lost event (and the race with a download that just finished).
+  try {
+    const s = await p.getUpdateStatus?.();
+    if (s) useUpdates.getState().setStatus(s);
+  } catch {
+    /* keep the pushed status */
+  }
+}
+
+/** "Resume download" after a stopped one: a manual check, which overrides the "stopped" memory of the main process. */
+export function resumeUpdateDownload(): Promise<void> {
+  return checkForUpdatesNow();
+}
+
 /** "Download" (notify mode: ad-hoc signed macOS). */
 export async function openReleasePage(url?: string): Promise<void> {
   await getPlatform().openExternal(url ?? RELEASES_URL);
@@ -144,6 +170,8 @@ export interface UpdateDescription {
   chip: string | null;
   /** 0–100 while downloading. */
   percent?: number;
+  /** The user stopped the download: "Resume download" starts it again. */
+  stopped?: boolean;
 }
 
 export function describeUpdate(s: UpdateStatus | null): UpdateDescription {
@@ -154,6 +182,7 @@ export function describeUpdate(s: UpdateStatus | null): UpdateDescription {
     case 'up-to-date':
       return { tone: 'success', text: `You're up to date — Rowlit ${s.currentVersion} is the latest version.`, chip: null };
     case 'available':
+      if (s.downloadStopped) return { tone: 'accent', text: `Download stopped — Rowlit ${v} is available.`, chip: 'Download stopped', stopped: true };
       return s.mode === 'notify'
         ? { tone: 'accent', text: `Rowlit ${v} is available to download.`, chip: `v${v} available` }
         : { tone: 'accent', text: `Rowlit ${v} is available — downloading in the background…`, chip: `v${v} available` };

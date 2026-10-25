@@ -24,6 +24,20 @@
 .sb-update.ready:hover {
   background: var(--accent-hover);
 }
+/* the stop (×) control next to the chip while downloading */
+.sb-update-group {
+  display: inline-flex;
+  align-items: center;
+}
+.sb-update-stop {
+  width: 20px;
+  padding: 0;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+.sb-update-stop:hover {
+  color: var(--fg);
+}
 .sb-update-label {
   font-variant-numeric: tabular-nums;
 }

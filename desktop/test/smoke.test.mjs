@@ -43,7 +43,7 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
   // ---- windows: closeDetachedWindow, getDetachedTabs, listDetachedTabs, onDetachedTabs, onTabsReattached,
   // openTabWindow, reattachTabs, reportDetachedTabs, windowRole
   assert.deepEqual(r.keys, [
-    'appVersion', 'checkForUpdates', 'closeDetachedWindow', 'configureUpdates', 'getDetachedTabs', 'getEngineInfo',
+    'appVersion', 'cancelUpdateDownload', 'checkForUpdates', 'closeDetachedWindow', 'configureUpdates', 'getDetachedTabs', 'getEngineInfo',
     'getPathForFile', 'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace', 'onDetachedTabs',
     'onEngineRestarted', 'onMenuCommand', 'onTabsReattached', 'onUpdateStatus', 'openExternal', 'openPath', 'openTabWindow', 'platform', 'quitAndInstall',
     'readTextFile', 'reattachTabs', 'reportDetachedTabs', 'revealInFolder', 'saveWorkspace', 'setTitle', 'setTitleBarTheme', 'setZoomFactor', 'showAppMenu',
@@ -67,6 +67,7 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
   assert.equal(r.updateStatus.state, 'disabled');
   assert.equal(r.updateStatus.mode, 'disabled');
   assert.equal(r.manualCheck.state, 'disabled');
+  assert.equal(r.cancelDownload, false, 'nothing is downloading');
   assert.equal(r.badUpdateConfigRejected, true);
   assert.match(r.appVersion, /^\d+\.\d+\.\d+/);
   assert.equal(r.origin, 'dbstudio://app');

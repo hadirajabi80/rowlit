@@ -71,6 +71,8 @@ const bridge: DbStudioBridge = {
   getPathForFile: (file: File) => {
     try { return webUtils.getPathForFile(file); } catch { return ''; }
   },
+  // ---- stop the update download
+  cancelUpdateDownload: () => ipcRenderer.invoke(IPC.updatesCancelDownload) as Promise<boolean>,
 };
 
 contextBridge.exposeInMainWorld('dbstudio', bridge);
