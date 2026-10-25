@@ -64,6 +64,10 @@ engine runs as a local sidecar and the React UI talks to it over authenticated H
 
 ### Exploring data
 
+- **Import Wizard** (CSV/TSV, Excel, JSON/NDJSON → new or existing table, mapping, upsert, bulk load) and **Export**
+  with a scope: loaded rows, selection, current filter (all matching rows) or all records.
+- **Types like SSMS** (alias, table, CLR types, XML schema collections, system types; PostgreSQL/Oracle types),
+  **schema colours**, a **movable results pane** (bottom/right/left/own tab) and **853 snippets** (Ctrl+J).
 - **Results grid** streaming hundreds of thousands of rows: sort, filter, value viewer, right-to-left text, copy as
   TSV/CSV/JSON/Markdown/INSERT, export to CSV, JSON, SQL and **Excel (.xlsx)** with typed cells and a frozen header.
 - **Find in database** (Ctrl+Shift+F): a centred popup that searches object names, columns and code (procedures,
