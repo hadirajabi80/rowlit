@@ -13,7 +13,8 @@ export const IMPORT_VIEW_ID = 'import.wizard';
 const UNSUPPORTED_PROVIDERS = new Set(['cassandra']);
 
 export interface ImportContext {
-  connectionId: string;
+  /** Null when the drop / command could not tell: the wizard asks for the connection in its first step. */
+  connectionId: string | null;
   /** Catalog database key (null for providers without a database level). */
   database: string | null;
   schema: string | null;

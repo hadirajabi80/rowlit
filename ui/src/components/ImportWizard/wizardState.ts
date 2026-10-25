@@ -3,18 +3,38 @@ import {
   autoMatch, defaultNewColumns, tableNameFromFile, type MapChoice, type NewColumnRow,
 } from './model';
 import type {
-  DdlPreview, ImportCapabilities, ImportMode, ImportProgress, ImportSummary, PreviewResult, SourceOptions, TargetTableInfo,
+  DdlPreview, ImportCapabilities, ImportMode, ImportPhase, ImportProgress, ImportSummary, PreviewResult, SourceOptions, TargetTableInfo,
 } from './types';
 
-export const STEPS = ['Source', 'Format', 'Target', 'Mode', 'Run'] as const;
+export const STEPS = ['Source', 'Format', 'Target', 'Columns', 'Options', 'Run'] as const;
 export const STEP_SOURCE = 0;
 export const STEP_FORMAT = 1;
 export const STEP_TARGET = 2;
-export const STEP_MODE = 3;
-export const STEP_RUN = 4;
+export const STEP_COLUMNS = 3;
+export const STEP_OPTIONS = 4;
+export const STEP_RUN = 5;
+
+/** One line under each step name in the stepper. */
+export const STEP_SUMMARY = [
+  'Pick the file',
+  'How it is read',
+  'Where it goes',
+  'Match the columns',
+  'Mode and errors',
+  'Review and import',
+] as const;
+
+/** One line of the live log on the Run step: phase changes and growing error counts (the engine reports counts, not rows). */
+export interface LogLine {
+  /** Milliseconds since the import started. */
+  at: number;
+  tone: 'info' | 'warn';
+  text: string;
+}
 
 export interface RunState {
   status: 'idle' | 'starting' | 'running' | 'done' | 'failed';
+  log: LogLine[];
   jobId: string | null;
   progress: ImportProgress | null;
   /** Rows read as the engine reports them in job.progress (done), when the message is not the JSON form. */
@@ -25,7 +45,29 @@ export interface RunState {
   cancelling: boolean;
 }
 
-export const IDLE_RUN: RunState = { status: 'idle', jobId: null, progress: null, rowsRead: 0, summary: null, error: null, startedAt: null, cancelling: false };
+export const IDLE_RUN: RunState = { status: 'idle', log: [], jobId: null, progress: null, rowsRead: 0, summary: null, error: null, startedAt: null, cancelling: false };
+
+export const PHASE_TEXT: Record<ImportPhase, string> = {
+  preparing: 'Preparing…',
+  truncating: 'Clearing the table…',
+  importing: 'Importing rows…',
+  committing: 'Committing…',
+  done: 'Finishing…',
+};
+
+const MAX_LOG = 200;
+
+/** The log after a progress report: a line when the phase changes and when the number of errors grows. */
+export function progressLog(run: Pick<RunState, 'log' | 'progress' | 'startedAt'>, next: ImportProgress | null, now: number): LogLine[] {
+  if (!next) return run.log;
+  const at = run.startedAt ? Math.max(0, now - run.startedAt) : 0;
+  const out = [...run.log];
+  if (!run.progress || run.progress.phase !== next.phase) out.push({ at, tone: 'info', text: PHASE_TEXT[next.phase] });
+  if (next.errors > (run.progress?.errors ?? 0)) {
+    out.push({ at, tone: 'warn', text: `${next.errors.toLocaleString('en-US')} ${next.errors === 1 ? 'row has' : 'rows have'} failed so far${next.skipped ? ` (${next.skipped.toLocaleString('en-US')} skipped)` : ''}.` });
+  }
+  return out.length > MAX_LOG ? out.slice(out.length - MAX_LOG) : out;
+}
 
 export interface WizardState {
   step: number;

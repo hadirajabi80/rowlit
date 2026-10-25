@@ -1,0 +1,108 @@
+/* Window-wide file drop overlay. Purely visual: it never takes pointer events, so a drop lands on whatever is below. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  background: var(--bg-overlay-soft);
+  pointer-events: none;
+  animation: drop-in var(--dur-fast) var(--ease);
+}
+.drop-frame {
+  position: absolute;
+  inset: var(--space-3);
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+.drop-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 520px;
+  padding: var(--space-8) var(--space-8) var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text);
+  text-align: center;
+}
+.drop-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.drop-title {
+  margin: 0;
+  text-wrap: balance;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-strong);
+}
+.drop-detail {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+.drop-types {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.drop-types li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--space-3);
+  border-radius: 12px;
+  background: var(--bg-active);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.drop-foot {
+  margin: var(--space-3) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+/* over an item that takes the drop itself: the card steps back */
+.drop-overlay.node {
+  align-items: flex-end;
+}
+.drop-overlay.node .drop-frame {
+  background: transparent;
+}
+.drop-overlay.node .drop-card {
+  padding: var(--space-3) var(--space-5);
+}
+.drop-overlay.node .drop-icon,
+.drop-overlay.node .drop-types,
+.drop-overlay.node .drop-foot {
+  display: none;
+}
+.drop-overlay.node .drop-title {
+  font-size: var(--text-lg);
+}
+@keyframes drop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drop-overlay {
+    animation: none;
+  }
+}

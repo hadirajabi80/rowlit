@@ -34,3 +34,21 @@ export function formatOfPath(path: string): SourceFormat | null {
 export function isImportable(path: string): boolean {
   return formatOfPath(path) !== null;
 }
+
+/** Human names of the formats (file card, summaries). */
+export const FORMAT_LABEL: Record<SourceFormat, string> = {
+  csv: 'CSV', tsv: 'TSV', xlsx: 'Excel workbook', json: 'JSON', ndjson: 'NDJSON',
+};
+
+/** Short badge text of a format ("CSV", "XLSX"). */
+export const FORMAT_BADGE: Record<SourceFormat, string> = { csv: 'CSV', tsv: 'TSV', xlsx: 'XLSX', json: 'JSON', ndjson: 'NDJSON' };
+
+/** A SQL script: dropping one opens it in a console instead of the wizard. */
+export function isSqlFile(path: string): boolean {
+  return extensionOf(path) === 'sql';
+}
+
+/** Excel 97-2003 workbooks: recognised only to explain why they cannot be read (the engine reads .xlsx). */
+export function isLegacyExcel(path: string): boolean {
+  return extensionOf(path) === 'xls';
+}
