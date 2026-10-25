@@ -54,3 +54,33 @@
   border-bottom-left-radius: 0;
   border-left: 1px solid color-mix(in srgb, var(--text-on-accent) 35%, transparent);
 }
+
+/* Schema indicator / switcher next to the database pill (SQL Server, PostgreSQL, Snowflake). */
+.schema-pill .muted {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+/* SQL Server cannot change a session's schema: the pill is the "editor schema", dashed when it differs from the server's. */
+.schema-pill.override {
+  border-style: dashed;
+}
+.schema-pill-tag {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.schema-picker .schema-picker-note {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.schema-picker .schema-picker-note b {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.schema-picker .scope-dot {
+  flex-shrink: 0;
+}

@@ -50,6 +50,15 @@ public sealed record CreateSessionRequest(string ConnectionId, string? Database,
 
 public sealed record DatabaseRequest(string Database);
 
+/// <summary><c>POST /sessions/{sid}/schema</c>: null or empty returns to the schema the session started with.</summary>
+public sealed record SchemaRequest(string? Schema);
+
+/// <summary><c>GET /sessions/{sid}/schema</c>: the session's default schema (the one unqualified names resolve to).</summary>
+/// <param name="Schema">Null when unknown.</param>
+/// <param name="SearchPath">PostgreSQL: the effective search_path, first entry first.</param>
+/// <param name="Mode">none (not offered, the request fails with NOT_SUPPORTED) | readOnly (SQL Server) | session.</param>
+public sealed record SchemaResponse(string? Schema, IReadOnlyList<string>? SearchPath, DbStudio.Core.Models.SchemaMode Mode);
+
 public sealed record TxModeRequest(TransactionMode TxMode);
 
 public sealed record ExecuteSource(string? TabId, string? Title);

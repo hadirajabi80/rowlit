@@ -135,6 +135,7 @@ export const MENUS: MenuDef[] = [
     items: [
       cmd('connections.change', 'Change connection…', 'Mod+Shift+K'),
       cmd('connections.changeDatabase', 'Change database…', 'Mod+Shift+D'),
+      cmd('connections.changeSchema', 'Change schema…', undefined),
       sep,
       cmd('designer.newTable', 'New table…', 'Mod+Alt+T', { optional: true }),
       cmd('designer.newView', 'New view…', undefined, { optional: true }),

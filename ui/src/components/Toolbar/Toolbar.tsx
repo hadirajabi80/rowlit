@@ -28,6 +28,8 @@ import { useTabScopeColor } from '../../lib/tabScope';
 import { showMenuBelow, type MenuItem } from '../common/Menu';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { Select } from '../common/Select';
+import { hasSchemaSwitcher } from '../../lib/schemaScope';
+import { SchemaPill } from './SchemaPill';
 import { CommandButton } from '../layout/CommandButton';
 import { commandMenuItems } from '../layout/commandMenu';
 import { OverflowToolbar, type OverflowItem } from '../layout/OverflowToolbar';
@@ -332,6 +334,14 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       ),
+    });
+  }
+  // SQL Server / PostgreSQL / Snowflake: where unqualified names resolve (Oracle and the single-level providers: the switcher above is the schema)
+  if (conn && hasSchemaSwitcher(conn.providerId)) {
+    items.push({
+      id: 'schema', priority: 5,
+      menu: () => commandMenuItems([{ command: 'connections.changeSchema' }]),
+      node: <SchemaPill tab={tab} />,
     });
   }
   if (transactional) items.push({

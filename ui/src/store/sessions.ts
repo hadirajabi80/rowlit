@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, isApiError } from '../api/client';
 import type { SessionInfo, TxMode, WsEventOf } from '../api/types';
+import { useTabs } from './tabs';
 
 /**
  * Engine sessions, keyed by sessionId; each editor tab owns at most one (created lazily on first run,
@@ -19,12 +20,17 @@ interface SessionsState {
   /** See TxEnd; null until this window ends a transaction. */
   lastTxEnd: TxEnd | null;
   /** Ensure the tab has a session on this connection/database; replaces a session on another connection. */
-  ensure(tabId: string, connectionId: string, database: string | null, txMode: TxMode): Promise<SessionInfo>;
+  ensure(tabId: string, connectionId: string, database: string | null, txMode: TxMode, schema?: string | null): Promise<SessionInfo>;
   forTab(tabId: string): SessionInfo | undefined;
   setTxMode(tabId: string, mode: TxMode): Promise<SessionInfo | undefined>;
   commit(tabId: string): Promise<void>;
   rollback(tabId: string): Promise<void>;
   changeDatabase(tabId: string, database: string): Promise<void>;
+  /**
+   * Sets the session's default schema (PostgreSQL search_path, Snowflake USE SCHEMA; null = the one it started with) and
+   * remembers it on the tab. Without a session the tab just remembers it: the next run applies it.
+   */
+  changeSchema(tabId: string, schema: string | null): Promise<void>;
   close(tabId: string, force?: boolean): Promise<void>;
   applyChanged(ev: WsEventOf<'session.changed'>): void;
   applyDone(ev: WsEventOf<'exec.done'>): void;
@@ -138,7 +144,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
     return sid ? get().sessions[sid] : undefined;
   },
 
-  async ensure(tabId, connectionId, database, txMode) {
+  async ensure(tabId, connectionId, database, txMode, schema) {
     const existing = get().forTab(tabId);
     if (existing && existing.connectionId === connectionId && existing.state !== 'closed') {
       if (database && existing.database !== database) {
@@ -156,8 +162,18 @@ export const useSessions = create<SessionsState>((set, get) => ({
     if (pending) return pending;
     const p = (async () => {
       if (existing) await get().close(tabId, true);
-      const info = await api.createSession({ connectionId, database, txMode, captureServerOutput: true });
+      let info = await api.createSession({ connectionId, database, txMode, captureServerOutput: true });
       get().upsert(info, tabId);
+      // A reopened session (restored workspace, switched connection) starts in the server's default schema: put it back
+      // in the one the tab remembers. Only a new session is touched; a live one already follows the editor's own SET.
+      if (schema && info.schemaMode === 'session' && info.schema !== schema) {
+        try {
+          info = await api.changeSchema(info.sessionId, schema);
+          get().upsert(info, tabId);
+        } catch (e) {
+          console.warn('[sessions] could not re-apply the console schema', e);
+        }
+      }
       return info;
     })().finally(() => creating.delete(tabId));
     creating.set(tabId, p);
@@ -190,6 +206,12 @@ export const useSessions = create<SessionsState>((set, get) => ({
     const s = get().forTab(tabId);
     if (!s) return;
     get().upsert(await api.changeDatabase(s.sessionId, database), tabId);
+  },
+
+  async changeSchema(tabId, schema) {
+    const s = get().forTab(tabId);
+    if (s && s.schemaMode === 'session') get().upsert(await api.changeSchema(s.sessionId, schema), tabId);
+    useTabs.getState().setSchema(tabId, schema);
   },
 
   async close(tabId, force = false) {
@@ -300,12 +322,21 @@ export const useSessions = create<SessionsState>((set, get) => ({
   applyChanged(ev) {
     const cur = get().sessions[ev.sessionId];
     if (!cur) return;
+    const schema = ev.schema === undefined ? cur.schema : ev.schema;
     set({
       sessions: {
         ...get().sessions,
-        [ev.sessionId]: { ...cur, state: ev.state, txOpen: ev.txOpen, database: ev.database ?? cur.database, txMode: ev.txMode ?? cur.txMode },
+        [ev.sessionId]: {
+          ...cur, state: ev.state, txOpen: ev.txOpen, database: ev.database ?? cur.database, txMode: ev.txMode ?? cur.txMode,
+          schema, searchPath: ev.searchPath === undefined ? cur.searchPath : ev.searchPath,
+        },
       },
     });
+    // A SET search_path / USE SCHEMA typed in the editor moves the session's schema: the tab remembers where it ended up.
+    if (cur.schemaMode === 'session' && schema && cur.schema && schema !== cur.schema) {
+      const tabId = Object.entries(get().byTab).find(([, sid]) => sid === ev.sessionId)?.[0];
+      if (tabId) useTabs.getState().setSchema(tabId, schema);
+    }
   },
 
   applyDone(ev) {

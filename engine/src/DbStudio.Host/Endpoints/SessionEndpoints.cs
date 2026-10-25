@@ -1,5 +1,6 @@
 using DbStudio.Core.Export;
 using DbStudio.Core.Models;
+using DbStudio.Core.Providers;
 using DbStudio.Core.Services;
 using DbStudio.Host.Contracts;
 using DbStudio.Host.Infrastructure;
@@ -44,6 +45,31 @@ public static class SessionEndpoints
                 // PostgreSQL connections are bound to one database: reopen the session on the new one (same session id).
                 await sessions.ReopenWithDatabaseAsync(h, req.Database, ct);
             }
+            sessions.PublishChanged(h);
+            return h.ToInfo();
+        });
+
+        // The default schema: read from the server (cached while the session is busy), changed where the dialect has a session-level one.
+        g.MapGet("/{sid}/schema", async (string sid, SessionManager sessions, CancellationToken ct) =>
+        {
+            var h = sessions.Get(sid);
+            if (h.Session.SchemaMode == SchemaMode.None)
+                throw new NotSupportedException("This provider has no default schema separate from the database; the database switcher is the schema.");
+            try
+            {
+                await h.Session.RefreshSchemaAsync(ct);
+            }
+            catch (SessionBusyException)
+            {
+                // an execution is running: the last known value
+            }
+            return new SchemaResponse(h.Session.CurrentSchema, h.Session.SearchPath, h.Session.SchemaMode);
+        });
+
+        g.MapPost("/{sid}/schema", async (HttpContext http, string sid, SchemaRequest? req, SessionManager sessions, CancellationToken ct) =>
+        {
+            var h = Touch(http, sessions, sid);
+            await h.Session.ChangeSchemaAsync(req?.Schema, ct);
             sessions.PublishChanged(h);
             return h.ToInfo();
         });

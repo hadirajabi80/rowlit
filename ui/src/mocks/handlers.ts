@@ -134,6 +134,20 @@ export function createHandlers(engine: MockEngine) {
       engine.changed(s);
       return ok(engine.info(s));
     }),
+    http.get(`${P}/sessions/:sid/schema`, ({ params }) => {
+      const s = engine.sessions.get(String(params.sid));
+      if (!s) return err(404, 'NOT_FOUND', 'Session not found');
+      if (!s.schemaMode || s.schemaMode === 'none') return err(400, 'NOT_SUPPORTED', 'This provider has no default schema separate from the database.');
+      return ok({ schema: s.schema ?? null, searchPath: s.searchPath ?? null, mode: s.schemaMode });
+    }),
+    http.post(`${P}/sessions/:sid/schema`, async ({ params, request }) => {
+      const s = engine.sessions.get(String(params.sid));
+      if (!s) return err(404, 'NOT_FOUND', 'Session not found');
+      if (s.schemaMode !== 'session') return err(400, 'NOT_SUPPORTED', s.schemaMode === 'readOnly' ? "This server uses the login's default schema for a session; qualify names or change the user's default schema." : 'This provider does not have a separate default schema; change the database instead.');
+      engine.setSchema(s, ((await request.json()) as { schema: string | null }).schema);
+      engine.changed(s);
+      return ok(engine.info(s));
+    }),
     http.post(`${P}/sessions/:sid/tx-mode`, async ({ params, request }) => {
       const s = engine.sessions.get(String(params.sid));
       if (!s) return err(404, 'NOT_FOUND', 'Session not found');

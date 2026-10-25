@@ -19,7 +19,10 @@ public sealed record SessionInfo(
     string? ExecutingSince = null,
     string? TabId = null,
     string? Label = null,
-    bool Orphan = false);
+    bool Orphan = false,
+    string? Schema = null,
+    IReadOnlyList<string>? SearchPath = null,
+    SchemaMode SchemaMode = SchemaMode.None);
 
 /// <summary>A tab session: the provider session plus engine bookkeeping (busy flag, reopen data).</summary>
 public sealed class SessionHandle
@@ -96,7 +99,8 @@ public sealed class SessionHandle
         return new SessionInfo(
             Id, Profile.Id, Session.Server, Session.CurrentDatabase, Session.TxMode, Session.TxOpen,
             IsReserved && Session.State == SessionState.Idle ? SessionState.Executing : Session.State, Dialect,
-            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan);
+            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan,
+            Session.CurrentSchema, Session.SearchPath, Session.SchemaMode);
     }
 }
 
@@ -330,7 +334,7 @@ public sealed class SessionManager : IAsyncDisposable
     public void PublishChanged(SessionHandle h)
     {
         var info = h.ToInfo();
-        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode));
+        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode, info.Schema, info.SearchPath));
     }
 
     /// <summary>Closes a session. With an open transaction requires <paramref name="force"/> (rolls back).</summary>
@@ -350,7 +354,7 @@ public sealed class SessionManager : IAsyncDisposable
             _log.LogWarning(ex, "Error closing session {SessionId}", sessionId);
         }
         _results.ReleaseSession(sessionId);
-        _events.Publish(new SessionChangedEvent(sessionId, SessionState.Closed, false, h.Session.CurrentDatabase, h.Session.TxMode));
+        _events.Publish(new SessionChangedEvent(sessionId, SessionState.Closed, false, h.Session.CurrentDatabase, h.Session.TxMode, h.Session.CurrentSchema, h.Session.SearchPath));
     }
 
     /// <summary>Closes every session of a connection (profile deleted).</summary>

@@ -27,6 +27,7 @@ import { useExecuteRoutine } from './components/ExecuteRoutine/store';
 import { SearchDialogHost } from './components/Search/SearchDialogHost';
 import { SavedQueryDialogHost } from './components/SavedQueries/SavedQueryDialogHost';
 import { ScopeColorDialogHost } from './components/ScopeColor/ScopeColorDialogHost';
+import { SchemaPickerHost } from './components/Toolbar/SchemaPickerHost';
 import { ShortcutSheet } from './components/Shortcuts/ShortcutSheet';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DesignerHost } from './designer/host';
@@ -149,6 +150,9 @@ function Shell() {
       </ModalBoundary>
       <ModalBoundary area="the connection switcher" open={(s) => s.switcher} close={() => useUi.getState().openSwitcher(null)}>
         <ConnectionSwitcher />
+      </ModalBoundary>
+      <ModalBoundary area="the schema picker" open={(s) => s.switcher?.mode === 'schema'} close={() => useUi.getState().openSwitcher(null)}>
+        <SchemaPickerHost />
       </ModalBoundary>
       <ModalBoundary area="the multi-run dialog" open={(s) => s.multiRunFor} close={() => useUi.getState().openMultiRun(null)}>
         <MultiRunDialog />

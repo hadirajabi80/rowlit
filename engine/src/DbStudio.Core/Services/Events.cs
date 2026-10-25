@@ -53,7 +53,10 @@ public sealed record ExecPlanEvent(string ExecutionId, Dialect Dialect, string M
 
 public sealed record ExecDiagnosticsEvent(string ExecutionId, IReadOnlyList<SqlDiagnostic> Diagnostics) : EngineEvent("exec.diagnostics");
 
-public sealed record SessionChangedEvent(string SessionId, SessionState State, bool TxOpen, string? Database, TransactionMode TxMode) : EngineEvent("session.changed");
+/// <param name="Schema">The session's default schema (<c>IDbSession.CurrentSchema</c>), null when not tracked.</param>
+/// <param name="SearchPath">PostgreSQL: the effective search_path.</param>
+public sealed record SessionChangedEvent(string SessionId, SessionState State, bool TxOpen, string? Database, TransactionMode TxMode,
+    string? Schema = null, IReadOnlyList<string>? SearchPath = null) : EngineEvent("session.changed");
 
 public sealed record CatalogChangedEvent(string ConnectionId, string? Database, IReadOnlyList<string> Schemas, int Version) : EngineEvent("catalog.changed");
 
