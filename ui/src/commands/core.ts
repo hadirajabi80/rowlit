@@ -14,6 +14,7 @@ import { peekEditSession } from '../designer/editSession';
 import { pluralize } from '../components/common/text';
 import { useExplorer } from '../components/Explorer/explorerStore';
 import { cycleRegion, focusEditorRegion, focusExplorer, focusResults } from '../components/layout/regions';
+import { consoleOfResults, resultsTabOf, showResults, toggleResultsFor } from '../components/ResultsPane/dock';
 import { isTabular, qualifiedName } from '../lib/sql';
 import { getPlatform } from '../platform';
 import { dbKey, useCatalog } from '../store/catalog';
@@ -107,12 +108,14 @@ export const CORE_COMMANDS: Command<never>[] = [
   {
     // In an F4 "Edit:" console (procedure, function, view, trigger…) Save writes the object to the database, like
     // SSMS / Navicat / DataGrip; in a console bound to a saved query ("Query: name") it writes the query back
-    // (components/SavedQueries); elsewhere it saves the .sql file. Save as… always writes a file.
+    // (components/SavedQueries); a console opened from / saved to a .sql file (filePath) writes that file; any other
+    // console on a SQL connection opens "Save query to schema…" (the default). Save as… always writes a file.
     id: 'file.save', title: 'Save', category: 'File', icon: 'Save', shortcut: 'Mod+S', when: () => !!getActiveConsole(),
     run: () => {
       const t = getActiveConsole();
       if (t && peekEditSession(t.id)) void saveEditToDatabase(t.id);
       else if (t?.savedQuery && runCommand('queries.save', { kind: 'tab', tabId: t.id })) return;
+      else if (t && !t.filePath && runCommand('queries.saveToSchema', { kind: 'tab', tabId: t.id })) return;
       else void saveActiveFile(false);
     },
   },
@@ -170,7 +173,15 @@ export const CORE_COMMANDS: Command<never>[] = [
     },
   },
   { id: 'connections.showActive', title: 'Show active connections', category: 'Connections', keywords: 'sessions', icon: 'Activity', run: () => useUi.getState().showDock('connections') },
-  { id: 'view.toggleResults', title: 'Toggle results pane', category: 'View', icon: 'Rows2', shortcut: 'Mod+R', run: () => useUi.getState().toggle('resultsVisible') },
+  { id: 'view.toggleResults', title: 'Toggle results pane', category: 'View', icon: 'Rows2', shortcut: 'Mod+R',
+    // Ordinary consoles share the flag; an "Edit:" console shows / hides its own pane; with the results in a tab it brings that tab forward.
+    run: (a?: unknown) => {
+      const c = consoleOfResults(isTabTarget(a) ? a.tabId : null);
+      if (!c) useUi.getState().toggle('resultsVisible');
+      else if (resultsTabOf(c.id)) showResults(c.id);
+      else toggleResultsFor(c.id);
+    },
+  },
   { id: 'view.maximizeResults', title: 'Maximize / restore results pane', category: 'View', icon: 'Maximize2', shortcut: 'Mod+Shift+R', run: () => useUi.getState().setResultsMaximized(!useUi.getState().resultsMaximized) },
   // Keyboard regions: Alt+1/2/3 and F6 / Shift+F6 (dock → editor → results → status bar).
   { id: 'view.focusExplorer', title: 'Focus explorer', category: 'View', shortcut: 'Alt+1', icon: 'Database', keywords: 'tree side panel keyboard', run: () => void focusExplorer() },

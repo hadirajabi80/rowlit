@@ -96,6 +96,10 @@ export const MENUS: MenuDef[] = [
       cmd('er.open', 'ER diagram', 'Mod+Alt+E', { optional: true }),
       cmd('view.toggleResults', 'Toggle results pane', 'Mod+R'),
       cmd('view.maximizeResults', 'Maximize / restore results pane', 'Mod+Shift+R'),
+      cmd('results.dockBottom', 'Dock results at the bottom', undefined, { optional: true }),
+      cmd('results.dockRight', 'Dock results on the right', undefined, { optional: true }),
+      cmd('results.dockLeft', 'Dock results on the left', undefined, { optional: true }),
+      cmd('results.openInTab', 'Open results in a new tab', undefined, { optional: true }),
       sep,
       cmd('view.toggleTheme', 'Toggle light / dark theme'),
       cmd('view.toggleDensity', 'Toggle compact density'),
@@ -197,7 +201,8 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
     c('objects.open', true), c('search.findInDatabase', true), c('connections.openConsole'), 'separator',
     n('designer.newTable'), n('designer.newView'), n('designer.newProcedure'), n('designer.newFunction'), n('designer.newPackage'),
     n('designer.newTrigger'), n('queries.new'), 'separator',
-    c('connections.refreshCatalog'), c('er.open', true), c('explorer.copyName'),
+    c('connections.refreshCatalog'), c('er.open', true), c('explorer.copyName'), 'separator',
+    { command: 'scope.setColor', optional: true, hideDisabled: true, label: 'Set colour…' },
   ],
   /** A schema's "Queries" folder (components/SavedQueries). */
   'explorer.queries': [

@@ -14,9 +14,11 @@ import { dbKey, useCatalog } from '../../store/catalog';
 import { getSourceModule, useSourceModules } from '../../lib/sources';
 import { dialectOf, kindOf, providerKind, useConnections } from '../../store/connections';
 import { useSavedQueries } from '../../store/savedQueries';
+import { useSettings } from '../../store/settings';
 import { useSourceClients } from '../../store/sourceClients';
 import { connectionActivity, useSessions, type ConnectionActivity } from '../../store/sessions';
 import { connColorCss, connColorName } from '../../theme/connColors';
+import { ownScopeColor, readScopeColors, resolveScopeColor, scopeColorLabel } from '../../lib/scopeColors';
 import { showContextMenu } from '../common/Menu';
 import { ColumnIcon, DatabaseIcon, ObjectIcon } from '../common/icons';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
@@ -510,6 +512,19 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   const active = !!activity;
   const conn = useConnections((s) => (r.kind === 'connection' ? s.connections.find((c) => c.id === r.connectionId) : undefined));
   const draggable = r.kind === 'object' || r.kind === 'column' || r.kind === 'query';
+  // Schema / database colour tags: a dot on the node itself, a stripe and a faint tint on everything inside it.
+  const scopeHex = useSettings((s) => {
+    if (!r.connectionId || r.kind === 'connection' || r.kind === 'cfolder' || r.kind === 'status' || r.kind === 'source') return null;
+    return resolveScopeColor(readScopeColors(s.settings.ui), r.connectionId, r.database ?? null, r.kind === 'database' ? null : r.schema ?? null);
+  });
+  const scopeCss = connColorCss(scopeHex ?? undefined);
+  const scopeNode = r.kind === 'database' || r.kind === 'schema';
+  // The dot marks a colour set on this very node; a schema that only inherits its database's gets the stripe and tint.
+  const scopeOwn = useSettings((s) => (scopeNode && r.connectionId
+    ? ownScopeColor(readScopeColors(s.settings.ui), { connectionId: r.connectionId, database: r.database ?? null, schema: r.kind === 'database' ? null : r.schema ?? null }) !== null
+    : false));
+  const scopeLabel = scopeColorLabel(scopeHex, r.kind === 'database' ? 'database' : 'schema');
+  const scopeText = scopeLabel && !scopeOwn ? `${scopeLabel} (from the database)` : scopeLabel;
   let icon: ReactNode = null;
   if (r.kind === 'connection' && conn) icon = <ProviderLogo providerId={conn.providerId} size={16} />;
   else if (r.kind === 'cfolder') icon = <Folder size={16} strokeWidth={1.5} className="obj-icon obj-folder" />;
@@ -533,19 +548,20 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
     r.kind === 'column' ? `${r.label} ${r.detail ?? ''}${r.column?.pk ? ' · primary key' : ''}${r.column?.fk ? ' · foreign key' : ''}`
       : r.kind === 'connection' && conn ? `${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}${conn.readOnly ? ' · read-only' : ''}`
         : r.kind === 'query' && r.savedQuery ? savedQueryTooltip(r.savedQuery.name, r.savedQuery.description, r.savedQuery.sql)
-          : r.object?.cm ?? undefined;
+          : scopeNode && scopeText ? `${r.label} · ${scopeText}`
+            : r.object?.cm ?? undefined;
 
   return (
     <div
       id={`tree-${r.id}`}
-      className={`tree-row${selected ? ' selected' : ''}${r.kind === 'status' ? ` status ${r.status}` : ''}${r.kind === 'connection' ? ' root' : ''}`}
+      className={`tree-row${selected ? ' selected' : ''}${r.kind === 'status' ? ` status ${r.status}` : ''}${r.kind === 'connection' ? ' root' : ''}${scopeCss ? ` has-scope${scopeNode ? ' scope-node' : ''}` : ''}`}
       role="treeitem"
       aria-level={r.depth + 1}
       aria-expanded={r.expandable ? r.expanded : undefined}
       aria-selected={selected}
       data-kind={r.kind}
       data-id={r.id}
-      style={{ top, paddingLeft: 8 + r.depth * 16, ...(color ? { ['--conn-color' as string]: color } : {}) }}
+      style={{ top, paddingLeft: 8 + r.depth * 16, ...(color ? { ['--conn-color' as string]: color } : {}), ...(scopeCss ? { ['--scope-color' as string]: scopeCss } : {}) }}
       draggable={draggable}
       onDragStart={(e) => {
         if (!r.connectionId) return;
@@ -580,6 +596,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       title={title}
     >
       {r.kind === 'connection' && color && <span className="tree-conn-bar" aria-hidden="true" />}
+      {scopeCss && <span className="tree-scope" aria-hidden="true" />}
       <span
         className="tree-twisty"
         onClick={(e) => {
@@ -590,6 +607,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
         {r.expandable ? r.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} /> : null}
       </span>
       {icon && <span className="tree-icon">{icon}</span>}
+      {scopeNode && scopeOwn && <span className="scope-dot" role="img" aria-label={scopeLabel ?? undefined} />}
       <span className={`tree-label${r.kind === 'connection' ? ' strong' : ''}`} dir="auto">
         <Highlight text={r.label} positions={r.match} />
       </span>

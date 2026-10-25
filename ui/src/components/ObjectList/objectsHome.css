@@ -206,3 +206,7 @@ button.oh-crumb:focus-visible {
   position: absolute;
   inset: 0;
 }
+/* A schema / database colour tag tints the breadcrumb bar's lower edge (lib/scopeColors.ts) */
+.oh-crumbs.has-scope-color {
+  box-shadow: inset 0 -2px 0 var(--scope-color);
+}

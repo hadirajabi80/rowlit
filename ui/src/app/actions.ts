@@ -23,6 +23,7 @@ import { SHORT_WINDOW, toast, useUi } from '../store/ui';
 import { displayShortcut } from '../commands/keys';
 import { pluralize } from '../components/common/text';
 import { getTabView } from '../components/layout/tabViews';
+import { outputMessages, revealResultsForRun, showResults } from '../components/ResultsPane/dock';
 import { runEditTab } from '../designer/editRun';
 import { editSessionOf, peekEditSession, rememberEdit } from '../designer/editSession';
 import { EDIT_RUN_STOP_REASON, useDesignerUi, type EditSession } from '../designer/store';
@@ -81,6 +82,11 @@ export interface RunOptions {
    * error lines are not marked in the editor.
    */
   detached?: boolean;
+  /**
+   * Do not open the results pane for this run (saving an object: its messages are shown as a toast); a failure still
+   * opens it, on Messages.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -150,7 +156,7 @@ export async function runInTab(tabId: string, label: RunLabel, batches: SqlBatch
     localId, tabId, connectionId: conn.id, sessionId: useSessions.getState().byTab[tabId] ?? null, label, batches, maxRows,
     confirmedDestructive: confirmed, params: params ?? null, detached: opts.detached,
   }));
-  if (!useUi.getState().resultsVisible) useUi.getState().toggle('resultsVisible');
+  revealResultsForRun(tabId, localId, opts.quiet);
   noteFirstRun(tabId);
 
   try {
@@ -578,17 +584,22 @@ export async function saveEditToDatabase(tabId: string): Promise<void> {
   const before = useResults.getState().byTab[tabId];
   // The text being saved: the "unsaved changes" dot of the toolbar's Save button compares with it.
   const savedText = getEditor(tabId)?.getValue() ?? tab.text;
-  await runInTab(tabId, 'script', target.batches);
+  // Quiet: saving produces messages, not a result worth the editor's space. They come back as a compact toast below; only
+  // an error (or rows) opens the results pane.
+  await runInTab(tabId, 'script', target.batches, { quiet: true });
   const id = useResults.getState().byTab[tabId];
   if (!id || id === before) return; // did not start (cancelled confirm, no connection…): runInTab already said why
+  let settled = false; // showResults below changes the results store, which calls settle again
   const settle = (e: ExecutionState | undefined): boolean => {
     if (!e || isRunning(e)) return false;
+    if (settled) return true;
+    settled = true;
     if (e.status === 'ok') {
       if (edit.isNew) {
-        toast('success', `Created ${noun} ${edit.ref.name}`, `${displayShortcut('Mod+S')} saves further changes to the database.`);
+        toast('success', `Created ${noun} ${edit.ref.name}`, withMessages(`${displayShortcut('Mod+S')} saves further changes to the database.`, e), showMessagesAction(tabId, e));
         promoteNewEdit(tabId, edit);
       } else {
-        toast('success', `Saved ${noun} ${edit.ref.name}`, 'The changes were applied to the database.');
+        toast('success', `Saved ${noun} ${edit.ref.name}`, withMessages('The changes were applied to the database.', e), showMessagesAction(tabId, e));
       }
       // Only the object's schema, revalidated in place: the explorer keeps its rows (no full refresh, no flash).
       void useCatalog.getState().revalidate(edit.connectionId, catalogDatabase(edit.connectionId, edit.ref.database ?? edit.database), [edit.ref.schema]);
@@ -597,12 +608,43 @@ export async function saveEditToDatabase(tabId: string): Promise<void> {
         .then((d) => { if (peekEditSession(tabId)) rememberEdit(tabId, { ...edit, isNew: false, serverDdl: d.ddl, savedText }); })
         .catch(() => { if (peekEditSession(tabId)) rememberEdit(tabId, { ...edit, isNew: false, savedText }); });
     } else if (e.status === 'error') {
-      toast('error', `${edit.ref.name} was not saved`, 'The database reported an error; see Messages for the line.');
+      showResults(tabId, 'messages');
+      toast('error', `${edit.ref.name} was not saved`, firstErrorLine(e) ?? 'The database reported an error; see Messages for the line.');
     }
     return true;
   };
   if (settle(useResults.getState().executions[id])) return;
   const unsub = useResults.subscribe((s) => { if (settle(s.executions[id])) unsub(); });
+}
+
+/** The first message of a finished run, shortened, with how many more there are ("Line 4: …" for a located one). */
+function messageSummary(e: ExecutionState): string | null {
+  const list = outputMessages(e);
+  if (!list.length) return null;
+  const m = list[0];
+  const text = m.text.trim().replace(/\s+/g, ' ');
+  const head = text.length > 140 ? `${text.slice(0, 139)}…` : text;
+  return `${m.line ? `Line ${m.line}: ` : ''}${head}${list.length > 1 ? ` (+${list.length - 1} more)` : ''}`;
+}
+
+/** The toast detail of a save: what it did, plus the server's own messages (PRINT, NOTICE, warnings) when it sent any. */
+function withMessages(base: string, e: ExecutionState): string {
+  const note = messageSummary(e);
+  return note ? `${base} Server: ${note}` : base;
+}
+
+/** "Show messages" on a toast, when the run has messages or rows the toast cannot hold. */
+function showMessagesAction(tabId: string, e: ExecutionState): { label: string; run: () => void } | undefined {
+  if (e.resultSets.length) return { label: 'Show results', run: () => showResults(tabId) };
+  return outputMessages(e).length ? { label: 'Show messages', run: () => showResults(tabId, 'messages') } : undefined;
+}
+
+/** "Line 7: ORA-…" of the first error message of a failed run. */
+function firstErrorLine(e: ExecutionState): string | null {
+  const m = e.messages.find((x) => x.severity === 'error' && x.text.trim());
+  if (!m) return null;
+  const t = m.text.trim().replace(/\s+/g, ' ');
+  return `${m.line ? `Line ${m.line}: ` : ''}${t.length > 200 ? `${t.slice(0, 199)}…` : t}`;
 }
 
 /** After a new object was created: an ordinary "Edit:" console from now on (Run executes routines, Save alters). */

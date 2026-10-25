@@ -67,6 +67,8 @@ interface Layout {
   historyWidth: number;
   /** Results pane height as a fraction of the console area. */
   resultsFraction: number;
+  /** Results pane width as a fraction of the console area when it is docked on the left / right. */
+  resultsWidthFraction: number;
   /** Left dock visible (Ctrl+B). */
   explorerVisible: boolean;
   historyVisible: boolean;
@@ -94,6 +96,7 @@ const DEFAULT_LAYOUT: Layout = {
   explorerWidth: 0,
   historyWidth: 340,
   resultsFraction: 0.45,
+  resultsWidthFraction: 0.45,
   explorerVisible: true,
   historyVisible: false,
   resultsVisible: true,
@@ -111,6 +114,7 @@ function loadLayout(): Layout {
       l.explorerWidth = !l.explorerWidth || l.explorerWidth === 280 ? 0 : Math.max(DOCK_MIN, Math.min(DOCK_MAX, l.explorerWidth));
       if (!['explorer', 'history', 'connections'].includes(l.dock)) l.dock = 'explorer';
       if (!l.tabSplits || typeof l.tabSplits !== 'object') l.tabSplits = {};
+      if (!(l.resultsWidthFraction > 0 && l.resultsWidthFraction < 1)) l.resultsWidthFraction = DEFAULT_LAYOUT.resultsWidthFraction;
       return l;
     }
   } catch {
@@ -132,6 +136,11 @@ interface UiState extends Layout {
   /** Multi-run dialog for a console tab (Ctrl+Alt+Enter). */
   multiRunFor: string | null;
   resultsMaximized: boolean;
+  /**
+   * Results pane shown / hidden per console, set by the user (×, Ctrl+R) or by a run. Ordinary consoles without an
+   * entry follow the global `resultsVisible`; "Edit:" consoles without one start hidden (components/ResultsPane/dock.ts).
+   */
+  tabResultsShown: Record<string, boolean>;
   connectionDialog: ConnectionDialogState | null;
   confirm: ConfirmRequest | null;
   toasts: Toast[];
@@ -153,6 +162,8 @@ interface UiState extends Layout {
   openSwitcher(s: SwitcherState | null): void;
   openMultiRun(tabId: string | null): void;
   setResultsMaximized(v: boolean): void;
+  /** Show / hide the results pane of one console (leaves `resultsVisible`, the default of ordinary consoles, alone). */
+  setTabResultsShown(tabId: string, shown: boolean): void;
   openConnectionDialog(s: ConnectionDialogState): void;
   closeConnectionDialog(): void;
   askConfirm(req: Omit<ConfirmRequest, 'resolve'>): Promise<boolean>;
@@ -180,6 +191,7 @@ function persistLayout(s: Layout) {
       explorerWidth: s.explorerWidth,
       historyWidth: s.historyWidth,
       resultsFraction: s.resultsFraction,
+      resultsWidthFraction: s.resultsWidthFraction,
       explorerVisible: s.explorerVisible,
       historyVisible: s.historyVisible,
       resultsVisible: s.resultsVisible,
@@ -209,6 +221,7 @@ export const useUi = create<UiState>((set, get) => ({
   switcher: null,
   multiRunFor: null,
   resultsMaximized: false,
+  tabResultsShown: {},
   connectionDialog: null,
   confirm: null,
   toasts: [],
@@ -259,6 +272,13 @@ export const useUi = create<UiState>((set, get) => ({
   },
   setResultsMaximized(v) {
     set({ resultsMaximized: v, ...(v ? { resultsVisible: true } : {}) });
+  },
+  setTabResultsShown(tabId, shown) {
+    const tabResultsShown = { ...get().tabResultsShown, [tabId]: shown };
+    // Bounded: a long session opens and closes many consoles.
+    const keys = Object.keys(tabResultsShown);
+    if (keys.length > 200) for (const k of keys.slice(0, keys.length - 200)) delete tabResultsShown[k];
+    set({ tabResultsShown, ...(!shown ? { resultsMaximized: false } : {}) });
   },
   openConnectionDialog(s) {
     set({ connectionDialog: s });

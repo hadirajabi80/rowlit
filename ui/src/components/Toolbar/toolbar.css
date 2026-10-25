@@ -11,6 +11,24 @@
   background: currentColor;
   flex-shrink: 0;
 }
+/* the results pane's toggle: lit while the pane is open, a dot when the last run has output that is not showing */
+.tb-results {
+  position: relative;
+  flex-shrink: 0;
+}
+.tb-results.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tb-results-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .tb-exec .btn.split-main {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;

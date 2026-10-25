@@ -74,8 +74,15 @@ engine runs as a local sidecar and the React UI talks to it over authenticated H
   databases or schemas as cards, a schema's tables (or views, procedures, functions when you pick that folder) with
   type filters, live search, counts and stats (rows, size, modified, comment), with list, card and small-icon views.
   It can be turned off in Settings › General.
-- **Saved queries** per schema (Ctrl+Alt+S): a **Queries** folder under every schema and in the Objects tab; open a
+- **Saved queries** per schema: Ctrl+S in a query console saves it to a schema (a **Queries** folder under every schema and in the Objects tab; a console opened from a .sql file still saves that file, Ctrl+Shift+S writes a .sql file); open a
   saved query and Ctrl+S updates it in place; rename, duplicate, delete, and find them with Ctrl+P (`q:`).
+- **Schema and database colours**: right-click a schema or database → **Set colour…** (or the palette). The colour shows
+  as a dot and a stripe in the explorer, on the tabs and the console's database switcher that work in it, and in the
+  Objects tab's breadcrumb; the tab colour bar prefers it to the connection's colour. Kept in your settings.
+- **Results pane position**: dock the results and messages **below, right or left** of the editor, or open them in a
+  **tab of their own** (the pane header's dock menu, View menu and palette). F4 "Edit:" consoles remember their own
+  position, start with the pane closed, and show the outcome of Ctrl+S as a toast (errors open the pane on the line).
+  "Open results automatically when a query runs" can be turned off; Ctrl+R shows or hides the pane.
 - **Dependencies** in every object tab: what it **uses** and what it is **used by**, with click-through and
   "Open in ER diagram".
 - **ER diagrams** per schema, per selection or around a table, smooth with 500+ tables, crow's-foot edges, PNG/SVG
@@ -332,7 +339,7 @@ Docker (or with `DBSTUDIO_IT=0`) the integration tests are skipped and the rest 
 | Cancel execution | Shift+F5 |
 | New query tab | Ctrl+N |
 | New connection | Ctrl+Shift+N |
-| Open file / Save / Save as | Ctrl+O / Ctrl+S / Ctrl+Shift+S |
+| Open file / Save (to a schema, or the open .sql file) / Save as (.sql file) | Ctrl+O / Ctrl+S / Ctrl+Shift+S |
 | Close tab | Ctrl+W |
 | Command palette | Ctrl+Shift+P |
 | Toggle object explorer | Ctrl+B |

@@ -26,6 +26,7 @@ import { ExecuteRoutineHost } from './components/ExecuteRoutine/ExecuteRoutineDi
 import { useExecuteRoutine } from './components/ExecuteRoutine/store';
 import { SearchDialogHost } from './components/Search/SearchDialogHost';
 import { SavedQueryDialogHost } from './components/SavedQueries/SavedQueryDialogHost';
+import { ScopeColorDialogHost } from './components/ScopeColor/ScopeColorDialogHost';
 import { ShortcutSheet } from './components/Shortcuts/ShortcutSheet';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DesignerHost } from './designer/host';
@@ -154,6 +155,7 @@ function Shell() {
       </ModalBoundary>
       <SearchDialogHost />
       <SavedQueryDialogHost />
+      <ScopeColorDialogHost />
       <ToastsBoundary>
         <Toasts />
       </ToastsBoundary>

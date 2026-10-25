@@ -1,7 +1,7 @@
 // Editor group and window commands (split editor, move between groups, detach to a window). Auto-registered by
 // commands/index.ts; the tab context menu lists them (commands/menuModel.ts `tab`).
 import { closeTab } from '../../app/actions';
-import { canDetachTabs, canReattachTabs, detachTab, reattachTab } from '../../app/detach';
+import { canDetachTabs, canReattachTabs, detachTab, isDetachable, reattachTab } from '../../app/detach';
 import { registerCommands, type Command } from '../../commands/registry';
 import { isTabTarget } from '../../commands/types';
 import { groupInDirection, groupOf, MAX_GROUPS, type SplitSide } from '../../store/editorGroups';
@@ -115,7 +115,7 @@ export const EDITOR_GROUP_COMMANDS: Command<never>[] = [
   },
   {
     id: 'view.openInNewWindow', title: 'Open in new window', category: 'View', icon: 'SquareArrowOutUpRight', keywords: 'detach undock separate window',
-    when: (a?: unknown) => canDetachTabs() && !!tabIdOf(a),
+    when: (a?: unknown) => canDetachTabs() && !!tabIdOf(a) && isDetachable(tabIdOf(a)),
     run: (a?: unknown) => {
       const id = tabIdOf(a);
       if (id) void detachTab(id);

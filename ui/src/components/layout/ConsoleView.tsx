@@ -1,4 +1,4 @@
-import { Plug } from 'lucide-react';
+import { ExternalLink, Plug } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { ObjectRef, RunLabel, ServerDiagnostic, SqlBatch } from '../../api/types';
@@ -7,6 +7,8 @@ import { interceptRoutineRun } from '../ExecuteRoutine/intercept';
 import { registerEditor } from '../../app/editors';
 import { SqlEditor } from '../../editor/SqlEditor';
 import type { SqlEditorHandle } from '../../editor/SqlEditor.types';
+import { peekEditSession } from '../../designer/editSession';
+import { useDesignerUi } from '../../designer/store';
 import { requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
 import { getConnection, useConnection, useDialect } from '../../store/connections';
 import { useTabExecution } from '../../store/results';
@@ -19,6 +21,7 @@ import { runCommand } from '../../commands/registry';
 import type { EffectiveTheme } from '../../theme/useTheme';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import { Splitter } from '../common/Splitter';
+import { dockResultsBack, hideResults, showResults, useResultsDock, useResultsShown, useResultsTabId } from '../ResultsPane/dock';
 import { ResultsPane } from '../ResultsPane/ResultsPane';
 import { Toolbar } from '../Toolbar/Toolbar';
 
@@ -33,6 +36,9 @@ const GRID_HEADER_H = 28;
 const GRID_SCROLLBAR_H = 12;
 /** The editor keeps at least this much (its CSS min-height) plus the splitter. */
 const EDITOR_MIN_H = 60 + 1;
+/** Share of the console width a pane docked on the left / right may take (CSS keeps both sides usable in px too). */
+const MIN_SIDE_SHARE = 0.2;
+const MAX_SIDE_SHARE = 0.8;
 
 /** Heights of the results chrome (tabs, toolbar, filter bar, status row), measured; defaults before the first paint. */
 interface ResultsChrome {
@@ -74,12 +80,25 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
   const usageAll = useSettings((s) => s.settings.ui?.completionUsage as Record<string, Record<string, number>> | undefined);
   const usage = (tab.connectionId && usageAll?.[tab.connectionId]) || EMPTY_USAGE;
   const updateText = useTabs((s) => s.updateText);
-  const resultsVisible = useUi((s) => s.resultsVisible);
+  // Where the results pane lives (components/ResultsPane/dock.ts): its dock, whether it is open, whether the console's
+  // results were moved into a tab of their own. "Edit:" consoles have their own dock and start with the pane hidden.
+  useDesignerUi((s) => s.edits[tab.id]); // re-render when the console becomes / stops being an "Edit:" console
+  const isEdit = !!peekEditSession(tab.id);
+  const dock = useResultsDock(isEdit);
+  const shown_ = useResultsShown(tab.id, isEdit);
+  const resultsTabId = useResultsTabId(tab.id);
+  const inTab = resultsTabId !== null;
+  const resultsVisible = shown_ && !inTab;
+  const side = dock !== 'bottom';
   const maximized = useUi((s) => s.resultsMaximized);
   const globalFraction = useUi((s) => s.resultsFraction);
-  // The user's split is remembered per tab; short windows get 60 % results after the first run (actions.ts).
+  const globalWidthFraction = useUi((s) => s.resultsWidthFraction);
+  // The user's split is remembered per tab; short windows get 60 % results after the first run (actions.ts). The width
+  // of a pane docked on a side is a separate fraction (`:w`).
   const tabFraction = useUi((s) => s.tabSplits[tab.id]);
+  const tabWidthFraction = useUi((s) => s.tabSplits[`${tab.id}:w`]);
   const fraction = tabFraction ?? globalFraction;
+  const widthFraction = Math.max(MIN_SIDE_SHARE, Math.min(MAX_SIDE_SHARE, tabWidthFraction ?? globalWidthFraction));
   const setTabSplit = useUi((s) => s.setTabSplit);
   const setCursor = useUi((s) => s.setCursor);
   const exec = useTabExecution(tab.id);
@@ -110,9 +129,9 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
   });
   // Only once there is something to show: the empty "Run a statement" pane keeps the plain 12 % minimum.
   const hasResults = !!exec;
-  const minPx = resultsVisible && hasResults && splitH > 0 ? minResultsHeight(size.console, splitH, chrome, rowHeight) : 0;
+  const minPx = resultsVisible && !side && hasResults && splitH > 0 ? minResultsHeight(size.console, splitH, chrome, rowHeight) : 0;
   const minFraction = splitH > 0 ? Math.max(0.12, minPx / splitH) : 0.12;
-  const shown = Math.max(minFraction, Math.min(MAX_RESULTS_SHARE, fraction));
+  const shown = side ? widthFraction : Math.max(minFraction, Math.min(MAX_RESULTS_SHARE, fraction));
 
   const tabId = tab.id;
   const connectionId = tab.connectionId;
@@ -173,80 +192,107 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
     return out;
   }, [exec?.diagnostics, exec?.messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const editorPane = (
+    <div
+      key="editor"
+      className="editor-host"
+      data-region="editor"
+      style={{ flexBasis: resultsVisible ? `${(1 - shown) * 100}%` : '100%' }}
+      onDropCapture={(e) => {
+        const raw = e.dataTransfer.getData('application/x-dbstudio-object');
+        if (!raw) return;
+        try {
+          const o = JSON.parse(raw) as { connectionId: string; name: string };
+          if (o.connectionId && o.connectionId !== tab.connectionId) {
+            const from = getConnection(o.connectionId)?.name ?? 'another connection';
+            toast('info', `Inserted ${o.name} from ${from}`, conn ? `This console runs on ${conn.name}.` : 'This console has no connection yet.');
+          }
+        } catch {
+          /* ignore */
+        }
+      }}
+    >
+      <SqlEditor
+        ref={editorRef}
+        tabId={tab.id}
+        dialect={dialect}
+        catalog={snapshot}
+        value={tab.text}
+        onChange={onChange}
+        onRun={onRun}
+        onCancel={onCancel}
+        onOpenObject={onOpenObject}
+        requestServerDiagnostics={requestServerDiagnostics}
+        requestSchema={requestSchema}
+        foreignCatalogs={foreignCatalogs}
+        requestDatabase={requestDatabase}
+        externalDiagnostics={externalDiagnostics}
+        theme={theme}
+        settings={editorSettings}
+        usage={usage}
+        onUsageChange={onUsageChange}
+        onCursorChange={onCursorChange}
+      />
+      {!conn && (
+        <div className="editor-hint">
+          <Plug size={16} strokeWidth={1.5} /> This console has no connection.
+          <button className="btn btn-xs btn-primary" onClick={() => runCommand('connections.change')}>
+            Choose connection <Kbd shortcut="Mod+Shift+K" className="on-accent" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // Keyed, so moving the pane to the other side keeps the editor (and its undo stack, cursor, scroll) alive.
+  const splitter = (
+    <Splitter
+      key="splitter"
+      direction={side ? 'vertical' : 'horizontal'}
+      ariaLabel="Resize results"
+      onDragStart={() => setDragStart(shown)}
+      onDrag={(d) => {
+        if (side) {
+          const w = containerRef.current?.clientWidth ?? 800;
+          // The pane grows when the bar moves towards the editor: left for a right dock, right for a left dock.
+          const grow = dock === 'right' ? -d : d;
+          setTabSplit(`${tab.id}:w`, Math.max(MIN_SIDE_SHARE, Math.min(MAX_SIDE_SHARE, dragStart + grow / w)));
+          return;
+        }
+        const h = containerRef.current?.clientHeight ?? 600;
+        // Clamped from the results minimum (header + 5 rows), not a fixed share (styles-03).
+        const consoleH = containerRef.current?.parentElement?.clientHeight ?? h;
+        const min = h > 0 && hasResults ? Math.max(0.12, minResultsHeight(consoleH, h, chrome, rowHeight) / h) : 0.12;
+        setTabSplit(tab.id, Math.max(min, Math.min(MAX_RESULTS_SHARE, dragStart - d / h)));
+      }}
+      onDoubleClick={() => setTabSplit(side ? `${tab.id}:w` : tab.id, null)}
+    />
+  );
+  const resultsPane = (
+    <div key="results" className="results-host" data-region="results" ref={resultsRef} style={{ flexBasis: `${shown * 100}%`, ...(minPx ? { minHeight: minPx } : {}) }}>
+      <ErrorBoundary area="the results" variant="panel">
+        <ResultsPane tabId={tab.id} dialect={dialect} theme={theme} onClose={() => hideResults(tab.id)} />
+      </ErrorBoundary>
+    </div>
+  );
+
   return (
     <div className="console" style={{ display: visible ? undefined : 'none' }} data-tab={tab.id} data-command-scope="console">
       <Toolbar tab={tab} />
       <TipStrip />
-      <div className={`console-split${maximized && resultsVisible ? ' results-maximized' : ''}`} ref={containerRef}>
-        <div
-          className="editor-host"
-          data-region="editor"
-          style={{ flexBasis: resultsVisible ? `${(1 - shown) * 100}%` : '100%' }}
-          onDropCapture={(e) => {
-            const raw = e.dataTransfer.getData('application/x-dbstudio-object');
-            if (!raw) return;
-            try {
-              const o = JSON.parse(raw) as { connectionId: string; name: string };
-              if (o.connectionId && o.connectionId !== tab.connectionId) {
-                const from = getConnection(o.connectionId)?.name ?? 'another connection';
-                toast('info', `Inserted ${o.name} from ${from}`, conn ? `This console runs on ${conn.name}.` : 'This console has no connection yet.');
-              }
-            } catch {
-              /* ignore */
-            }
-          }}
-        >
-          <SqlEditor
-            ref={editorRef}
-            tabId={tab.id}
-            dialect={dialect}
-            catalog={snapshot}
-            value={tab.text}
-            onChange={onChange}
-            onRun={onRun}
-            onCancel={onCancel}
-            onOpenObject={onOpenObject}
-            requestServerDiagnostics={requestServerDiagnostics}
-            requestSchema={requestSchema}
-            foreignCatalogs={foreignCatalogs}
-            requestDatabase={requestDatabase}
-            externalDiagnostics={externalDiagnostics}
-            theme={theme}
-            settings={editorSettings}
-            usage={usage}
-            onUsageChange={onUsageChange}
-            onCursorChange={onCursorChange}
-          />
-          {!conn && (
-            <div className="editor-hint">
-              <Plug size={16} strokeWidth={1.5} /> This console has no connection.
-              <button className="btn btn-xs btn-primary" onClick={() => runCommand('connections.change')}>
-                Choose connection <Kbd shortcut="Mod+Shift+K" className="on-accent" />
-              </button>
-            </div>
-          )}
-        </div>
-        {resultsVisible && (
-          <>
-            <Splitter
-              direction="horizontal"
-              ariaLabel="Resize results"
-              onDragStart={() => setDragStart(shown)}
-              onDrag={(d) => {
-                const h = containerRef.current?.clientHeight ?? 600;
-                // Clamped from the results minimum (header + 5 rows), not a fixed share (styles-03).
-                const consoleH = containerRef.current?.parentElement?.clientHeight ?? h;
-                const min = h > 0 && hasResults ? Math.max(0.12, minResultsHeight(consoleH, h, chrome, rowHeight) / h) : 0.12;
-                setTabSplit(tab.id, Math.max(min, Math.min(MAX_RESULTS_SHARE, dragStart - d / h)));
-              }}
-              onDoubleClick={() => setTabSplit(tab.id, null)}
-            />
-            <div className="results-host" data-region="results" ref={resultsRef} style={{ flexBasis: `${shown * 100}%`, ...(minPx ? { minHeight: minPx } : {}) }}>
-              <ErrorBoundary area="the results" variant="panel">
-                <ResultsPane tabId={tab.id} dialect={dialect} theme={theme} onClose={() => useUi.getState().toggle('resultsVisible')} />
-              </ErrorBoundary>
-            </div>
-          </>
+      <div
+        className={`console-split${maximized && resultsVisible ? ' results-maximized' : ''}`}
+        data-dock={resultsVisible ? dock : 'bottom'}
+        ref={containerRef}
+      >
+        {dock === 'left' && resultsVisible ? [resultsPane, splitter, editorPane] : [editorPane, ...(resultsVisible ? [splitter, resultsPane] : [])]}
+        {inTab && (
+          <div className="results-elsewhere" role="status">
+            <ExternalLink size={13} aria-hidden="true" />
+            <span>The results are open in their own tab.</span>
+            <button className="btn btn-xs" onClick={() => showResults(tab.id)}>Show</button>
+            <button className="btn btn-xs" onClick={() => dockResultsBack(tab.id)} title="Close that tab and show the results here again">Dock here</button>
+          </div>
         )}
       </div>
     </div>

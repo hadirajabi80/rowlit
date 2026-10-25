@@ -1,0 +1,76 @@
+/* The results pane docked on a side of the editor (components/ResultsPane/dock.ts): editor and results side by side.
+   Tokens only. */
+.console-split[data-dock='right'],
+.console-split[data-dock='left'] {
+  flex-direction: row;
+}
+.console-split[data-dock='right'] > .results-host,
+.console-split[data-dock='left'] > .results-host {
+  min-height: 0;
+  min-width: min(280px, 60%);
+}
+.console-split[data-dock='right'] > .editor-host,
+.console-split[data-dock='left'] > .editor-host {
+  min-height: 0;
+  min-width: min(240px, 40%);
+}
+.console-split.results-maximized > .results-host {
+  min-width: 0;
+}
+
+/* the results live in a tab of their own: a quiet strip under the editor says so */
+.results-elsewhere {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+.results-elsewhere > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* header of the pane: the controls stay put when the pane is narrow, the result tabs scroll instead */
+.results-tabs > .results-tab {
+  flex: none;
+}
+.results-head-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  background: var(--bg-panel);
+}
+.results-tabs {
+  scrollbar-width: none;
+}
+.results-tabs::-webkit-scrollbar {
+  display: none;
+}
+.results.empty.with-head {
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.results.empty.with-head > .results-empty {
+  flex: 1;
+  justify-content: center;
+}
+.results-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-editor);
+}

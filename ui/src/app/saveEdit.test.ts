@@ -64,7 +64,7 @@ describe('Ctrl+S (file.save) in an object edit console', () => {
   beforeEach(async () => {
     useTabs.setState({ tabs: [], activeId: null, seq: 0, mru: [], closed: [] });
     useSessions.setState({ sessions: {}, byTab: {} });
-    useUi.setState({ confirm: null, toasts: [] });
+    useUi.setState({ confirm: null, toasts: [], tabResultsShown: {} });
     await useConnections.getState().load();
   });
 
@@ -83,6 +83,29 @@ describe('Ctrl+S (file.save) in an object edit console', () => {
     const exec = useResults.getState().executions[useResults.getState().byTab[id]];
     expect(exec?.status).toBe('ok');
     mock.server.events.removeListener('request:start', listener);
+  });
+
+  it('does not force the results pane open: an "Edit:" console starts with it hidden and a quiet save keeps it so', async () => {
+    const id = editTab();
+    expect(useUi.getState().tabResultsShown[id]).toBeUndefined();
+
+    await runCommand('file.save');
+
+    await until(() => useUi.getState().toasts.some((t) => t.text === 'Saved procedure refresh_totals'));
+    expect(useUi.getState().tabResultsShown[id] ?? false).toBe(false);
+    expect(useResults.getState().executions[useResults.getState().byTab[id]]?.status).toBe('ok');
+  });
+
+  it('an error opens the pane on Messages and the toast names the line', async () => {
+    const id = editTab('c_shop', 'SELECT * FROM missing_table');
+
+    await runCommand('file.save');
+
+    await until(() => useUi.getState().toasts.some((t) => /was not saved/.test(t.text)));
+    expect(useUi.getState().tabResultsShown[id]).toBe(true);
+    expect(useResults.getState().activeView[id]).toBe('messages');
+    const t = useUi.getState().toasts.find((x) => /was not saved/.test(x.text))!;
+    expect(t.detail).toMatch(/Line 1: .*missing_table/);
   });
 
   it('saves the whole CREATE / ALTER even when a statement is selected (no need to deselect)', async () => {

@@ -4,6 +4,7 @@ import { getEditor } from '../../app/editors';
 import { useTabs } from '../../store/tabs';
 import { useUi } from '../../store/ui';
 import { focusFirst } from '../common/focus';
+import { resultsShownFor, setResultsShown } from '../ResultsPane/dock';
 import { useExplorer } from '../Explorer/explorerStore';
 import { focusTabPrimary, tabContainer } from './ViewTabHost';
 
@@ -61,8 +62,9 @@ export function focusResults(): boolean {
     const host = activeConsoleEl()?.querySelector<HTMLElement>('[data-region="results"]');
     if (host && focusFirst(host, RESULTS_FOCUS)) flash(host);
   };
-  if (!useUi.getState().resultsVisible) {
-    useUi.getState().toggle('resultsVisible');
+  const id = useTabs.getState().activeId;
+  if (id && !resultsShownFor(id)) {
+    setResultsShown(id, true);
     setTimeout(go, 30);
   } else go();
   return true;

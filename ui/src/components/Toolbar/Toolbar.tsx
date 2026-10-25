@@ -1,6 +1,6 @@
 import {
-  ChevronDown, CircleStop, Code, Database, GitCommitHorizontal, GitCompare, Layers, ListEnd, LoaderCircle, Lock, Play, RotateCcw, Rows3,
-  Save, Sparkles, WandSparkles,
+  ChevronDown, CircleStop, Code, Database, ExternalLink, GitCommitHorizontal, GitCompare, Layers, ListEnd, LoaderCircle, Lock, Play, RotateCcw, Rows3,
+  PanelBottom, PanelLeft, PanelRight, Save, Sparkles, WandSparkles,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { TxMode } from '../../api/types';
@@ -23,12 +23,15 @@ import { useSettings } from '../../store/settings';
 import { useTabs, type ConsoleTab } from '../../store/tabs';
 import { useUi } from '../../store/ui';
 import { connColorCss, connColorName, isProductionColor } from '../../theme/connColors';
+import { scopeColorName } from '../../lib/scopeColors';
+import { useTabScopeColor } from '../../lib/tabScope';
 import { showMenuBelow, type MenuItem } from '../common/Menu';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { Select } from '../common/Select';
 import { CommandButton } from '../layout/CommandButton';
 import { commandMenuItems } from '../layout/commandMenu';
 import { OverflowToolbar, type OverflowItem } from '../layout/OverflowToolbar';
+import { useResultsDock, useResultsShown, useResultsTabId } from '../ResultsPane/dock';
 import { routineEditOf } from '../ExecuteRoutine/intercept';
 import './toolbar.css';
 
@@ -51,13 +54,22 @@ function executeEntries(noun: string, name: string): ContextEntry[] {
   ];
 }
 
-/** Save menu of an ordinary console: the .sql file, or a query saved into a schema. */
-const SAVE_ENTRIES: ContextEntry[] = [
-  { command: 'file.save', label: 'Save to a .sql file' },
-  { command: 'file.saveAs', label: 'Save as…' },
-  'separator',
-  { command: 'queries.saveToSchema', optional: true },
-];
+/**
+ * Save menu of an ordinary console: a query saved into a schema first (what Ctrl+S does), then the .sql file. A console
+ * that already has a file keeps Ctrl+S on that file.
+ */
+function saveEntries(hasFile: boolean): ContextEntry[] {
+  return hasFile ? [
+    { command: 'file.save', label: 'Save the .sql file' },
+    { command: 'queries.saveToSchema', optional: true, label: 'Save to schema…' },
+    'separator',
+    { command: 'file.saveAs', label: 'Save as a .sql file…' },
+  ] : [
+    { command: 'queries.saveToSchema', optional: true, label: 'Save to schema…' },
+    'separator',
+    { command: 'file.saveAs', label: 'Save as a .sql file…' },
+  ];
+}
 
 /** Save menu of a console bound to a saved query. */
 function boundSaveEntries(name: string): ContextEntry[] {
@@ -110,6 +122,13 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
   const txOpen = !!session?.txOpen;
   const maxRows = tab.maxRows ?? defaultMax;
   const prod = isProductionColor(conn?.color);
+  // The results pane's toggle: where it is docked, whether it is open, whether the console has output it is not showing.
+  const resultsDock = useResultsDock(!!edit);
+  const resultsShown = useResultsShown(tab.id, !!edit);
+  const resultsInTab = useResultsTabId(tab.id) !== null;
+  // The colour tag of the console's database / schema (set from the explorer), shown on the switcher.
+  const scopeHex = useTabScopeColor(tab);
+  const scopeCss = connColorCss(scopeHex ?? undefined);
 
   let current: string | null = null;
   if (hasDatabaseLevel(conn?.providerId)) current = effectiveDatabase(conn!.id, tab.database) ?? session?.database ?? connCat?.databases?.current ?? null;
@@ -242,13 +261,14 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
         </span>
       ),
     }] : !edit && conn && hasCommand('queries.saveToSchema') ? [{
-      id: 'save', priority: 1, menu: () => commandMenuItems(SAVE_ENTRIES),
+      id: 'save', priority: 1, menu: () => commandMenuItems(saveEntries(!!tab.filePath)),
       node: (
         <button
           className="btn btn-ghost tb-text-btn"
           aria-haspopup="menu"
-          title="Save the query: to a schema (saved queries) or to a .sql file"
-          onClick={(e) => showMenuBelow(e.currentTarget, commandMenuItems(SAVE_ENTRIES))}
+          title={tooltipWithShortcut(tab.filePath ? 'Save the .sql file, or the query to a schema' : 'Save the query to a schema, or to a .sql file', displayShortcut('Mod+S'))}
+          aria-keyshortcuts={ariaKeyShortcuts('Mod+S')}
+          onClick={(e) => showMenuBelow(e.currentTarget, commandMenuItems(saveEntries(!!tab.filePath)))}
         >
           <Save size={16} strokeWidth={1.5} /> <span className="btn-text">Save</span> <ChevronDown size={14} />
         </button>
@@ -298,13 +318,15 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
       menu: () => commandMenuItems([{ command: 'connections.changeDatabase', label: `Change ${dbLabel}${current ? ` (${current})` : ''}…` }]),
       node: (
         <button
-          className="db-pill"
+          className={`db-pill${scopeCss ? ' has-scope-color' : ''}`}
           onClick={(e) => openSwitcher('database', e.currentTarget)}
-          title={`${singleLevel ? `Current ${dbLabel}` : 'Database'} — change with ${displayShortcut('Mod+Shift+D')}`}
-          aria-label={`${singleLevel ? dbLabel[0].toUpperCase() + dbLabel.slice(1) : 'Database'} ${current ?? ''}, change`}
+          title={`${singleLevel ? `Current ${dbLabel}` : 'Database'}${scopeHex ? ` (${scopeColorName(scopeHex)})` : ''} — change with ${displayShortcut('Mod+Shift+D')}`}
+          aria-label={`${singleLevel ? dbLabel[0].toUpperCase() + dbLabel.slice(1) : 'Database'} ${current ?? ''}${scopeHex ? `, colour ${scopeColorName(scopeHex)}` : ''}, change`}
           aria-haspopup="dialog"
           aria-keyshortcuts={ariaKeyShortcuts('Mod+Shift+D')}
+          style={scopeCss ? ({ ['--scope-color' as string]: scopeCss }) : undefined}
         >
+          {scopeCss ? <span className="scope-dot" aria-hidden="true" /> : null}
           <Database size={14} strokeWidth={1.5} aria-hidden="true" />
           <span>{current ?? dbLabel}</span>
           <ChevronDown size={14} aria-hidden="true" />
@@ -425,6 +447,22 @@ export function Toolbar({ tab }: { tab: ConsoleTab }) {
           searchable={false}
         />
       </>
+    ),
+  }, {
+    id: 'results', priority: 8, menu: () => commandMenuItems([{ command: 'view.toggleResults' }]),
+    node: (
+      <button
+        className={`icon-btn tb-results${resultsShown && !resultsInTab ? ' on' : ''}`}
+        aria-pressed={resultsInTab ? undefined : resultsShown}
+        aria-label={resultsInTab ? 'Show the results tab' : resultsShown ? 'Hide results' : exec ? 'Show results, there is output' : 'Show results'}
+        title={tooltipWithShortcut(resultsInTab ? 'The results are in a tab: show it' : resultsShown ? 'Hide the results' : exec ? 'Show the results (the last run has output)' : 'Show the results', displayShortcut('Mod+R'))}
+        aria-keyshortcuts={ariaKeyShortcuts('Mod+R')}
+        data-command="view.toggleResults"
+        onClick={() => runCommand('view.toggleResults', { kind: 'tab', tabId: tab.id })}
+      >
+        {resultsInTab ? <ExternalLink size={16} strokeWidth={1.5} /> : resultsDock === 'right' ? <PanelRight size={16} strokeWidth={1.5} /> : resultsDock === 'left' ? <PanelLeft size={16} strokeWidth={1.5} /> : <PanelBottom size={16} strokeWidth={1.5} />}
+        {!resultsShown && !resultsInTab && exec && <span className="tb-results-dot" aria-hidden="true" />}
+      </button>
     ),
   });
 

@@ -9,6 +9,8 @@ import type { CommandTarget } from '../../commands/types';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { hasDatabaseLevel, useConnection } from '../../store/connections';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
+import { connColorCss } from '../../theme/connColors';
+import { resolveScopeColor, scopeColorLabel, useScopeColor, useScopeColors } from '../../lib/scopeColors';
 import { DatabaseIcon, PROVIDER_LABEL } from '../common/icons';
 import { EmptyState } from '../EmptyState/EmptyState';
 import { useExplorer } from '../Explorer/explorerStore';
@@ -51,6 +53,16 @@ interface Crumb {
   label: string;
   icon?: ReactNode;
   go?: () => void;
+  /** The database / schema this crumb stands for: its colour tag (if any) shows as a dot. */
+  scope?: { database: string | null; schema: string | null };
+}
+
+/** A schema / database colour tag as a dot (nothing without one); the name is in the title and the label. */
+function ScopeDot({ connectionId, database, schema }: { connectionId: string; database: string | null; schema: string | null }) {
+  const hex = useScopeColor(connectionId, database, schema);
+  const css = connColorCss(hex ?? undefined);
+  if (!css) return null;
+  return <span className="scope-dot" role="img" aria-label={scopeColorLabel(hex, schema ? 'schema' : 'database') ?? undefined} style={{ ['--scope-color' as string]: css }} />;
 }
 
 function Crumbs({ conn, items }: { conn: ConnectionProfile; items: Crumb[] }) {
@@ -58,8 +70,12 @@ function Crumbs({ conn, items }: { conn: ConnectionProfile; items: Crumb[] }) {
     { label: conn.name, icon: <ProviderLogo providerId={conn.providerId} size={14} />, go: items.length ? () => drillTo(connNode(conn.id).id, connNode(conn.id).target, []) : undefined },
     ...items,
   ];
+  // The deepest coloured crumb tints the bar's bottom edge.
+  const map = useScopeColors();
+  const tint = [...items].reverse().map((c) => (c.scope ? resolveScopeColor(map, conn.id, c.scope.database, c.scope.schema) : null)).find(Boolean) ?? null;
+  const tintCss = connColorCss(tint ?? undefined);
   return (
-    <nav className="oh-crumbs" aria-label="Location">
+    <nav className={`oh-crumbs${tintCss ? ' has-scope-color' : ''}`} aria-label="Location" style={tintCss ? ({ ['--scope-color' as string]: tintCss }) : undefined}>
       <ol>
         {all.map((c, i) => (
           <li key={i}>
@@ -67,11 +83,13 @@ function Crumbs({ conn, items }: { conn: ConnectionProfile; items: Crumb[] }) {
             {c.go && i < all.length - 1 ? (
               <button type="button" className="oh-crumb" onClick={c.go} title={`Show ${c.label}`}>
                 {c.icon}
+                {c.scope && <ScopeDot connectionId={conn.id} database={c.scope.database} schema={c.scope.schema} />}
                 <span>{c.label}</span>
               </button>
             ) : (
               <span className="oh-crumb current" aria-current="location">
                 {c.icon}
+                {c.scope && <ScopeDot connectionId={conn.id} database={c.scope.database} schema={c.scope.schema} />}
                 <span>{c.label}</span>
               </span>
             )}
@@ -97,11 +115,11 @@ function ScopeList({ conn, target, state, visible }: { conn: ConnectionProfile; 
   if (dbLevel && shownDb) {
     crumbs.push({
       label: shownDb,
-      icon: <DatabaseIcon size={14} />,
+      icon: <DatabaseIcon size={14} />, scope: { database: database ?? shownDb, schema: null },
       go: schema ? () => drillTo(nodeId.db(cid, database), { kind: 'container', connectionId: cid, database, schema: null }, [nodeId.conn(cid)]) : undefined,
     });
   }
-  if (schema) crumbs.push({ label: schema, icon: <Layers size={14} aria-hidden="true" /> });
+  if (schema) crumbs.push({ label: schema, icon: <Layers size={14} aria-hidden="true" />, scope: { database: database ?? (dbLevel ? shownDb : null), schema } });
   return (
     <ObjectList
       key={key}
@@ -217,7 +235,7 @@ function ConnectionHome({ conn, state, visible }: { conn: ConnectionProfile; sta
 function HomePanel({ conn, db, children }: { conn: ConnectionProfile; db?: string | null; children: ReactNode }) {
   return (
     <div className="oh-view">
-      <Crumbs conn={conn} items={db ? [{ label: db, icon: <DatabaseIcon size={14} /> }] : []} />
+      <Crumbs conn={conn} items={db ? [{ label: db, icon: <DatabaseIcon size={14} />, scope: { database: db, schema: null } }] : []} />
       <div className="oh-body">{children}</div>
     </div>
   );
@@ -342,7 +360,10 @@ function CardGrid({ title, cards, visible }: { title: string; cards: Card[]; vis
                 {c.kind === 'database' ? <DatabaseIcon size={18} /> : <Layers size={18} aria-hidden="true" />}
               </span>
               <span className="ol-card-text">
-                <span className="ol-card-name">{c.label}</span>
+                <span className="ol-card-name">
+                  {c.node.target.kind === 'container' && <ScopeDot connectionId={c.node.target.connectionId} database={c.node.target.database} schema={c.node.target.schema} />}
+                  {c.label}
+                </span>
                 <span className="ol-card-meta">
                   {c.badge && <span className="oh-badge">{c.badge}</span>}
                   {c.meta ?? (c.kind === 'database' ? 'Database' : 'Schema')}

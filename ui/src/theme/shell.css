@@ -386,6 +386,41 @@ html.native-material .topbar {
   border-radius: 0 2px 2px 0;
   background: var(--conn-color);
 }
+/* Schema / database colour tags (lib/scopeColors.ts): the node carries a dot and a full stripe, its children a quieter
+   stripe and a faint tint (an overlay, so hover / selected backgrounds keep working). Colours are the connection
+   palette tokens, which are tuned for 3:1 against the panel in both themes; the name is also in the row's title. */
+.scope-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--scope-color);
+  flex-shrink: 0;
+}
+.tree-scope {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--scope-color) 7%, transparent);
+  pointer-events: none;
+}
+.tree-scope::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--scope-color) 55%, transparent);
+}
+.tree-row.scope-node .tree-scope::before {
+  width: 3px;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--scope-color);
+}
+.db-pill.has-scope-color {
+  border-color: color-mix(in srgb, var(--scope-color) 60%, var(--border));
+}
 .tree:focus-visible .tree-row.selected {
   box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
