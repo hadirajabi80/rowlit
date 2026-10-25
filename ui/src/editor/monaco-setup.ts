@@ -9,7 +9,7 @@ import { tokenizeLine } from './tokens-core';
 import { bindingByUri, bindingFor, bindingForEditor } from './registry';
 import { objectUri, parseObjectUri, objectSummary } from './object-uri';
 import { formatRange, formatSql, type FormatWarning } from '../format';
-import { snippetPickerItems } from '../snippets';
+import { builtinsReady, ensureBuiltins, snippetPickerItems } from '../snippets';
 import { getEditorConfig } from './config';
 import { FORMAT_MARKER_OWNER } from './actions';
 import { defineMonacoThemes } from '../theme/monacoTheme';
@@ -126,9 +126,13 @@ function registerLanguage(dialect: Dialect): void {
 
   monaco.languages.registerCompletionItemProvider(id, {
     triggerCharacters: TRIGGER_CHARACTERS,
-    provideCompletionItems(model, position, context) {
+    provideCompletionItems(model, position, context, token): monaco.languages.ProviderResult<monaco.languages.CompletionList> {
       const b = bindingFor(model);
       if (!b) return { suggestions: [] };
+      // Ctrl+J before the dialect's snippet library has loaded (first use): wait for it, then answer
+      if (b.snippetPicker && !builtinsReady(dialect)) {
+        return ensureBuiltins(dialect).then(() => this.provideCompletionItems(model, position, context, token));
+      }
       if (context.triggerCharacter === ' ') {
         const before = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
         if (!SPACE_TRIGGER_AFTER.test(before)) return { suggestions: [] };

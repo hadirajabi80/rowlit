@@ -1,12 +1,13 @@
 // Snippets (A4): dialect filtering, user overrides, validation, completion at statement start, Ctrl+J items and
 // postfix templates through the completer's extraSources hook.
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { createIntel } from '../intel';
 import { postfixSource } from '../intel/complete/postfix';
 import type { CatalogSnapshot, Snippet } from '../api/types';
 import tsqlShop from '../intel/__tests__/fixtures/shop-tsql.json';
 import sqliteShop from '../intel/__tests__/fixtures/shop-sqlite.json';
-import { BUILTIN_SNIPPETS, snippetPickerItems, snippetPreview, snippetSource, snippetsFor, validateSnippet } from './index';
+import { ensureDialect } from '../intel/dialect/registry';
+import { loadAllBuiltins, snippetPickerItems, snippetPreview, snippetSource, snippetsFor, validateSnippet } from './index';
 
 const user: Snippet[] = [
   { id: 's_1', name: 'My select', prefix: 'sel', dialects: null, body: 'SELECT TOP 5 * FROM ${1:t}$0' },
@@ -21,6 +22,12 @@ function intelWith(dialect: 'tsql' | 'sqlite', text: string, snippets: Snippet[]
   intel.setDocument('u', text.replace('|', ''));
   return intel.complete('u', offset);
 }
+
+// the built-ins load on demand (one chunk per dialect): load them all before the tests read them
+beforeAll(async () => {
+  await ensureDialect('mysql');
+  await loadAllBuiltins();
+});
 
 describe('snippet sets', () => {
   it('every dialect has the PLAN A4 prefixes', () => {
@@ -39,12 +46,12 @@ describe('snippet sets', () => {
     }
   });
 
-  it('prefixes are unique per dialect and built-in bodies are valid', () => {
+  it('prefixes are unique per dialect and built-in bodies are valid', async () => {
     for (const d of ['tsql', 'plsql', 'sqlite', 'pgsql'] as const) {
       const list = snippetsFor(d, []);
       expect(new Set(list.map((s) => s.prefix)).size).toBe(list.length);
     }
-    for (const s of BUILTIN_SNIPPETS) expect(validateSnippet(s), s.id).toEqual([]);
+    for (const s of await loadAllBuiltins()) expect(validateSnippet(s), s.id).toEqual([]);
   });
 
   it('MySQL snippets: unique prefixes, DELIMITER escapes $$, valid bodies', () => {

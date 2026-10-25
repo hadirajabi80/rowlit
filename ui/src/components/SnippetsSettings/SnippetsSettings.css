@@ -15,8 +15,10 @@
 .snip-list { width: 340px; flex-shrink: 0; overflow: auto; border-right: 1px solid var(--border); padding: var(--space-1) 0; }
 .snip-group { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--fg-muted); font-size: var(--text-sm); font-weight: 600; }
 .snip-empty { padding: var(--space-1) var(--space-3); color: var(--fg-muted); font-size: var(--text-sm); }
+.snip-subgroup { padding: var(--space-1) var(--space-3); color: var(--fg-muted); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border-subtle); }
+.snip-count { font-weight: 400; opacity: 0.7; }
 .snip-item {
-  display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-areas: "prefix name tag" "prefix code code";
+  display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; grid-template-areas: "prefix name tag" "prefix code code";
   column-gap: var(--space-2); row-gap: 2px; align-items: baseline;
   padding: var(--space-2) var(--space-3); cursor: default; min-height: 24px;
   border-bottom: 1px solid var(--border-subtle);
