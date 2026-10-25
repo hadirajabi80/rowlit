@@ -23,7 +23,9 @@ export type ApiErrorCode =
   | 'SESSION_LIMIT' | 'DDL_FAILED' | 'NOT_EDITABLE'
   // M2 (docs/PLAN-M2.md 1.1): 503 a source client cannot connect, 429 more than 8 open streams per UI client,
   // 403 the server denied a system view (`detail.needs` names the grant), 409 offset reset on an active group (7.5).
-  | 'SOURCE_UNAVAILABLE' | 'STREAM_LIMIT' | 'PRIVILEGE' | 'GROUP_ACTIVE';
+  | 'SOURCE_UNAVAILABLE' | 'STREAM_LIMIT' | 'PRIVILEGE' | 'GROUP_ACTIVE'
+  // Resources (docs/resources.md): closing a connection would roll back a transaction or cancel running work (detail.blockers).
+  | 'RESOURCE_BUSY';
 
 // ---------- 3.1 Meta ----------
 export interface Health { status: 'ok'; version: string; pid: number; dev: boolean }
@@ -77,6 +79,8 @@ export interface Settings {
   // M2 additive keys (engine defaults: streams.maxQueuedItems 50000, logs.tailIntervalMs 2000).
   streams?: StreamsSettings;
   logs?: LogsSettings;
+  // Resources (docs/resources.md): Settings › Connections › Resources.
+  resources?: ResourcesSettings;
 }
 
 // ---------- 3.2 Connections ----------
@@ -252,6 +256,15 @@ export interface SessionInfo {
    * window uses the session.
    */
   orphan?: boolean;
+  /**
+   * Resources (docs/resources.md): the engine closed the session's connection to free resources (idle, closed from the
+   * explorer, memory pressure, the open connections limit). The id stays valid: the next run reconnects on the same
+   * database. `releasedReason`: 'idle' | 'closed' | 'pressure' | 'limit'.
+   */
+  released?: boolean;
+  releasedReason?: string | null;
+  /** The session created temporary objects (#temp, CREATE TEMP TABLE): it is never released automatically. */
+  hasTempObjects?: boolean;
 }
 
 /** line/col are 1-based positions of the batch's first character in the editor document. */
@@ -372,7 +385,10 @@ export type WsEvent =
     })
   | (Ev<'exec.diagnostics'> & { executionId: string; diagnostics: ServerDiagnostic[] })
   | (Ev<'exec.plan'> & ExecPlanPayload)
-  | (Ev<'session.changed'> & { sessionId: string; state: SessionState; txOpen: boolean; database: string | null; txMode: TxMode })
+  | (Ev<'session.changed'> & {
+    sessionId: string; state: SessionState; txOpen: boolean; database: string | null; txMode: TxMode;
+    released?: boolean; releasedReason?: string | null; hasTempObjects?: boolean;
+  })
   | (Ev<'catalog.changed'> & { connectionId: string; database: string | null; schemas: string[]; version: number })
   | (Ev<'export.progress'> & { exportId: string; rows: number })
   | (Ev<'export.done'> & { exportId: string; path: string; rows: number; status: 'ok' | 'error' | 'cancelled'; error: string | null })
@@ -382,7 +398,10 @@ export type WsEvent =
   | (Ev<'stream.state'> & StreamStatePayload)
   | (Ev<'source.client'> & { connectionId: string; state: SourceClientState })
   | (Ev<'job.progress'> & JobProgressPayload)
-  | (Ev<'job.done'> & JobDonePayload);
+  | (Ev<'job.done'> & JobDonePayload)
+  // ---- Resources (docs/resources.md)
+  | (Ev<'resources.released'> & { connectionId: string; connectionName: string; reason: 'idle' | 'pressure' | 'limit'; sessions: number; sourceClient: boolean })
+  | (Ev<'resources.pressure'> & { level: MemoryLevel; usedBytes: number; limitBytes: number });
 
 export type WsEventType = WsEvent['type'];
 export type WsEventOf<T extends WsEventType> = Extract<WsEvent, { type: T }>;
@@ -441,6 +460,31 @@ export interface ConnectionsSettings {
   /** M2 (D2): seconds an unused Redis/MongoDB/Kafka client stays open (0 = never close). Default 600. */
   sourceIdleSeconds?: number;
 }
+/** Resources (docs/resources.md): engine settings `resources.*`; defaults in DEFAULT_RESOURCES (store/settings.ts). */
+export interface ResourcesSettings {
+  /** Master switch of the automatic policies (idle sessions, open connections limit, background results). */
+  autoRelease: boolean;
+  /** Sessions without a run for this long give back their connection (0 = never). Default 15. */
+  idleSessionMinutes: number;
+  /** Memory limit of the app in MB; 0 = auto (25% of RAM, 1–8 GB). */
+  memoryLimitMb: number;
+  /** Connections holding server resources at once (0 = unlimited). Default 20. */
+  maxOpenConnections: number;
+  /** Engine catalog cache budget (MB). Default 128. */
+  catalogCacheMb: number;
+  /** Engine copy of result rows (paging, full cells, export loaded rows), MB. Default 256. */
+  resultCacheMb: number;
+  /** Engine copies unread for this long are dropped (0 = never). Default 30. */
+  resultCacheMinutes: number;
+  /** Rows of background result tabs not viewed for this long are released (0 = never). Default 10. */
+  releaseResultsMinutes: number;
+  /** Rows kept across all result tabs before background ones are released. Default 500000. */
+  resultRowBudget: number;
+  /** Shorter timeouts and smaller budgets while memory use is high. */
+  trimUnderPressure: boolean;
+}
+export type MemoryLevel = 'normal' | 'high' | 'critical';
+
 /** M2 (docs/PLAN-M2.md 1.1): engine stream queue size (oldest items dropped beyond it). */
 export interface StreamsSettings { maxQueuedItems: number }
 /** M2: poll interval of `logs.tail` streams over sources without push. */

@@ -200,6 +200,12 @@ function TabItem({ tab, groupId, active, showConn, dropSide }: {
     const sid = s.byTab[tab.id];
     return sid ? !!s.sessions[sid]?.txOpen : false;
   });
+  // Resources: the session gave back its connection (idle, closed, memory); the next run reconnects.
+  const releasedReason = useSessions((s) => {
+    const sid = s.byTab[tab.id];
+    const x = sid ? s.sessions[sid] : undefined;
+    return x?.released ? x.releasedReason ?? 'closed' : null;
+  });
   const renaming = useUi((s) => s.renamingTabId === tab.id);
   const dragging = useTabDrag((s) => s.tabId === tab.id);
   const dirty = isDirty(tab);
@@ -217,6 +223,7 @@ function TabItem({ tab, groupId, active, showConn, dropSide }: {
       ? `Saved query in ${[tab.savedQuery.database, tab.savedQuery.schema].filter((x, i, a) => x && a.indexOf(x) === i).join('.') || 'the connection'}`
       : null,
     txOpen ? 'Uncommitted transaction' : null,
+    releasedReason ? `${releasedReason === 'idle' ? 'Disconnected (idle)' : 'Disconnected'} — reconnects on the next run` : null,
   ].filter(Boolean).join('\n');
 
   return (

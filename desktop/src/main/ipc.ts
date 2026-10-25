@@ -1,6 +1,7 @@
 // IPC handlers behind window.dbstudio. Every handler checks the sender's origin and validates its arguments.
-import { BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import type { EngineInfo } from '../../../ui/src/platform/bridge';
 import { IPC } from '../shared/channels';
 import { atomicWriteFile, readTextFileDecoded, SerialQueue } from './fs-utils';
@@ -26,6 +27,7 @@ import {
   validateNotification,
 } from './validate';
 import { isAllowedUrl } from './window';
+import { summarizeAppMetrics } from './memory';
 
 export interface IpcDeps {
   getEngineInfo(): Promise<EngineInfo>;
@@ -140,6 +142,8 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.updatesQuitAndInstall, async () => (await updates()).quitAndInstall());
   // ---- stop the update download (no arguments to validate)
   handle(IPC.updatesCancelDownload, async () => (await updates()).stopDownload());
+  // ---- resources (docs/resources.md): Electron processes' memory for the engine's memory limit (no arguments)
+  handle(IPC.getAppMemory, () => summarizeAppMetrics(app.getAppMetrics(), os.totalmem()));
 
   // Fire-and-forget channels: bad input is ignored.
   const on = (channel: string, fn: (e: IpcMainEvent, win: BrowserWindow, ...args: unknown[]) => void) => {

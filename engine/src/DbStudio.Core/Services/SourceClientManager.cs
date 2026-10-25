@@ -56,6 +56,15 @@ public sealed class SourceClientManager : IAsyncDisposable
         _reaper = _time.CreateTimer(_ => _ = ReapIdleAsync(), null, interval, interval);
     }
 
+    /// <summary>
+    /// Resources (docs/resources.md): called before a client is opened for a connection that has none, so
+    /// <see cref="ResourceManager"/> can enforce the open connections limit.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? BeforeConnect { get; set; }
+
+    /// <summary>True while a stream or job holds a lease on the connection's client.</summary>
+    public bool HasLease(string connectionId) => _leases.GetValueOrDefault(connectionId) > 0;
+
     /// <summary>Raised after a client was closed or marked broken: (connectionId, "closed" | "broken", reason).</summary>
     public event Action<string, string, string?>? ClientClosed;
 
@@ -77,6 +86,12 @@ public sealed class SourceClientManager : IAsyncDisposable
         if (provider.Kind == SourceKind.Relational)
             throw EngineException.Validation($"'{profile.Name}' is a {provider.DisplayName} connection: it uses sessions, not a source client.",
                 new { connectionId });
+
+        if (BeforeConnect is { } hook)
+        {
+            try { await hook(connectionId, ct).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogWarning(ex, "Freeing resources before opening {ConnectionId} failed", connectionId); }
+        }
 
         var gate = _gates.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct).ConfigureAwait(false);
@@ -162,18 +177,23 @@ public sealed class SourceClientManager : IAsyncDisposable
     }
 
     /// <summary>Closes clients idle for longer than <see cref="IdleTimeout"/> that hold no lease. Public for tests.</summary>
-    public async Task<int> ReapIdleAsync()
+    public Task<int> ReapIdleAsync() => ReapIdleAsync(null);
+
+    /// <param name="timeout">Overrides <see cref="IdleTimeout"/> (the resource manager shortens it under memory pressure).</param>
+    public async Task<int> ReapIdleAsync(TimeSpan? timeout)
     {
         if (_disposed || Interlocked.Exchange(ref _reaping, 1) != 0) return 0;
         try
         {
-            var timeout = IdleTimeout();
-            if (timeout <= TimeSpan.Zero) return 0;
+            var configured = IdleTimeout();
+            if (configured <= TimeSpan.Zero) return 0;
+            var limit = timeout is { } t && t < configured ? t : configured;
+            if (limit <= TimeSpan.Zero) return 0;
             var now = _time.GetUtcNow();
             var closed = 0;
             foreach (var (cid, entry) in _clients.ToArray())
             {
-                if (_leases.GetValueOrDefault(cid) > 0 || now - entry.Client.LastUsed < timeout) continue;
+                if (_leases.GetValueOrDefault(cid) > 0 || now - entry.Client.LastUsed < limit) continue;
                 if (await RemoveAsync(cid, "closed", "idle").ConfigureAwait(false)) closed++;
             }
             return closed;

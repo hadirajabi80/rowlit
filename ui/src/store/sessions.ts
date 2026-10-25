@@ -27,6 +27,8 @@ interface SessionsState {
   changeDatabase(tabId: string, database: string): Promise<void>;
   close(tabId: string, force?: boolean): Promise<void>;
   applyChanged(ev: WsEventOf<'session.changed'>): void;
+  /** Resources: the engine released these sessions' connections (Close connection / database); ids stay valid. */
+  markReleased(sessionIds: string[], reason: string): void;
   applyDone(ev: WsEventOf<'exec.done'>): void;
   upsert(info: SessionInfo, tabId?: string): void;
   /** GET /sessions: refresh every known session (state, executingSince); drops sessions the engine forgot. */
@@ -300,12 +302,29 @@ export const useSessions = create<SessionsState>((set, get) => ({
   applyChanged(ev) {
     const cur = get().sessions[ev.sessionId];
     if (!cur) return;
+    // Resources: the engine reports whether the session gave back its connection (absent on older engines).
+    const released = ev.released === undefined ? {} : { released: ev.released, releasedReason: ev.released ? ev.releasedReason ?? null : null };
+    const temp = ev.hasTempObjects === undefined ? {} : { hasTempObjects: ev.hasTempObjects };
     set({
       sessions: {
         ...get().sessions,
-        [ev.sessionId]: { ...cur, state: ev.state, txOpen: ev.txOpen, database: ev.database ?? cur.database, txMode: ev.txMode ?? cur.txMode },
+        [ev.sessionId]: { ...cur, state: ev.state, txOpen: ev.txOpen, database: ev.database ?? cur.database, txMode: ev.txMode ?? cur.txMode, ...released, ...temp },
       },
     });
+  },
+
+  markReleased(ids, reason) {
+    const sessions = { ...get().sessions };
+    const rolledBack: string[] = [];
+    for (const sid of ids) {
+      const cur = sessions[sid];
+      if (!cur) continue;
+      if (cur.txOpen) rolledBack.push(sid);
+      sessions[sid] = { ...cur, released: true, releasedReason: reason, txOpen: false, state: 'idle' };
+    }
+    set({ sessions });
+    // The engine rolled back an open transaction of a session it released (grids that saved into it must say so).
+    for (const sid of rolledBack) set(txEnd(sid, 'rollback'));
   },
 
   applyDone(ev) {
@@ -321,14 +340,32 @@ export const useSessions = create<SessionsState>((set, get) => ({
  * console session). Sessions another live window uses (isForeignSession) never make this window connected; the
  * Connections panel lists them apart, under "In use by another window".
  */
-export type ConnectionActivity = { kind: 'session'; sessions: number } | { kind: 'catalog' } | null;
+export type ConnectionActivity = { kind: 'session'; sessions: number } | { kind: 'client' } | { kind: 'catalog'; released?: number } | null;
 
+/** Resources: a session that holds its server connection (not closed, not released to free resources). */
+export function holdsConnection(s: SessionInfo): boolean {
+  return s.state !== 'closed' && !s.released;
+}
+
+/**
+ * Resources (docs/resources.md): the "connected" dot means the connection holds server resources — a session with its
+ * connection, or (`hasClient`) an open Redis/MongoDB/Kafka client. Sessions released to free resources and a cached
+ * catalog read as 'catalog' (the dim "not connected" marker); `released` counts the released sessions.
+ */
 export function connectionActivity(
   connectionId: string, sessions: Record<string, SessionInfo>, catalogStatus: (connectionId: string) => string | undefined,
+  hasClient?: (connectionId: string) => boolean,
 ): ConnectionActivity {
   let n = 0;
-  for (const s of Object.values(sessions)) if (s.connectionId === connectionId && s.state !== 'closed' && !isForeignSession(s)) n++;
+  let released = 0;
+  for (const s of Object.values(sessions)) {
+    if (s.connectionId !== connectionId || s.state === 'closed' || isForeignSession(s)) continue;
+    if (s.released) released++;
+    else n++;
+  }
   if (n) return { kind: 'session', sessions: n };
+  if (hasClient?.(connectionId)) return { kind: 'client' };
+  if (released) return { kind: 'catalog', released };
   return catalogStatus(connectionId) === 'ready' ? { kind: 'catalog' } : null;
 }
 
@@ -337,7 +374,7 @@ export function connectionActivity(
  * sessions. Sessions another live window uses are left out, as in connectionActivity.
  */
 export function activityCounts(sessions: Record<string, SessionInfo>, catalogConns: Record<string, { status: string }>): { connections: number; sessions: number } {
-  const live = Object.values(sessions).filter((s) => s.state !== 'closed' && !isForeignSession(s));
+  const live = Object.values(sessions).filter((s) => holdsConnection(s) && !isForeignSession(s));
   const ids = new Set(live.map((s) => s.connectionId));
   for (const [cid, c] of Object.entries(catalogConns)) if (c.status === 'ready') ids.add(cid);
   return { connections: ids.size, sessions: live.length };

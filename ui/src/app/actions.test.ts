@@ -61,10 +61,14 @@ describe('disconnect ignores another window\'s sessions (logic-r2-01)', () => {
     expect(isEnabled('connections.disconnectAll')).toBe(true);
     await disconnectAll();
     expect(confirm).not.toHaveBeenCalled();
-    expect(Object.keys(useSessions.getState().sessions).sort()).toEqual(['liveTx', 'other']);
+    // Resources: this window's session is released (its id stays, the tab reconnects on its next run); the others are untouched.
+    expect(Object.keys(useSessions.getState().sessions).sort()).toEqual(['liveTx', 'mine', 'other']);
+    expect(useSessions.getState().sessions.mine.released).toBe(true);
+    expect(useSessions.getState().sessions.liveTx.released).toBeUndefined();
+    expect(useSessions.getState().sessions.other.released).toBeUndefined();
     const t = useUi.getState().toasts.at(-1)!;
     expect(t.text).toBe('Disconnected 1 connection');
-    expect(t.detail).toBe('1 session closed');
+    expect(t.detail).toBe('1 session released');
   });
 
   it('Disconnect: a foreign transaction does not prompt; this window\'s own one does', async () => {
@@ -72,13 +76,16 @@ describe('disconnect ignores another window\'s sessions (logic-r2-01)', () => {
     expect(isEnabled('connections.disconnect', { kind: 'connection', connectionId: 'c_shop' })).toBe(true);
     await disconnectConnection('c_shop');
     expect(confirm).not.toHaveBeenCalled();
-    expect(Object.keys(useSessions.getState().sessions)).toEqual(['liveTx']);
+    expect(useSessions.getState().sessions.mine.released).toBe(true);
+    expect(useSessions.getState().sessions.liveTx.txOpen).toBe(true);
+    expect(useSessions.getState().sessions.liveTx.released).toBeUndefined();
 
     useSessions.getState().upsert(info('mine2', { tabId: 't_a', txOpen: true, txMode: 'manual' }), 't_a');
     confirm.mockResolvedValueOnce(false);
     await disconnectConnection('c_shop');
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0].message).toMatch(/^1 console has an uncommitted transaction on “.+”\. Disconnecting rolls it back\.$/);
+    expect(confirm.mock.calls[0][0].message).toMatch(/^1 console has an uncommitted transaction on “.+”\. Closing rolls it back\.$/);
+    expect(useSessions.getState().sessions.mine2.released).toBeFalsy();
     // cancelled: nothing closed
     expect(useSessions.getState().sessions.mine2).toBeDefined();
   });
@@ -88,7 +95,7 @@ describe('disconnect ignores another window\'s sessions (logic-r2-01)', () => {
     confirm.mockResolvedValueOnce(false);
     await disconnectAll();
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0].message).toBe('1 session has an uncommitted transaction. Disconnecting rolls it back.');
+    expect(confirm.mock.calls[0][0].message).toBe('1 session has an uncommitted transaction. Closing rolls it back.');
   });
 
   it('Delete connection names a stray session of another window and still rolls it back', async () => {

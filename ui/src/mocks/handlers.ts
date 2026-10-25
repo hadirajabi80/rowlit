@@ -15,6 +15,7 @@ import { createRedisHandlers } from './m2/redis';
 import { createObjectsHandlers } from './objects';
 import { createSavedQueriesHandlers } from './savedQueries';
 import { createSearchHandlers } from './search';
+import { createResourcesHandlers } from './resources';
 import { MOCK_PACKS } from './packs';
 
 const P = '*/api/v1';
@@ -244,6 +245,7 @@ export function createHandlers(engine: MockEngine) {
     // M1.5: explain, describe, designer, query export
     ...createObjectsHandlers(engine, ok), // WP3 object browser
     ...createSavedQueriesHandlers(engine, ok), // queries saved into schemas
+    ...createResourcesHandlers(engine, ok), // resources (docs/resources.md)
     ...createM15Handlers(engine),
 
     // M2 (docs/PLAN-M2.md): streams/sources/jobs framework, then the feature mocks (mocks/m2/*.ts, owned per package)

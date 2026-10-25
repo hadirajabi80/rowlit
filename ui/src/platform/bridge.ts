@@ -100,6 +100,24 @@ export interface DbStudioBridge {
    * with downloadStopped set (a manual check starts it again); false when nothing is downloading.
    */
   cancelUpdateDownload?(): Promise<boolean>;
+
+  // ---- resources (docs/resources.md)
+  /**
+   * Additive (optional, older preloads lack it): memory of the Electron processes (main, windows, GPU, utilities) from
+   * app.getAppMetrics, plus the machine's RAM. The engine is a separate process and reports its own.
+   */
+  getAppMemory?(): Promise<AppMemoryInfo>;
+}
+
+// ---- resources
+export interface AppMemoryInfo {
+  /** Working set of every Electron process, bytes. */
+  totalBytes: number;
+  /** Renderer processes (windows) only. */
+  rendererBytes: number;
+  processes: number;
+  /** Physical memory of the machine (os.totalmem). */
+  systemBytes: number;
 }
 
 // ---- notifications

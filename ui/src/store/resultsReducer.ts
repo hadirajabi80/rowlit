@@ -19,6 +19,23 @@ export interface ResultSetState {
   done: boolean;
   /** Bumped on every append; lets memoized views recompute. */
   rev: number;
+  /**
+   * Resources (docs/resources.md): the rows beyond the first page were released to save memory (a background tab not
+   * viewed for a while, the row budget, memory pressure). `rows` holds the first `kept`; Reload fetches the rest back
+   * from the engine's copy, or the query is re-run when that copy is gone (`unavailable`).
+   */
+  released?: ReleasedRows | null;
+}
+
+export interface ReleasedRows {
+  kept: number;
+  /** Rows the result set had before the release. */
+  total: number;
+  at: number;
+  reason: 'idle' | 'budget' | 'pressure';
+  reloading?: boolean;
+  /** The engine no longer has the rows: only Re-run can bring them back. */
+  unavailable?: boolean;
 }
 
 export type MessageSource = 'server' | 'dbmsOutput' | 'engine' | 'client';

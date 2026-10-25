@@ -35,9 +35,14 @@ public sealed class CatalogService
     private readonly ILogger _log;
     private readonly ConcurrentDictionary<string, ConnectionCatalog> _caches = new(StringComparer.Ordinal);
     private readonly string _epoch = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
+    private readonly TimeProvider _time;
+    // Resources: the last version of every forgotten / evicted database cache, so a reload never reuses an ETag.
+    private readonly ConcurrentDictionary<string, int> _retiredVersions = new(StringComparer.OrdinalIgnoreCase);
 
-    public CatalogService(ProviderRegistry providers, ConnectionStore connections, IEventPublisher events, ILogger<CatalogService>? log = null)
+    public CatalogService(ProviderRegistry providers, ConnectionStore connections, IEventPublisher events, ILogger<CatalogService>? log = null,
+        TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         _providers = providers;
         _connections = connections;
         _events = events;
@@ -47,21 +52,29 @@ public sealed class CatalogService
     private sealed class ConnectionCatalog
     {
         public readonly SemaphoreSlim Gate = new(1, 1);
+        public DateTimeOffset LastUsed;
+        public string Id = "";
         public readonly Dictionary<string, DbCatalog> Databases = new(StringComparer.OrdinalIgnoreCase);
         public string? CurrentDatabase;
         public IReadOnlyList<string>? DatabaseList;
     }
 
-    private sealed class DbCatalog(string? name)
+    private sealed class DbCatalog(string? name, int version = 1)
     {
         public string? Name { get; } = name;
-        public int Version = 1;
+        public int Version = version;
+        /// <summary>Schemas evicted to save memory: reloading one bumps <see cref="Version"/> so the UI gets the fresh copy.</summary>
+        public readonly HashSet<string> Evicted = new(StringComparer.OrdinalIgnoreCase);
         public string? DefaultSchema;
         public IReadOnlyList<SchemaInfo>? SchemaList;
         public readonly Dictionary<string, SchemaEntry> Loaded = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    private sealed record SchemaEntry(string Name, int Version, byte[] Json, int ObjectCount);
+    private sealed record SchemaEntry(string Name, int Version, byte[] Json, int ObjectCount)
+    {
+        /// <summary>Last snapshot that included the schema (LRU eviction, docs/resources.md).</summary>
+        public DateTimeOffset LastUsed { get; set; }
+    }
 
     /// <summary>Lazily opened catalog reader shared by one operation.</summary>
     private sealed class ReaderLease(IDbProvider provider, ConnectionProfile profile, string? password, CancellationToken ct) : IAsyncDisposable
@@ -75,12 +88,20 @@ public sealed class CatalogService
     private (IDbProvider Provider, ConnectionProfile Profile, string? Password) Resolve(string connectionId)
     {
         var profile = _connections.WithSecrets(_connections.Get(connectionId));
+        if (_caches.TryGetValue(connectionId, out var cc)) cc.LastUsed = _time.GetUtcNow(); // pooled catalog connections in use
         return (_providers.Get(profile.ProviderId), profile, _connections.GetPassword(connectionId));
     }
 
-    private ConnectionCatalog Cache(string connectionId) => _caches.GetOrAdd(connectionId, _ => new ConnectionCatalog());
+    private ConnectionCatalog Cache(string connectionId)
+    {
+        var cc = _caches.GetOrAdd(connectionId, id => new ConnectionCatalog { Id = id });
+        cc.LastUsed = _time.GetUtcNow();
+        return cc;
+    }
 
-    private static async Task<DbCatalog> DbAsync(ConnectionCatalog cc, Dialect dialect, string? database, ReaderLease lease)
+    private static string RetiredKey(string connectionId, string dbKey) => connectionId + "|" + dbKey;
+
+    private async Task<DbCatalog> DbAsync(ConnectionCatalog cc, Dialect dialect, string? database, ReaderLease lease)
     {
         string? name = null;
         if (DialectInfo.HasDatabases(dialect))
@@ -95,7 +116,7 @@ public sealed class CatalogService
         var key = name ?? "";
         if (!cc.Databases.TryGetValue(key, out var db))
         {
-            db = new DbCatalog(name);
+            db = new DbCatalog(name, _retiredVersions.TryRemove(RetiredKey(cc.Id, key), out var last) ? last + 1 : 1);
             cc.Databases[key] = db;
         }
         return db;
@@ -174,7 +195,12 @@ public sealed class CatalogService
             foreach (var name in requested)
             {
                 if (!db.Loaded.TryGetValue(name, out var entry))
+                {
+                    // Evicted to save memory: the reload may differ from what the client kept, so it gets a new ETag.
+                    if (db.Evicted.Remove(name)) db.Version++;
                     entry = await LoadSchemaAsync(db, name, db.Version, lease, ct).ConfigureAwait(false);
+                }
+                entry.LastUsed = _time.GetUtcNow();
                 entries.Add(entry);
             }
 
@@ -207,7 +233,7 @@ public sealed class CatalogService
         if (model.HiddenForeignKeys > 0)
             _log.LogWarning("Catalog {Database}.{Schema}: {Hidden} foreign key(s) left out: the referenced table or columns are not visible to this login (VIEW DEFINITION)",
                 db.Name, model.Name, model.HiddenForeignKeys);
-        var entry = new SchemaEntry(model.Name, version, CatalogWire.SerializeSchema(model, version), model.Objects.Count);
+        var entry = new SchemaEntry(model.Name, version, CatalogWire.SerializeSchema(model, version), model.Objects.Count) { LastUsed = _time.GetUtcNow() };
         db.Loaded[model.Name] = entry;
         return entry;
     }
@@ -384,6 +410,121 @@ public sealed class CatalogService
         }
     }
 
-    /// <summary>Drops all cached metadata of a connection (profile edited or deleted).</summary>
-    public void Forget(string connectionId) => _caches.TryRemove(connectionId, out _);
+    /// <summary>Drops all cached metadata of a connection (profile edited or deleted, connection closed).</summary>
+    public void Forget(string connectionId)
+    {
+        if (!_caches.TryRemove(connectionId, out var cc)) return;
+        foreach (var (key, db) in cc.Databases.ToArray()) Retire(connectionId, key, db);
+    }
+
+    // ------------------------------------------------------------------ resources (docs/resources.md)
+
+    private void Retire(string connectionId, string key, DbCatalog db) =>
+        _retiredVersions.AddOrUpdate(RetiredKey(connectionId, key), db.Version, (_, v) => Math.Max(v, db.Version));
+
+    /// <summary>
+    /// Explorer "Close database": drops the cached metadata of one database of the connection (SQLite / Oracle and the
+    /// other single-database engines: the whole connection's cache). Returns the bytes freed.
+    /// </summary>
+    public long ForgetDatabase(string connectionId, string? database)
+    {
+        if (!_caches.TryGetValue(connectionId, out var cc)) return 0;
+        if (!cc.Gate.Wait(TimeSpan.FromSeconds(5))) return 0;
+        try
+        {
+            var key = database?.Trim() ?? "";
+            if (!cc.Databases.TryGetValue(key, out var db))
+            {
+                // the connection's default database is cached under its name, or under "" (no database level)
+                if (key.Length == 0 && cc.CurrentDatabase is { } current && cc.Databases.TryGetValue(current, out var byCurrent)) { db = byCurrent; key = current; }
+                else if (cc.Databases.TryGetValue("", out var single)) { db = single; key = ""; }
+                else return 0;
+            }
+            var bytes = db.Loaded.Values.Sum(e => (long)e.Json.Length);
+            cc.Databases.Remove(key);
+            Retire(connectionId, key, db);
+            return bytes;
+        }
+        finally
+        {
+            cc.Gate.Release();
+        }
+    }
+
+    /// <summary>Bytes of serialized schema snapshots cached for the connection, and how many schemas.</summary>
+    public (long Bytes, int Schemas, int Databases) Stats(string connectionId)
+    {
+        if (!_caches.TryGetValue(connectionId, out var cc)) return (0, 0, 0);
+        try
+        {
+            var dbs = cc.Databases.Values.ToList();
+            return (dbs.Sum(d => d.Loaded.Values.Sum(e => (long)e.Json.Length)), dbs.Sum(d => d.Loaded.Count), dbs.Count);
+        }
+        catch (InvalidOperationException)
+        {
+            return (0, 0, 0); // modified concurrently: the next sample counts it
+        }
+    }
+
+    /// <summary>Last catalog request of the connection (any database), null when nothing is cached.</summary>
+    public DateTimeOffset? LastUsed(string connectionId) => _caches.TryGetValue(connectionId, out var cc) ? cc.LastUsed : null;
+
+    /// <summary>Connections with cached metadata.</summary>
+    public IReadOnlyList<string> CachedConnections() => _caches.Keys.ToList();
+
+    /// <summary>Names of the databases cached for a connection (null = the connection's default / no database level).</summary>
+    public IReadOnlyList<string?> CachedDatabases(string connectionId) =>
+        _caches.TryGetValue(connectionId, out var cc) ? cc.Databases.Values.Select(d => d.Name).ToList() : [];
+
+    /// <summary>Total bytes of every cached schema snapshot.</summary>
+    public long TotalBytes() => _caches.Keys.Sum(cid => Stats(cid).Bytes);
+
+    /// <summary>
+    /// LRU eviction (docs/resources.md): drops the least recently used schema snapshots that were not used for
+    /// <paramref name="minIdle"/> until the cache fits <paramref name="budgetBytes"/>. Connections whose cache is busy
+    /// (a load in progress) are skipped. An evicted schema reloads lazily with a new ETag. Returns the bytes freed.
+    /// </summary>
+    public long Trim(long budgetBytes, TimeSpan minIdle)
+    {
+        var now = _time.GetUtcNow();
+        var candidates = new List<(ConnectionCatalog Cc, DbCatalog Db, SchemaEntry Entry)>();
+        long total = 0;
+        foreach (var cc in _caches.Values)
+        {
+            if (!cc.Gate.Wait(0)) continue;
+            try
+            {
+                foreach (var db in cc.Databases.Values)
+                    foreach (var e in db.Loaded.Values)
+                    {
+                        total += e.Json.Length;
+                        if (now - e.LastUsed >= minIdle) candidates.Add((cc, db, e));
+                    }
+            }
+            finally
+            {
+                cc.Gate.Release();
+            }
+        }
+        if (total <= budgetBytes) return 0;
+        long freed = 0;
+        foreach (var (cc, db, e) in candidates.OrderBy(c => c.Entry.LastUsed))
+        {
+            if (total - freed <= budgetBytes) break;
+            if (!cc.Gate.Wait(0)) continue;
+            try
+            {
+                if (!db.Loaded.TryGetValue(e.Name, out var current) || !ReferenceEquals(current, e)) continue;
+                db.Loaded.Remove(e.Name);
+                db.Evicted.Add(e.Name);
+                freed += e.Json.Length;
+            }
+            finally
+            {
+                cc.Gate.Release();
+            }
+        }
+        if (freed > 0) _log.LogInformation("Catalog cache: evicted {Bytes:N0} bytes of schema snapshots (budget {Budget:N0})", freed, budgetBytes);
+        return freed;
+    }
 }

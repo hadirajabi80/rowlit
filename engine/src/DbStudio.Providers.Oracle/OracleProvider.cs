@@ -64,6 +64,20 @@ public sealed class OracleProvider : IDbProvider, IObjectBrowserProvider, IDatab
 
     public IdentifierRules Identifiers { get; } = new('"', '"', "upper", OracleReservedWords.All);
 
+    /// <summary>Resources: closes the idle pooled catalog connections of the profile.</summary>
+    public void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases)
+    {
+        try
+        {
+            using var conn = new OracleConnection(OracleConnectionStrings.Build(profile, password, pooling: true));
+            OracleConnection.ClearPool(conn);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OracleException)
+        {
+            // incomplete profile or no pool: nothing to clear
+        }
+    }
+
     /// <summary>The session connection string (pooling and statement cache disabled).</summary>
     public string BuildConnectionString(ConnectionProfile profile, string? password) =>
         OracleConnectionStrings.Build(profile, password, pooling: false);

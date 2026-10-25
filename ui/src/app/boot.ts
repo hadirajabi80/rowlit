@@ -19,6 +19,7 @@ import { preloadCatalog } from './actions';
 import { bootDetachedTabs, liveDetachedTabs, wireMainWindowTabs } from './detach';
 import { MULTIRUN_VIEW, targetTabId, type MultiRunState } from './multiRun';
 import { restoreZoom } from './zoom';
+import { wireResources } from './resources';
 
 let wired = false;
 
@@ -123,6 +124,8 @@ export function wireSocket(): void {
     useSessions.getState().refreshSoon(400);
   });
   engineSocket.on('catalog.changed', (ev) => useCatalog.getState().applyChanged(ev));
+  // Resources (docs/resources.md): released connections, memory pressure, background results, the status-bar poll.
+  wireResources();
   // export.progress / export.done belong to the export that was started: the export dialog follows them and reports the
   // end (components/Export/serverExport.ts), so there is no global listener here.
   engineSocket.on('source.client', (ev) => useSourceClients.getState().apply(ev.connectionId, ev.state));

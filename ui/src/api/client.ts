@@ -17,6 +17,7 @@ import type { SourceClientInfo, StreamInfo, StreamOpenRequest, StreamOpenRespons
 import { CLIENT_ID_HEADER, uiClientId } from './clientId';
 import { createM2Namespaces } from './client.m2';
 import { createM3Namespaces } from './client.m3';
+import { createResourcesApi } from './resources';
 
 export const API_PREFIX = '/api/v1';
 
@@ -309,6 +310,8 @@ export const api = {
   logs: m2.logs,
   er: m2.er,
   ...m3,
+  // Resources (docs/resources.md): status-bar popover, memory reports, Close connection / database, Disconnect all.
+  resources: createResourcesApi({ json, send, enc, filenameFrom }),
 };
 
 

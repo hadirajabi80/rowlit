@@ -230,7 +230,8 @@ export function Explorer() {
     const m = new Map<string, ConnectionActivity>();
     return (cid: string) => {
       // M2: an open source client (Redis/MongoDB/Kafka) counts like a loaded catalog.
-      if (!m.has(cid)) m.set(cid, connectionActivity(cid, sessions, (id) => conns[id]?.status ?? (sourceClients[id] ? 'ready' : undefined)));
+      // Resources: the filled dot only while it holds server resources (live sessions, an open client).
+      if (!m.has(cid)) m.set(cid, connectionActivity(cid, sessions, (id) => conns[id]?.status, (id) => !!sourceClients[id]));
       return m.get(cid)!;
     };
   }, [sessions, conns, sourceClients]);
@@ -633,7 +634,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       {r.busy && <LoaderCircle size={12} className="spin tree-spinner" aria-label="Loading" />}
       {active && !r.busy && (
         <span
-          className={`conn-active-dot${activity?.kind === 'session' ? ' has-session' : ' catalog-only'}`}
+          className={`conn-active-dot${activity?.kind === 'session' || activity?.kind === 'client' ? ' has-session' : ' catalog-only'}`}
           title={activityTitle(activity)}
           role="img"
           aria-label={activityTitle(activity)}

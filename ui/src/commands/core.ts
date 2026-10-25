@@ -3,12 +3,14 @@
 import { api } from '../api/client';
 import type { HistoryEntry, SessionInfo } from '../api/types';
 import {
-  cancelTab, catalogDatabase, closeTab, commitTab, connectAllInFolder, connectAndOpen, copyText, disconnectAll, disconnectConnection,
+  cancelTab, catalogDatabase, closeTab, commitTab, closeDatabase, connectAllInFolder, connectAndOpen, copyText, disconnectAll, disconnectConnection,
   insertIntoActiveEditor, newConsole, openObject, openSampleDatabase, openSqlFile, openSqliteFile, reopenSql, rerun, rollbackTab,
   ownSessions, runActive, saveActiveFile, saveEditToDatabase, selectTop, setTxMode,
 } from '../app/actions';
 import { canDrop, copyDdl, dropObject, generateSqlInto, scriptCreate, truncateTable, type SqlTemplate } from '../app/objectActions';
 import { checkForUpdatesNow } from '../app/updates';
+import { freeMemoryNow } from '../app/resources';
+import { useResources } from '../store/resources';
 import { currentZoom, setZoom } from '../app/zoom';
 import { peekEditSession } from '../designer/editSession';
 import { pluralize } from '../components/common/text';
@@ -281,11 +283,12 @@ export const CORE_COMMANDS: Command<never>[] = [
     run: (a?: unknown) => useUi.getState().openConnectionDialog({ mode: 'duplicate', id: connectionIdOf(a)! }),
   },
   {
-    id: 'connections.disconnect', title: 'Disconnect', category: 'Connections', icon: 'Unplug',
+    // Resources (docs/resources.md): Navicat-like "Close connection" (the id stays for shortcuts and menus).
+    id: 'connections.disconnect', title: 'Close connection', category: 'Connections', icon: 'Unplug',
     when: (a?: unknown) => {
       const cid = connectionIdOf(a);
       // Only what Disconnect closes: the cached catalog and this window's sessions (not another window's).
-      return !!cid && (!!useCatalog.getState().conns[cid] || ownSessions(cid).length > 0 || sourceClientOpen(cid));
+      return !!cid && (!!useCatalog.getState().conns[cid] || ownSessions(cid).some((s) => !s.released) || sourceClientOpen(cid));
     },
     run: (a?: unknown) => void disconnectConnection(connectionIdOf(a)!),
   },
@@ -293,6 +296,27 @@ export const CORE_COMMANDS: Command<never>[] = [
     id: 'connections.disconnectAll', title: 'Disconnect all', category: 'Connections', icon: 'Unplug',
     when: () => ownSessions().length > 0 || Object.keys(useCatalog.getState().conns).length > 0 || Object.keys(useSourceClients.getState().clients).length > 0,
     run: () => void disconnectAll(),
+  },
+  // ---- Resources (docs/resources.md)
+  {
+    id: 'connections.closeDatabase', title: 'Close database', category: 'Connections', icon: 'Unplug', palette: false,
+    // A database node (not a schema or folder below it): its sessions and cached catalog.
+    when: (a?: unknown) => {
+      const t = targetOf(a);
+      return isContainerTarget(t) && !!t.database && !t.schema && !t.objectType && !t.queries && !t.typeKind;
+    },
+    run: (a?: unknown) => {
+      const t = targetOf(a);
+      if (isContainerTarget(t)) void closeDatabase(t.connectionId, t.database);
+    },
+  },
+  {
+    id: 'resources.show', title: 'Resources and memory…', category: 'Connections', icon: 'Activity',
+    run: () => useResources.getState().setOpen(true),
+  },
+  {
+    id: 'resources.freeMemory', title: 'Free memory now', category: 'Connections', icon: 'Activity',
+    run: () => void freeMemoryNow(),
   },
   {
     id: 'connections.connectFolder', title: 'Connect all in folder', category: 'Connections', icon: 'Plug', palette: false,

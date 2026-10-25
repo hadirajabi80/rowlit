@@ -34,6 +34,14 @@ public interface IDbProvider
     ISqlDiagnostics? Diagnostics { get; }
 
     IdentifierRules Identifiers { get; }
+
+    /// <summary>
+    /// Additive (docs/resources.md): closes the idle pooled catalog/metadata connections of the profile, one pool per
+    /// database for engines that connect per database (<paramref name="databases"/>: the cached ones; null = the
+    /// profile's default). Called when a connection is closed or its metadata was not used for the idle timeout.
+    /// Default: nothing is pooled.
+    /// </summary>
+    void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases) { }
 }
 
 public interface IDbSession : IAsyncDisposable

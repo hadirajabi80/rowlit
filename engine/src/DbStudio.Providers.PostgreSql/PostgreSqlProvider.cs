@@ -35,6 +35,25 @@ public sealed class PostgreSqlProvider : IDbProvider, IObjectBrowserProvider, ID
     public ISqlDiagnostics? Diagnostics { get; } = new PgPrepareDiagnostics();
     public IdentifierRules Identifiers { get; } = new('"', '"', "lower", PgReservedWords.All);
 
+    /// <summary>Resources: the catalog reader pools one Npgsql pool per database ("Rowlit catalog" application name).</summary>
+    public void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases)
+    {
+        foreach (var db in databases.Append(null).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var b = PgConnectionStrings.Builder(profile, password, pooling: true, db);
+                b.ApplicationName = (b.ApplicationName ?? PgConnectionStrings.DefaultApplicationName) + " catalog";
+                using var conn = new NpgsqlConnection(b.ConnectionString);
+                NpgsqlConnection.ClearPool(conn);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // incomplete profile: nothing was pooled for it
+            }
+        }
+    }
+
     /// <summary>The session connection string (pooling disabled).</summary>
     public string BuildConnectionString(ConnectionProfile profile, string? password) =>
         PgConnectionStrings.Build(profile, password, pooling: false);

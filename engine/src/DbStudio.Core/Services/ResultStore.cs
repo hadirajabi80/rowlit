@@ -18,10 +18,45 @@ public sealed class ResultStore
     private readonly object _evictGate = new();
     private long _totalBytes;
 
-    public ResultStore(long capBytes = DefaultCapBytes) => CapBytes = capBytes;
+    private readonly TimeProvider _time;
 
-    public long CapBytes { get; }
+    public ResultStore(long capBytes = DefaultCapBytes, TimeProvider? time = null)
+    {
+        CapBytes = capBytes;
+        _time = time ?? TimeProvider.System;
+    }
+
+    /// <summary>Memory cap; settings resources.resultCacheMb (applied by <see cref="ResourceManager"/>).</summary>
+    public long CapBytes { get; set; }
     public long TotalBytes => Interlocked.Read(ref _totalBytes);
+
+    /// <summary>Stored executions (finished or running).</summary>
+    public int Count => _byExecution.Count;
+
+    internal long NowMs() => _time.GetUtcNow().ToUnixTimeMilliseconds();
+
+    /// <summary>
+    /// Resources (docs/resources.md): drops completed executions untouched (no page, cell or export read) for
+    /// <paramref name="maxIdle"/>, then the least recently used completed ones until <see cref="TotalBytes"/> fits
+    /// <paramref name="targetBytes"/> (null = no size target). Running executions are kept. Returns the bytes freed.
+    /// </summary>
+    public long Trim(TimeSpan? maxIdle, long? targetBytes = null)
+    {
+        var before = TotalBytes;
+        var now = NowMs();
+        lock (_evictGate)
+        {
+            foreach (var e in _byExecution.Values.Where(e => e.Completed).OrderBy(e => e.LastAccess).ToList())
+            {
+                var idle = maxIdle is { } m && now - e.LastAccess >= (long)m.TotalMilliseconds;
+                var over = targetBytes is { } t && TotalBytes > t;
+                if (!idle && !over) continue;
+                Remove(e.ExecutionId);
+                if (_latestBySession.TryGetValue(e.SessionId, out var x) && x == e.ExecutionId) _latestBySession.TryRemove(e.SessionId, out _);
+            }
+        }
+        return Math.Max(0, before - TotalBytes);
+    }
 
     /// <summary>Starts storing a new execution for the session, dropping the session's previous one.</summary>
     public StoredExecution Begin(string sessionId, string executionId, Models.Dialect dialect)
@@ -75,12 +110,13 @@ public sealed class StoredExecution
     private readonly ResultStore _owner;
     private readonly ConcurrentDictionary<int, StoredResultSet> _sets = new();
     private long _bytes;
-    private long _lastAccess = Environment.TickCount64;
+    private long _lastAccess;
     private volatile bool _released;
 
     internal StoredExecution(ResultStore owner, string sessionId, string executionId)
     {
         _owner = owner;
+        _lastAccess = owner.NowMs();
         SessionId = sessionId;
         ExecutionId = executionId;
     }
@@ -88,10 +124,21 @@ public sealed class StoredExecution
     public string SessionId { get; }
     public string ExecutionId { get; }
     internal long LastAccess => Interlocked.Read(ref _lastAccess);
-    public bool Completed { get; internal set; }
+    private volatile bool _completed;
+
+    /// <summary>The execution ended; finishing counts as an access (idle expiry starts then).</summary>
+    public bool Completed
+    {
+        get => _completed;
+        internal set
+        {
+            _completed = value;
+            Touch();
+        }
+    }
     public Dialect Dialect { get; init; }
 
-    internal void Touch() => Interlocked.Exchange(ref _lastAccess, Environment.TickCount64);
+    internal void Touch() => Interlocked.Exchange(ref _lastAccess, _owner.NowMs());
 
     public IReadOnlyList<StoredResultSet> ResultSets => _sets.Values.OrderBy(s => s.Id).ToList();
 

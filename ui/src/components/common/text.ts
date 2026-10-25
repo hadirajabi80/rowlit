@@ -14,5 +14,9 @@ export function pluralWord(n: number, singular: string, plural = `${singular}s`)
 /** Title of the explorer's connected dot: says which kind of "connected" it is. */
 export function activityTitle(a: ConnectionActivity): string {
   if (!a) return 'Not connected';
-  return a.kind === 'session' ? `Connected · ${pluralize(a.sessions, 'open session')}` : 'Connected · catalog loaded (no open session)';
+  if (a.kind === 'session') return `Connected · ${pluralize(a.sessions, 'open session')}`;
+  if (a.kind === 'client') return 'Connected';
+  // Resources: nothing held on the server; released sessions reconnect on the next run.
+  if (a.released) return `Disconnected · ${pluralize(a.released, 'session')} ${a.released === 1 ? 'reconnects' : 'reconnect'} on the next run`;
+  return 'Not connected · catalog cached';
 }

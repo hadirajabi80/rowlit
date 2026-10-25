@@ -72,6 +72,8 @@ public sealed class SettingsService
             // M2 (docs/PLAN-M2.md D2): seconds an unused Redis/Mongo/Kafka client stays open (0 = never close).
             ["sourceIdleSeconds"] = SourceClientManager.DefaultIdleSeconds,
         },
+        // ---- Resources (docs/resources.md): automatic release of idle sessions, cache budgets, memory pressure.
+        ["resources"] = ResourcePolicy.DefaultsJson(),
         // ---- M2 (docs/PLAN-M2.md 1.1, 2.4)
         ["streams"] = new JsonObject
         {
@@ -246,6 +248,11 @@ public sealed class SettingsService
         CheckRange(streams, "streams.maxQueuedItems", 100, 10_000_000);
         if (s["logs"] is not JsonObject logs) throw Invalid("logs", "object");
         CheckRange(logs, "logs.tailIntervalMs", 250, 600_000);
+
+        // Resources
+        if (s["resources"] is not JsonObject resources) throw Invalid("resources", "object");
+        foreach (var (key, min, max) in ResourcePolicy.Ranges) CheckRange(resources, "resources." + key, min, max);
+        foreach (var key in ResourcePolicy.Toggles) CheckKind(resources, key, JsonValueKind.True, JsonValueKind.False);
     }
 
     private static void CheckRange(JsonObject o, string path, double min, double max)

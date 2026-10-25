@@ -1,6 +1,6 @@
-import type { EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus } from './bridge';
+import type { AppMemoryInfo, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus } from './bridge';
 
-export type { EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus };
+export type { AppMemoryInfo, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus };
 
 /** What the app needs from its host. Electron delegates to window.dbstudio; the browser uses fallbacks. */
 export interface Platform {
@@ -51,4 +51,7 @@ export interface Platform {
   // ---- stop the update download
   /** Desktop only: stops the update download in progress (false when nothing is downloading). */
   cancelUpdateDownload?(): Promise<boolean>;
+  // ---- resources
+  /** Desktop only: memory of the Electron processes (app.getAppMetrics), reported to the engine's memory limit. */
+  getAppMemory?(): Promise<AppMemoryInfo>;
 }

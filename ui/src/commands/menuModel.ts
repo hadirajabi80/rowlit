@@ -149,6 +149,7 @@ export const MENUS: MenuDef[] = [
       sep,
       cmd('connections.refreshCatalog', 'Refresh catalog'),
       cmd('connections.disconnectAll', 'Disconnect all'),
+      cmd('resources.show', 'Resources and memory…'),
     ],
   },
   {
@@ -205,6 +206,8 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
     n('designer.newTrigger'), n('designer.newType'), n('designer.newTableType'), n('queries.new'), 'separator',
     c('connections.refreshCatalog'), c('er.open', true), c('explorer.copyName'), 'separator',
     { command: 'scope.setColor', optional: true, hideDisabled: true, label: 'Set colour…' },
+    // Resources (docs/resources.md): database nodes only (hidden on schemas and folders).
+    h('connections.closeDatabase'),
   ],
   /** A schema's "Queries" folder (components/SavedQueries). */
   'explorer.queries': [

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { WsEvent } from '../api/types';
+import type { CellValue, WsEvent } from '../api/types';
+import { ChunkedList } from '../lib/chunked';
 import { EMPTY_VIEW, type GridViewModel } from '../lib/filter';
-import { applyEvents, failExecution, type ExecutionState } from './resultsReducer';
+import { applyEvents, failExecution, isRunning, type ExecutionState, type ReleasedRows } from './resultsReducer';
 
 export type ResultView = number | 'messages';
 
@@ -23,6 +24,14 @@ interface ResultsState {
   setActiveView(tabId: string, v: ResultView): void;
   setGridView(key: string, v: Partial<GridViewModel>): void;
   clearTab(tabId: string): void;
+  /**
+   * Resources (docs/resources.md): keeps only the first `keep` rows of every finished result set of the execution
+   * (`ResultSetState.released`). Returns the number of rows dropped (0 while it runs or when nothing is beyond `keep`).
+   */
+  releaseRows(localId: string, keep: number, reason: ReleasedRows['reason'], now?: number): number;
+  /** Reload: rows fetched back from the engine's copy, appended after the kept ones; `complete` ends the release. */
+  restoreRows(localId: string, rsId: number, rows: CellValue[][], complete: boolean): void;
+  patchReleased(localId: string, rsId: number, patch: Partial<ReleasedRows>): void;
 }
 
 const xidToLocal = new Map<string, string>();
@@ -150,6 +159,42 @@ export const useResults = create<ResultsState>((set, get) => {
       const byTab = { ...s.byTab };
       delete byTab[tabId];
       set({ executions, byTab });
+    },
+
+    releaseRows(localId, keep, reason, now = Date.now()) {
+      const e = get().executions[localId];
+      if (!e || isRunning(e)) return 0;
+      let dropped = 0;
+      const resultSets = e.resultSets.map((rs) => {
+        if (!rs.done || rs.rows.length <= keep) return rs;
+        dropped += rs.rows.length - keep;
+        const total = rs.released ? rs.released.total : rs.rows.length;
+        return {
+          ...rs, rows: ChunkedList.from(rs.rows.slice(0, keep)), rev: rs.rev + 1,
+          released: { kept: keep, total, at: now, reason },
+        };
+      });
+      if (!dropped) return 0;
+      set({ executions: { ...get().executions, [localId]: { ...e, resultSets } } });
+      return dropped;
+    },
+
+    restoreRows(localId, rsId, rows, complete) {
+      const e = get().executions[localId];
+      if (!e) return;
+      const resultSets = e.resultSets.map((rs) => {
+        if (rs.id !== rsId || !rs.released) return rs;
+        rs.rows.pushAll(rows);
+        return { ...rs, rev: rs.rev + 1, released: complete ? null : { ...rs.released, reloading: true } };
+      });
+      set({ executions: { ...get().executions, [localId]: { ...e, resultSets } } });
+    },
+
+    patchReleased(localId, rsId, patch) {
+      const e = get().executions[localId];
+      if (!e) return;
+      const resultSets = e.resultSets.map((rs) => (rs.id === rsId && rs.released ? { ...rs, released: { ...rs.released, ...patch } } : rs));
+      set({ executions: { ...get().executions, [localId]: { ...e, resultSets } } });
     },
   };
 });

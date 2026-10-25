@@ -53,7 +53,29 @@ public sealed record ExecPlanEvent(string ExecutionId, Dialect Dialect, string M
 
 public sealed record ExecDiagnosticsEvent(string ExecutionId, IReadOnlyList<SqlDiagnostic> Diagnostics) : EngineEvent("exec.diagnostics");
 
-public sealed record SessionChangedEvent(string SessionId, SessionState State, bool TxOpen, string? Database, TransactionMode TxMode) : EngineEvent("session.changed");
+public sealed record SessionChangedEvent(string SessionId, SessionState State, bool TxOpen, string? Database, TransactionMode TxMode) : EngineEvent("session.changed")
+{
+    /// <summary>Resources (docs/resources.md): the session's connection was closed to free resources; the next run reopens it.</summary>
+    public bool Released { get; init; }
+
+    /// <summary>"idle" | "closed" | "pressure" | "limit" while released.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReleasedReason { get; init; }
+
+    /// <summary>The session created temporary objects: the idle reaper keeps it.</summary>
+    public bool HasTempObjects { get; init; }
+}
+
+/// <summary>
+/// Resources (docs/resources.md): the engine freed resources of a connection on its own (idle timeout, memory pressure,
+/// open connections limit). The UI shows a toast for "pressure" and "limit".
+/// </summary>
+/// <param name="Reason">"idle" | "pressure" | "limit".</param>
+public sealed record ResourcesReleasedEvent(string ConnectionId, string ConnectionName, string Reason, int Sessions, bool SourceClient)
+    : EngineEvent("resources.released");
+
+/// <param name="Level">"normal" | "high" | "critical".</param>
+public sealed record ResourcesPressureEvent(string Level, long UsedBytes, long LimitBytes) : EngineEvent("resources.pressure");
 
 public sealed record CatalogChangedEvent(string ConnectionId, string? Database, IReadOnlyList<string> Schemas, int Version) : EngineEvent("catalog.changed");
 

@@ -19,21 +19,29 @@ public sealed record SessionInfo(
     string? ExecutingSince = null,
     string? TabId = null,
     string? Label = null,
-    bool Orphan = false);
+    bool Orphan = false,
+    bool Released = false,
+    string? ReleasedReason = null,
+    bool HasTempObjects = false);
 
 /// <summary>A tab session: the provider session plus engine bookkeeping (busy flag, reopen data).</summary>
 public sealed class SessionHandle
 {
     private int _busy;
 
-    internal SessionHandle(string id, ConnectionProfile profile, IDbProvider provider, IDbSession session, SessionOptions options)
+    internal SessionHandle(string id, ConnectionProfile profile, IDbProvider provider, IDbSession session, SessionOptions options,
+        TimeProvider? time = null)
     {
         Id = id;
         Profile = profile;
         Provider = provider;
         Session = session;
         Options = options;
+        Time = time ?? TimeProvider.System;
+        LastActivity = Time.GetUtcNow();
     }
+
+    internal TimeProvider Time { get; }
 
     public string Id { get; }
     public ConnectionProfile Profile { get; internal set; }
@@ -41,7 +49,24 @@ public sealed class SessionHandle
     public IDbSession Session { get; internal set; }
     public SessionOptions Options { get; internal set; }
     public Dialect Dialect => Provider.Dialect;
-    public DateTimeOffset LastActivity { get; internal set; } = DateTimeOffset.UtcNow;
+    /// <summary>End of the last execution/export (or creation). The idle ping does not count as activity.</summary>
+    public DateTimeOffset LastActivity { get; internal set; }
+
+    /// <summary>
+    /// Resources (docs/resources.md): the physical connection was closed to free server resources (idle, closed from the
+    /// explorer, memory pressure, connection limit) while the session id stays valid. The next execution reopens it
+    /// transparently on the same database (<see cref="SessionManager.EnsureUsableAsync"/>).
+    /// </summary>
+    public bool Released { get; internal set; }
+
+    /// <summary>"idle" | "closed" | "pressure" | "limit" while <see cref="Released"/>.</summary>
+    public string? ReleasedReason { get; internal set; }
+
+    /// <summary>
+    /// A statement created a temporary object (#temp table, CREATE TEMP TABLE, ...) on this connection: the idle reaper
+    /// keeps the session because reopening it would lose the object. Sticky until the session is closed or released.
+    /// </summary>
+    public bool HasTempObjects { get; internal set; }
 
     /// <summary>Id of the execution or export currently using the session, else null.</summary>
     public string? ActiveOperation { get; private set; }
@@ -61,9 +86,10 @@ public sealed class SessionHandle
 
     public void Release()
     {
+        // The idle ping and the resource manager's own release do not make the session "used".
+        if (ActiveOperation is not ("ping" or "release")) LastActivity = Time.GetUtcNow();
         ActiveOperation = null;
         ExecutingSince = null;
-        LastActivity = DateTimeOffset.UtcNow;
         Interlocked.Exchange(ref _busy, 0);
     }
 
@@ -84,8 +110,11 @@ public sealed class SessionHandle
     /// <summary>True when the session has an owner client and that client has no live WebSocket.</summary>
     public bool Orphan => OwnerClientId is { } owner && Presence is { } presence && !presence.IsLive(owner);
 
-    /// <summary>Running an execution or export (not the idle ping).</summary>
-    public bool IsRunning => IsReserved && ActiveOperation is not "ping";
+    /// <summary>Running an execution or export (not the idle ping or a resource release).</summary>
+    public bool IsRunning => IsReserved && ActiveOperation is not ("ping" or "release");
+
+    /// <summary>Holds a physical connection (not <see cref="Released"/>, not closed).</summary>
+    public bool HoldsConnection => !Released && Session.State != SessionState.Closed;
 
     /// <summary>"Console 1" (the tab title of the last execution), else the session id.</summary>
     public string DisplayName => string.IsNullOrWhiteSpace(Label) ? $"Session {Id}" : Label!;
@@ -94,9 +123,15 @@ public sealed class SessionHandle
     {
         var executing = IsRunning;
         return new SessionInfo(
-            Id, Profile.Id, Session.Server, Session.CurrentDatabase, Session.TxMode, Session.TxOpen,
-            IsReserved && Session.State == SessionState.Idle ? SessionState.Executing : Session.State, Dialect,
-            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan);
+            Id, Profile.Id, Session.Server, Session.CurrentDatabase, Session.TxMode, Session.TxOpen && !Released, WireState(), Dialect,
+            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan, Released, Released ? ReleasedReason : null, HasTempObjects);
+    }
+
+    /// <summary>A released session reads idle (its id stays usable); a reserved idle one reads executing.</summary>
+    internal SessionState WireState()
+    {
+        if (Released) return IsRunning ? SessionState.Executing : SessionState.Idle;
+        return IsReserved && Session.State == SessionState.Idle && ActiveOperation is not "release" ? SessionState.Executing : Session.State;
     }
 }
 
@@ -126,12 +161,23 @@ public sealed class SessionManager : IAsyncDisposable
     /// <summary>Default of settings connections.orphanGraceSeconds.</summary>
     public const int DefaultOrphanGraceSeconds = 90;
 
+    private readonly TimeProvider _time;
+
+    /// <summary>
+    /// Resources (docs/resources.md): called before a session opens a physical connection for a connection that holds
+    /// none yet (new session, reopening a released one). <see cref="ResourceManager"/> uses it to enforce the open
+    /// connections limit by releasing the least recently used idle connection.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? BeforeConnect { get; set; }
+
     /// <param name="presence">Live UI clients (WebSocket hub); without it sessions are never treated as orphaned.</param>
     /// <param name="orphanGrace">Tests: overrides settings connections.orphanGraceSeconds.</param>
+    /// <param name="time">Clock of the idle bookkeeping (tests use a manual clock).</param>
     public SessionManager(ProviderRegistry providers, ConnectionStore connections, IEventPublisher events, ResultStore results,
         ILogger<SessionManager>? log = null, TimeSpan? pingInterval = null, SettingsService? settings = null,
-        ClientPresence? presence = null, TimeSpan? orphanGrace = null)
+        ClientPresence? presence = null, TimeSpan? orphanGrace = null, TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         _settings = settings;
         _providers = providers;
         _connections = connections;
@@ -157,6 +203,8 @@ public sealed class SessionManager : IAsyncDisposable
         var id = Ids.New("s");
         var options = new SessionOptions(id, string.IsNullOrWhiteSpace(database) ? null : database, txMode, captureServerOutput);
 
+        await NotifyBeforeConnectAsync(connectionId, ct).ConfigureAwait(false);
+
         // M1.5: per-profile session limit (429 SESSION_LIMIT). A per-profile gate makes count + add atomic.
         var gate = _createGates.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct).ConfigureAwait(false);
@@ -170,7 +218,7 @@ public sealed class SessionManager : IAsyncDisposable
                     $"The connection '{profile.Name}' already has {open} open sessions (limit {limit}). Close idle tabs or raise the limit in Settings.",
                     new { connectionId, limit, open });
             var session = await provider.OpenSessionAsync(profile, _connections.GetPassword(connectionId), options, ct).ConfigureAwait(false);
-            handle = new SessionHandle(id, profile, provider, session, options)
+            handle = new SessionHandle(id, profile, provider, session, options, _time)
             {
                 Presence = _presence,
                 OwnerClientId = ClientPresence.Normalize(clientId),
@@ -330,7 +378,127 @@ public sealed class SessionManager : IAsyncDisposable
     public void PublishChanged(SessionHandle h)
     {
         var info = h.ToInfo();
-        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode));
+        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode)
+        {
+            Released = info.Released,
+            ReleasedReason = info.ReleasedReason,
+            HasTempObjects = info.HasTempObjects,
+        });
+    }
+
+    // ------------------------------------------------------------------ resources (docs/resources.md)
+
+    /// <summary>True when a session of the connection holds a physical connection.</summary>
+    public bool HoldsConnection(string connectionId) => _sessions.Values.Any(s => s.Profile.Id == connectionId && s.HoldsConnection);
+
+    /// <summary>
+    /// Closes the session's physical connection but keeps the session (same id, database, transaction mode): the next
+    /// execution reopens it (<see cref="EnsureUsableAsync"/>). Returns false, doing nothing, when the session is running,
+    /// already released, or has an open transaction without <paramref name="force"/> (force rolls it back).
+    /// </summary>
+    /// <param name="reason">"idle" | "closed" | "pressure" | "limit" (reported to the UI).</param>
+    public async Task<bool> ReleaseAsync(SessionHandle h, string reason, bool force = false)
+    {
+        ArgumentNullException.ThrowIfNull(h);
+        if (h.Released || !_sessions.ContainsKey(h.Id)) return false;
+        if (h.Session.TxOpen && !force) return false;
+        if (!h.TryReserve("release")) return false;
+        var rolledBack = false;
+        try
+        {
+            if (h.Released) return false;
+            rolledBack = h.Session.TxOpen;
+            // Remember where the session was: the reopen re-applies the database (USE / reconnect) and transaction mode.
+            h.Options = h.Options with { Database = h.Session.CurrentDatabase ?? h.Options.Database, TxMode = h.Session.TxMode };
+            try
+            {
+                await h.Session.DisposeAsync().ConfigureAwait(false); // rolls back an open transaction
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "Closing the connection of session {SessionId} failed", h.Id);
+            }
+            h.Released = true;
+            h.ReleasedReason = reason;
+            h.HasTempObjects = false;
+        }
+        finally
+        {
+            h.Release();
+        }
+        _log.LogInformation("Session {SessionId} ({Label}) released its connection ({Reason}{RolledBack})", h.Id, h.DisplayName, reason,
+            rolledBack ? ", transaction rolled back" : "");
+        PublishChanged(h);
+        return true;
+    }
+
+    /// <summary>
+    /// Reopens a released session before a non-execution action that needs its connection (switch database, change the
+    /// transaction mode). No-op when the session holds its connection. 409 SESSION_BUSY while it is reserved.
+    /// </summary>
+    public async Task ReopenIfReleasedAsync(SessionHandle h, CancellationToken ct)
+    {
+        if (!h.Released) return;
+        if (!h.TryReserve("reopen")) throw new EngineException(409, ErrorCodes.SessionBusy, "The session is already executing a statement.");
+        try
+        {
+            if (h.Released) await ReopenReleasedAsync(h, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            h.Release();
+        }
+    }
+
+    /// <summary>Info message of the execution that reopened a released session.</summary>
+    public static string ReopenedMessage(string? reason) => reason switch
+    {
+        "idle" => "Reconnected: the session had been closed after being idle.",
+        "pressure" => "Reconnected: the session had been closed to free memory.",
+        "limit" => "Reconnected: the session had been closed to stay under the open connections limit.",
+        _ => "Reconnected: the connection had been closed.",
+    };
+
+    private async Task NotifyBeforeConnectAsync(string connectionId, CancellationToken ct)
+    {
+        if (BeforeConnect is not { } hook || HoldsConnection(connectionId)) return;
+        try
+        {
+            await hook(connectionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Freeing resources before connecting {ConnectionId} failed", connectionId);
+        }
+    }
+
+    /// <summary>Reopens a released session in place (the database and transaction mode it had). Throws 503-ish SESSION_BROKEN when that fails.</summary>
+    private async Task ReopenReleasedAsync(SessionHandle h, CancellationToken ct)
+    {
+        await NotifyBeforeConnectAsync(h.Profile.Id, ct).ConfigureAwait(false);
+        IDbSession fresh;
+        try
+        {
+            var profile = _connections.Find(h.Profile.Id) is { } p ? _connections.WithSecrets(p) : h.Profile;
+            fresh = await h.Provider.OpenSessionAsync(profile, _connections.GetPassword(profile.Id), h.Options, ct).ConfigureAwait(false);
+            h.Profile = profile;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new EngineException(409, ErrorCodes.SessionBroken, $"The session was closed to free resources and could not be reopened: {ex.Message}");
+        }
+        // Back to the transaction mode it had (a provider may ignore SessionOptions.TxMode on open).
+        if (fresh.TxMode != h.Options.TxMode)
+        {
+            try { await fresh.SetTransactionModeAsync(h.Options.TxMode, ct).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogDebug(ex, "Restoring the transaction mode of {SessionId} failed", h.Id); }
+        }
+        h.Session = fresh;
+        h.Released = false;
+        h.ReleasedReason = null;
+        _connections.Touch(h.Profile.Id);
+        _log.LogInformation("Session {SessionId} reopened its connection", h.Id);
+        PublishChanged(h);
     }
 
     /// <summary>Closes a session. With an open transaction requires <paramref name="force"/> (rolls back).</summary>
@@ -366,6 +534,12 @@ public sealed class SessionManager : IAsyncDisposable
     /// </summary>
     public async Task<string?> EnsureUsableAsync(SessionHandle h, CancellationToken ct)
     {
+        if (h.Released)
+        {
+            var reason = h.ReleasedReason;
+            await ReopenReleasedAsync(h, ct).ConfigureAwait(false);
+            return ReopenedMessage(reason);
+        }
         if (h.Session.State != SessionState.Broken) return null;
         // TxOpen is already false when the break was detected mid-execution: LostTransaction remembers it.
         var hadTx = h.Session.TxOpen || h.Session.LostTransaction;
@@ -409,6 +583,8 @@ public sealed class SessionManager : IAsyncDisposable
             var options = h.Options with { Database = database.Trim(), TxMode = old.TxMode };
             var fresh = await h.Provider.OpenSessionAsync(profile, _connections.GetPassword(profile.Id), options, ct).ConfigureAwait(false);
             h.Session = fresh;
+            h.Released = false;
+            h.ReleasedReason = null;
             h.Profile = profile;
             h.Options = options;
             try { await old.DisposeAsync().ConfigureAwait(false); } catch { /* the old connection is discarded either way */ }
@@ -428,8 +604,8 @@ public sealed class SessionManager : IAsyncDisposable
             catch (Exception ex) { _log.LogWarning(ex, "Closing orphaned sessions failed"); }
             foreach (var h in _sessions.Values)
             {
-                if (h.IsReserved || h.Session.State != SessionState.Idle) continue;
-                if (DateTimeOffset.UtcNow - h.LastActivity < TimeSpan.FromSeconds(30)) continue;
+                if (h.Released || h.IsReserved || h.Session.State != SessionState.Idle) continue;
+                if (_time.GetUtcNow() - h.LastActivity < TimeSpan.FromSeconds(30)) continue;
                 if (!h.TryReserve("ping")) continue;
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 bool ok;

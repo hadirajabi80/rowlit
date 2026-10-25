@@ -1,0 +1,127 @@
+/* Resources popover (ResourcesPopover.tsx, lazy). Tokens only. */
+.resources-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 50;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popup);
+  font-size: var(--fs-sm);
+  cursor: default;
+}
+.resources-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.resources-title {
+  font-weight: var(--weight-strong);
+}
+.resources-error,
+.resources-empty {
+  padding: 8px 10px;
+}
+.resources-error {
+  color: var(--danger-text);
+}
+.resources-memory {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.resources-memory-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.resources-memory-detail {
+  font-size: var(--fs-xs);
+}
+.resources-level.level-high {
+  color: var(--warning);
+}
+.resources-level.level-critical {
+  color: var(--danger-text);
+  font-weight: var(--weight-strong);
+}
+.resources-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.resources-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.resources-bar.level-high > span {
+  background: var(--warning);
+}
+.resources-bar.level-critical > span {
+  background: var(--danger);
+}
+.resources-conns {
+  overflow: auto;
+  min-height: 0;
+}
+.resources-conns-head {
+  padding: 6px 10px 2px;
+  font-size: var(--fs-xs);
+}
+.resources-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+}
+.resources-row {
+  display: grid;
+  grid-template-columns: 8px minmax(60px, max-content) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+}
+.resources-row:hover {
+  background: var(--bg-hover-elevated);
+}
+.resources-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+.resources-dot.on {
+  background: var(--success);
+  border-color: var(--success);
+}
+.resources-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.resources-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+.resources-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+}

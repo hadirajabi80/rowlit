@@ -55,6 +55,7 @@ import { ExecutedQueryLine } from './ExecutedQueryLine';
 import { resultStatement, type ExecutedQuery } from './executedQuery';
 import { applyServerFilter, originalBatch, originatingSelect, previewServerSql, serverFilterAvailability } from './serverFilter';
 import { GRID_EXPORT_MENU, RESULTS_CODE_ENTRY } from './toolbarModel';
+import { ReleasedBanner } from './ReleasedBanner';
 import './results.css';
 import './dock.css';
 
@@ -579,6 +580,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
           </button>
         </div>
       )}
+      {rs.released && <ReleasedBanner exec={exec} rs={rs} />}
       <div className="resultset-body">
         <div className="resultset-grid">
           {rs.columns.length === 0 ? (

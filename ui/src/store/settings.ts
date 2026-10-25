@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api } from '../api/client';
-import type { ConnectionsSettings, FormatOptions, GridSettings, Settings, Snippet } from '../api/types';
+import type { ConnectionsSettings, FormatOptions, GridSettings, ResourcesSettings, Settings, Snippet } from '../api/types';
 
 export const DEFAULT_FORMAT: FormatOptions = {
   keywordCase: 'upper',
@@ -21,6 +21,11 @@ export const DEFAULT_FORMAT: FormatOptions = {
 
 export const DEFAULT_GRID: GridSettings = { density: 'comfortable', pageSize: 1000, verifyUnchanged: false, showSqlBeforeSave: false };
 export const DEFAULT_CONNECTIONS: ConnectionsSettings = { maxSessionsPerProfile: 8 };
+/** Resources (docs/resources.md): the engine's defaults of `resources.*`. */
+export const DEFAULT_RESOURCES: ResourcesSettings = {
+  autoRelease: true, idleSessionMinutes: 15, memoryLimitMb: 0, maxOpenConnections: 20, catalogCacheMb: 128,
+  resultCacheMb: 256, resultCacheMinutes: 30, releaseResultsMinutes: 10, resultRowBudget: 500_000, trimUnderPressure: true,
+};
 
 /** Settings with every M1.5 key present (the engine always returns them; the defaults cover older engines). */
 export type FullSettings = Settings & {
@@ -28,6 +33,7 @@ export type FullSettings = Settings & {
   snippets: Snippet[];
   grid: GridSettings;
   connections: ConnectionsSettings;
+  resources: ResourcesSettings;
   ui: Record<string, unknown>;
 };
 
@@ -49,6 +55,7 @@ export const DEFAULT_SETTINGS: FullSettings = {
   snippets: [],
   grid: DEFAULT_GRID,
   connections: DEFAULT_CONNECTIONS,
+  resources: DEFAULT_RESOURCES,
 };
 
 export type SettingsPatch = {
@@ -62,6 +69,7 @@ export type SettingsPatch = {
   snippets?: Snippet[];
   grid?: Partial<GridSettings>;
   connections?: Partial<ConnectionsSettings>;
+  resources?: Partial<ResourcesSettings>;
 };
 
 const THEMES = new Set(['system', 'light', 'dark']);
@@ -80,6 +88,7 @@ export function mergeSettings(s: FullSettings, p: SettingsPatch | Partial<Settin
     snippets: Array.isArray(p.snippets) ? p.snippets : s.snippets,
     grid: { ...s.grid, ...p.grid },
     connections: { ...s.connections, ...p.connections },
+    resources: { ...s.resources, ...p.resources },
   };
 }
 
@@ -108,6 +117,7 @@ function queuePut(patch: SettingsPatch) {
     format: mergeObj(pending.format, patch.format),
     grid: mergeObj(pending.grid, patch.grid),
     connections: mergeObj(pending.connections, patch.connections),
+    resources: mergeObj(pending.resources, patch.resources),
   };
   for (const k of Object.keys(pending) as (keyof SettingsPatch)[]) if (pending[k] === undefined) delete pending[k];
   if (timer) clearTimeout(timer);

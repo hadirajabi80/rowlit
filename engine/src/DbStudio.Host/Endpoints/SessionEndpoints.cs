@@ -35,6 +35,7 @@ public static class SessionEndpoints
         {
             if (string.IsNullOrWhiteSpace(req?.Database)) throw EngineException.Validation("database is required.", new { field = "database" });
             var h = Touch(http, sessions, sid);
+            await sessions.ReopenIfReleasedAsync(h, ct); // resources: a released session reconnects first
             try
             {
                 await h.Session.ChangeDatabaseAsync(req.Database, ct);
@@ -52,6 +53,7 @@ public static class SessionEndpoints
         {
             if (req is null) throw EngineException.Validation("txMode is required.", new { field = "txMode" });
             var h = Touch(http, sessions, sid);
+            await sessions.ReopenIfReleasedAsync(h, ct);
             await h.Session.SetTransactionModeAsync(req.TxMode, ct);
             sessions.PublishChanged(h);
             return h.ToInfo();
@@ -60,7 +62,7 @@ public static class SessionEndpoints
         g.MapPost("/{sid}/commit", async (HttpContext http, string sid, SessionManager sessions, CancellationToken ct) =>
         {
             var h = Touch(http, sessions, sid);
-            await h.Session.CommitAsync(ct);
+            if (!h.Released) await h.Session.CommitAsync(ct); // a released session has no transaction
             sessions.PublishChanged(h);
             return h.ToInfo();
         });
@@ -68,7 +70,7 @@ public static class SessionEndpoints
         g.MapPost("/{sid}/rollback", async (HttpContext http, string sid, SessionManager sessions, CancellationToken ct) =>
         {
             var h = Touch(http, sessions, sid);
-            await h.Session.RollbackAsync(ct);
+            if (!h.Released) await h.Session.RollbackAsync(ct);
             sessions.PublishChanged(h);
             return h.ToInfo();
         });

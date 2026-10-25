@@ -237,3 +237,28 @@ describe('window chrome and lifecycle', () => {
   });
 
 });
+
+// ---- resources (docs/resources.md): memory of the Electron processes reported to the engine's memory limit
+describe('app memory (app.getAppMetrics)', () => {
+  const mem = require(join(desktopRoot, 'out', 'lib', 'memory.js'));
+
+  it('sums every process in bytes and counts renderers apart', () => {
+    const r = mem.summarizeAppMetrics([
+      { type: 'Browser', memory: { workingSetSize: 100_000 } },
+      { type: 'Tab', memory: { workingSetSize: 250_000 } },
+      { type: 'GPU', memory: { workingSetSize: 50_000 } },
+      { type: 'Utility' },
+    ], 16 * 1024 ** 3);
+    assert.equal(r.totalBytes, 400_000 * 1024);
+    assert.equal(r.rendererBytes, 250_000 * 1024);
+    assert.equal(r.processes, 4);
+    assert.equal(r.systemBytes, 16 * 1024 ** 3);
+  });
+
+  it('ignores missing or bogus sizes', () => {
+    const r = mem.summarizeAppMetrics([{ type: 'Tab', memory: { workingSetSize: Number.NaN } }, { type: 'Browser', memory: { privateBytes: 10 } }], -1);
+    assert.equal(r.totalBytes, 10 * 1024);
+    assert.equal(r.rendererBytes, 0);
+    assert.equal(r.systemBytes, 0);
+  });
+});

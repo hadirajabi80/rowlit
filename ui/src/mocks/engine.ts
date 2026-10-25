@@ -283,7 +283,7 @@ export class MockEngine {
     return { ...rest };
   }
   changed(s: MockSession) {
-    this.emit({ type: 'session.changed', sessionId: s.sessionId, state: s.state, txOpen: s.txOpen, database: s.database, txMode: s.txMode } as WsEvent);
+    this.emit({ type: 'session.changed', sessionId: s.sessionId, state: s.state, txOpen: s.txOpen, database: s.database, txMode: s.txMode, released: !!s.released, releasedReason: s.releasedReason ?? null } as WsEvent);
   }
 
   // ---------- execution ----------
@@ -291,6 +291,11 @@ export class MockEngine {
     const s = this.sessions.get(sid);
     if (!s) return { error: 'Session not found', code: 'NOT_FOUND' };
     if (s.state === 'executing') return { error: 'The session is executing another statement', code: 'SESSION_BUSY' };
+    // Resources: a released session reconnects on its next run.
+    if (s.released) {
+      s.released = false;
+      s.releasedReason = null;
+    }
     const conn = this.conn(s.connectionId)!;
     if (conn.readOnly && !req.confirmedDestructive && req.batches.some((b) => /^\s*(insert|update|delete|merge|create|drop|alter|truncate)\b/i.test(stripComments(b.sql)))) {
       return { error: `Connection “${conn.name}” is read-only; the statement modifies data`, code: 'READ_ONLY' };

@@ -1,0 +1,17 @@
+/* Status bar Resources item (ResourcesItem.tsx). Tokens only. */
+.sb-resources-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.sb-resources {
+  gap: 5px;
+  color: var(--fg-muted);
+}
+.sb-resources.level-high {
+  color: var(--warning);
+}
+.sb-resources.level-critical {
+  color: var(--danger-text);
+  font-weight: var(--weight-strong);
+}

@@ -154,9 +154,11 @@ public sealed partial class ExecutionService
             _events.Publish(new ExecStartedEvent(executionId, h.Id, cmd.Batches.Count));
             _sessions.PublishChanged(h);
 
+            // A session released to free resources reopens quietly (info); a broken one that reconnected warns.
+            var wasReleased = h.Released;
             var reconnectMessage = await _sessions.EnsureUsableAsync(h, CancellationToken.None).ConfigureAwait(false);
             if (reconnectMessage is not null)
-                _events.Publish(new ExecMessageEvent(executionId, 0, MessageSeverity.Warning, reconnectMessage, null, null, MessageSource.Engine));
+                _events.Publish(new ExecMessageEvent(executionId, 0, wasReleased ? MessageSeverity.Info : MessageSeverity.Warning, reconnectMessage, null, null, MessageSource.Engine));
 
             var request = new ExecuteRequest(cmd.Batches, cmd.MaxRows, cmd.StopOnError, h.Options.CaptureServerOutput, cmd.Label, cmd.Params,
                 WritesConfirmed: cmd.ConfirmedDestructive && h.Profile.ReadOnly);
@@ -202,6 +204,8 @@ public sealed partial class ExecutionService
                 if (sink.BatchStatus(i) != BatchStatus.Ok) continue;
                 targets.AddRange(StatementClassifier.Classify(cmd.Batches[i].Sql, h.Dialect).DdlTargets);
             }
+            // Resources: a session that created temporary objects is never released by the idle reaper.
+            if (targets.Any(t => t.Scope == DdlScope.Temporary && t.Action is "CREATE" or "SELECT INTO")) h.HasTempObjects = true;
             if (targets.Count > 0) _catalog.InvalidateAfterDdl(h.Profile.Id, h.Dialect, h.Session.CurrentDatabase, targets);
         }
         catch (Exception ex)

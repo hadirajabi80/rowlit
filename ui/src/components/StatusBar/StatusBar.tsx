@@ -17,6 +17,7 @@ import { connColorName } from '../../theme/connColors';
 import { ColorDot } from '../common/ConnectionBadge';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { UpdateChip } from './UpdateChip';
+import { ResourcesItem } from './ResourcesItem';
 
 const CassandraStatusItem = lazy(() => import('../Cassandra/StatusItem'));
 
@@ -90,6 +91,11 @@ export function StatusBar() {
         </span>
       )}
       {tx && <span className={`sb-item${session?.txOpen ? ' sb-warn' : ''}`}>{tx}</span>}
+      {session?.released && (
+        <span className="sb-item muted" title="The connection was closed to free resources; the next run reconnects on the same database">
+          {session.releasedReason === 'idle' ? 'Disconnected (idle)' : 'Disconnected'}
+        </span>
+      )}
       {tab?.kind === 'console' && conn?.providerId === 'cassandra' && (
         <Suspense fallback={null}>
           <CassandraStatusItem sessionId={session?.sessionId ?? null} version={`${exec?.startedAt ?? 0}:${running}`} />
@@ -111,6 +117,7 @@ export function StatusBar() {
       )}
       {tab?.kind === 'console' && cursor && <span className="sb-item muted tabular">Ln {cursor.line}, Col {cursor.col}</span>}
       {tab?.kind === 'console' && <span className="sb-item muted">{dialectName(conn?.providerId)}</span>}
+      <ResourcesItem />
       <UpdateChip />
       <button className="sb-item sb-button" onClick={() => runCommand('view.shortcuts')} title={`Keyboard shortcuts (${displayShortcut('F1')})`} aria-label="Keyboard shortcuts">
         <Keyboard size={12} />

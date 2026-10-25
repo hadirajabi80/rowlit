@@ -22,6 +22,22 @@ public abstract class MySqlProviderBase : IDbProvider, IObjectBrowserProvider, I
     public ISqlDiagnostics? Diagnostics => null;
     public IdentifierRules Identifiers { get; } = new('`', '`', "preserve", MySqlReservedWords.All);
 
+    /// <summary>Resources: closes the idle pooled catalog connections of the profile.</summary>
+    public void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases)
+    {
+        try
+        {
+            var b = MySqlConnectionStrings.Builder(profile, password, pooling: true);
+            b.ApplicationName = MySqlConnectionStrings.ApplicationName + " catalog";
+            using var conn = new MySqlConnection(b.ConnectionString);
+            MySqlConnection.ClearPool(conn);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // incomplete profile: nothing was pooled for it
+        }
+    }
+
     public string BuildConnectionString(ConnectionProfile profile, string? password) =>
         MySqlConnectionStrings.Build(profile, password, pooling: false);
 

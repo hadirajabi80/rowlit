@@ -94,6 +94,32 @@ interface CatalogState {
   revalidate(connectionId: string, database: string | null, schemas: (string | null)[]): Promise<void>;
   applyChanged(ev: WsEventOf<'catalog.changed'>): void;
   forget(connectionId: string): void;
+  /** Resources: explorer "Close database" — drops one database's cached catalog (null = the connection's default entry). */
+  forgetDatabase(connectionId: string, database: string | null): void;
+  /**
+   * Resources (docs/resources.md): LRU eviction of whole database entries not used for `minIdleMs` and not `inUse`
+   * (open tabs, expanded explorer nodes), oldest first, until the estimated size fits `budgetBytes`. Evicted entries
+   * reload lazily (the explorer or IntelliSense asks again; ETags keep it cheap). Returns the keys evicted.
+   */
+  evict(opts: { budgetBytes: number; minIdleMs: number; inUse: (d: DbCatalog) => boolean; now?: number }): string[];
+}
+
+/** Last time each cached database entry changed or was read (LRU of `evict`). */
+const lastUsed = new Map<string, number>();
+
+/** Marks a cached database entry as used (consoles / IntelliSense reading it). */
+export function touchCatalog(connectionId: string, database: string | null | undefined, now = Date.now()): void {
+  lastUsed.set(dbKey(connectionId, database), now);
+}
+
+/** Rough in-memory size of a cached database entry (objects, columns and keys of its loaded schemas). */
+export function estimateCatalogBytes(d: DbCatalog): number {
+  let bytes = 2_000;
+  for (const s of Object.values(d.loaded)) {
+    bytes += 1_000;
+    for (const o of s.objects ?? []) bytes += 400 + (o.c?.length ?? 0) * 160 + (o.fk?.length ?? 0) * 200 + (o.p?.length ?? 0) * 120;
+  }
+  return bytes;
 }
 
 const inflight = new Map<string, Promise<unknown>>();
@@ -110,6 +136,7 @@ export const useCatalog = create<CatalogState>((set, get) => {
     const key = dbKey(cid, db);
     const cur = get().dbs[key] ?? emptyDb(cid, db);
     const next = { ...cur, ...fn(cur) };
+    lastUsed.set(key, Date.now());
     set({ dbs: { ...get().dbs, [key]: next } });
     return next;
   };
@@ -325,8 +352,48 @@ export const useCatalog = create<CatalogState>((set, get) => {
       delete conns[cid];
       set({ dbs, conns });
     },
+
+    forgetDatabase(cid, database) {
+      const dbs = { ...get().dbs };
+      const same = (a: string | null, b: string | null) => (a ?? '').toLowerCase() === (b ?? '').toLowerCase();
+      let changed = false;
+      for (const [k, d] of Object.entries(dbs)) {
+        if (d.connectionId !== cid || !same(d.database, database)) continue;
+        delete dbs[k];
+        lastUsed.delete(k);
+        changed = true;
+      }
+      if (changed) set({ dbs });
+    },
+
+    evict({ budgetBytes, minIdleMs, inUse, now = Date.now() }) {
+      const entries = Object.entries(get().dbs).map(([key, d]) => ({ key, d, bytes: estimateCatalogBytes(d), used: lastUsed.get(key) ?? 0 }));
+      let total = entries.reduce((n, e) => n + e.bytes, 0);
+      if (total <= budgetBytes) return [];
+      const evicted: string[] = [];
+      for (const e of entries.sort((a, b) => a.used - b.used)) {
+        if (total <= budgetBytes) break;
+        if (now - e.used < minIdleMs || inUse(e.d) || inflightFor(e.key)) continue;
+        evicted.push(e.key);
+        total -= e.bytes;
+      }
+      if (!evicted.length) return [];
+      const dbs = { ...get().dbs };
+      for (const k of evicted) {
+        delete dbs[k];
+        lastUsed.delete(k);
+      }
+      set({ dbs });
+      return evicted;
+    },
   };
 });
+
+/** A load of this database entry is on its way (never evict it mid-flight). */
+function inflightFor(key: string): boolean {
+  for (const k of inflight.keys()) if (k.includes(key)) return true;
+  return false;
+}
 
 export function useSnapshot(connectionId: string | null | undefined, database: string | null | undefined): CatalogSnapshot | null {
   return useCatalog((s) => (connectionId ? s.dbs[dbKey(connectionId, database)]?.snapshot ?? null : null));

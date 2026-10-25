@@ -105,7 +105,8 @@ try
     services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<WsHub>());
     services.AddSingleton<SessionManager>();
     services.AddSingleton(sp => new SourceClientManager(sp.GetRequiredService<SourceRegistry>(), sp.GetRequiredService<ConnectionStore>(),
-        sp.GetRequiredService<IEventPublisher>(), sp.GetRequiredService<SettingsService>(), sp.GetRequiredService<ILogger<SourceClientManager>>()));
+        sp.GetRequiredService<IEventPublisher>(), sp.GetRequiredService<SettingsService>(), sp.GetRequiredService<ILogger<SourceClientManager>>(),
+        reapInterval: Timeout.InfiniteTimeSpan)); // resources: ResourceManager drives the idle reaper
     services.AddSingleton(sp => new StreamManager(sp.GetRequiredService<IEventPublisher>(), kind => sp.GetKeyedService<IStreamFactory>(kind),
         sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<ClientPresence>(), sp.GetRequiredService<SourceClientManager>(),
         sp.GetRequiredService<SettingsService>(), sp.GetRequiredService<ILogger<StreamManager>>()));
@@ -113,6 +114,11 @@ try
     services.AddSingleton<CatalogService>();
     services.AddSingleton<ExecutionService>();
     services.AddSingleton<ExportService>();
+    // Resources (docs/resources.md): idle sessions, connection limit, cache budgets, memory pressure, manual close.
+    services.AddSingleton(sp => new ResourceManager(sp.GetRequiredService<SessionManager>(), sp.GetRequiredService<CatalogService>(),
+        sp.GetRequiredService<ResultStore>(), sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<ProviderRegistry>(),
+        sp.GetRequiredService<IEventPublisher>(), sp.GetRequiredService<SourceClientManager>(), sp.GetRequiredService<StreamManager>(),
+        sp.GetRequiredService<JobManager>(), sp.GetRequiredService<SettingsService>(), sp.GetRequiredService<ILogger<ResourceManager>>()));
     services.AddHostedService<ParentWatchdog>();
 
     // ---- M1.5 (docs/PLAN-M1.5.md): per-provider features as keyed services by provider id.
@@ -151,6 +157,7 @@ try
     app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
     app.UseMiddleware<TokenAuthMiddleware>();
 
+    app.Services.GetRequiredService<ResourceManager>(); // starts the resource policy timer and hooks the connect paths
     var hub = app.Services.GetRequiredService<WsHub>();
     app.Map("/ws", hub.HandleAsync);
     app.Map("/api/v1/ws", hub.HandleAsync);
@@ -172,7 +179,8 @@ try
         .MapSampleDb()
         // M2
         .MapStreams()
-        .MapSources();
+        .MapSources()
+        .MapResources();
     foreach (var module in modules) module.MapEndpoints(api);
 
     app.Lifetime.ApplicationStarted.Register(() =>
@@ -187,6 +195,7 @@ try
 
     app.Lifetime.ApplicationStopping.Register(() =>
     {
+        app.Services.GetRequiredService<ResourceManager>().DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
         // Roll back open transactions and close tab connections.
         app.Services.GetRequiredService<SessionManager>().DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(10));
         // M2: end streams ("shutdown"), cancel jobs, close source clients.

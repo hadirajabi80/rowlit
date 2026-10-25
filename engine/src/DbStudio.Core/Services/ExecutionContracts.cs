@@ -51,5 +51,7 @@ public static class ErrorCodes
         BindVarsUnsupported = "BIND_VARS_UNSUPPORTED", NotSupported = "NOT_SUPPORTED", ReadOnly = "READ_ONLY",
         EngineError = "ENGINE_ERROR", Cancelled = "CANCELLED",
         // M2 (docs/PLAN-M2.md 1.1, 7.5)
-        SourceUnavailable = "SOURCE_UNAVAILABLE", StreamLimit = "STREAM_LIMIT", Privilege = "PRIVILEGE", GroupActive = "GROUP_ACTIVE";
+        SourceUnavailable = "SOURCE_UNAVAILABLE", StreamLimit = "STREAM_LIMIT", Privilege = "PRIVILEGE", GroupActive = "GROUP_ACTIVE",
+        // Resources (docs/resources.md): closing a connection would roll back a transaction or cancel running work.
+        ResourceBusy = "RESOURCE_BUSY";
 }

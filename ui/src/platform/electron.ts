@@ -51,5 +51,7 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
     ...(typeof b.getPathForFile === 'function' ? { getFilePath: (f: File) => b.getPathForFile!(f) || null } : {}),
     // ---- stop the update download
     ...(typeof b.cancelUpdateDownload === 'function' ? { cancelUpdateDownload: () => b.cancelUpdateDownload!() } : {}),
+    // ---- resources
+    ...(typeof b.getAppMemory === 'function' ? { getAppMemory: () => b.getAppMemory!() } : {}),
   };
 }

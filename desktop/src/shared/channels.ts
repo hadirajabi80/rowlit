@@ -51,6 +51,8 @@ export const IPC = {
   notify: 'dbstudio:notify',
   // ---- stop the update download
   updatesCancelDownload: 'dbstudio:updates-cancel-download',
+  // ---- resources: memory of the Electron processes (app.getAppMetrics)
+  getAppMemory: 'dbstudio:get-app-memory',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

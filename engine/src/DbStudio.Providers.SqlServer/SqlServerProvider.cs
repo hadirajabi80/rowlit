@@ -18,6 +18,20 @@ public sealed class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDa
     public ISqlDiagnostics? Diagnostics { get; } = new ScriptDomDiagnostics();
     public IdentifierRules Identifiers { get; } = new('[', ']', "preserve", SqlServerReservedWords.All);
 
+    /// <summary>Resources: closes the idle pooled catalog connections of the profile.</summary>
+    public void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases)
+    {
+        try
+        {
+            using var conn = new SqlConnection(SqlServerConnectionStrings.Build(profile, password, pooling: true));
+            SqlConnection.ClearPool(conn);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // incomplete profile: nothing was pooled for it
+        }
+    }
+
     /// <summary>The session connection string (pooling disabled).</summary>
     public string BuildConnectionString(ConnectionProfile profile, string? password) =>
         SqlServerConnectionStrings.Build(profile, password, pooling: false);

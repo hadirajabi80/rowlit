@@ -29,6 +29,8 @@ await Promise.all([
     ...common,
     entryPoints: ['src/main/engine-process.ts', 'src/main/validate.ts', 'src/main/fs-utils.ts', 'src/main/csp.ts', 'src/main/platform.ts', 'src/main/updater-core.ts',
       'src/main/data-dir.ts',
+      // ---- resources
+      'src/main/memory.ts',
       // ---- windows
       'src/main/windows-core.ts',
     ],

@@ -1,6 +1,7 @@
 // App-level commands that coordinate several stores (run, transactions, tabs, export).
 import { api, errorMessage, isApiError } from '../api/client';
 import type { ExportFormat, ObjectRef, QueryParam, RunLabel, SessionInfo, SqlBatch, TxMode } from '../api/types';
+import type { CloseResourcesResult, ResourceBusyDetail } from '../api/resources';
 import { resolveParams } from '../components/ParamsDialog/ParamsDialog';
 import { findDestructive } from '../lib/classify';
 import { EXPORT_EXT, EXPORT_FILTER_NAME, EXPORT_MIME } from '../lib/exportFormats';
@@ -765,59 +766,124 @@ function uncommittedText(withTx: SessionInfo[]): string {
   return n === 1 ? `1 ${noun} has an uncommitted transaction` : `${pluralize(n, noun)} have uncommitted transactions`;
 }
 
-/** Explorer "Disconnect": closes this window's sessions of the connection and drops its cached catalog. */
-export async function disconnectConnection(connectionId: string): Promise<void> {
-  const conn = getConnection(connectionId);
-  if (conn && providerKind(conn.providerId) !== 'relational') {
-    // M2: close the engine's source client (its streams end) and let the module drop cached data.
-    try {
-      await useSourceClients.getState().close(connectionId);
-    } catch (e) {
-      toast('error', `Could not disconnect ${conn.name}`, errorMessage(e));
-      return;
-    }
-    getSourceModule(conn.providerId)?.onDisconnect?.(connectionId);
-    toast('info', `Disconnected ${conn.name}`);
-    return;
-  }
-  const withTx = ownSessions(connectionId).filter((s) => s.txOpen);
-  if (withTx.length) {
-    const ok = await useUi.getState().askConfirm({
-      title: 'Open transactions',
-      message: `${uncommittedText(withTx)} on “${conn?.name ?? 'this connection'}”. Disconnecting rolls ${withTx.length === 1 ? 'it' : 'them'} back.`,
-      confirmLabel: 'Roll back and disconnect',
-      danger: true,
-    });
-    if (!ok) return;
-  }
-  const n = await useSessions.getState().closeConnection(connectionId, true);
-  useCatalog.getState().forget(connectionId);
-  toast('info', `Disconnected ${conn?.name ?? ''}`.trim(), n ? `${pluralize(n, 'session')} closed` : undefined);
+const sameDb = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').toLowerCase() === (b ?? '').toLowerCase();
+
+/** This window's sessions that "Close connection" / "Close database" release (live ones, on the database when given). */
+function closableSessions(connectionId?: string, database?: string | null): SessionInfo[] {
+  return ownSessions(connectionId).filter((s) => s.state !== 'closed' && !s.released && (database == null || sameDb(s.database, database)));
 }
 
-/** Connections ▸ Disconnect all: this window's sessions and cached catalogs (another window's sessions stay open). */
+/** Running console queries of this window on the connection, as confirmation items ("Console 1 — running query, cancelled"). */
+function runningItems(connectionId?: string): string[] {
+  const { executions } = useResults.getState();
+  const tabs = useTabs.getState().tabs;
+  return Object.values(executions)
+    .filter((e) => isRunning(e) && (!connectionId || e.connectionId === connectionId))
+    .map((e) => `${tabs.find((t) => t.id === e.tabId)?.title ?? 'A tab'} — running query, cancelled`);
+}
+
+/**
+ * Resources (docs/resources.md): asks the engine to release a connection (or one database), first confirming what
+ * that interrupts — this window's open transactions and running queries, then whatever else the engine reports
+ * (409 RESOURCE_BUSY: exports, imports, live streams). Null when the user cancelled or the request failed.
+ */
+async function closeWithConfirm(title: string, what: string, localTx: SessionInfo[], running: string[], call: (force: boolean) => Promise<CloseResourcesResult>): Promise<CloseResourcesResult | null> {
+  let force = false;
+  if (localTx.length || running.length) {
+    const parts = [localTx.length ? `${uncommittedText(localTx)}${what}. Closing rolls ${localTx.length === 1 ? 'it' : 'them'} back.` : null,
+      running.length ? `${pluralize(running.length, 'running query', 'running queries')} will be cancelled.` : null].filter(Boolean);
+    const ok = await useUi.getState().askConfirm({
+      title, message: parts.join(' '), items: localTx.length + running.length > 1 ? [...localTx.map((s) => `${s.label ?? s.sessionId} — uncommitted transaction, rolled back`), ...running] : undefined,
+      confirmLabel: localTx.length ? 'Roll back and close' : 'Cancel and close', danger: true,
+    });
+    if (!ok) return null;
+    force = true;
+  }
+  try {
+    return await call(force);
+  } catch (e) {
+    if (!isApiError(e, 'RESOURCE_BUSY')) {
+      toast('error', `Could not close${what}`, errorMessage(e));
+      return null;
+    }
+    const blockers = (e.detail as ResourceBusyDetail | undefined)?.blockers ?? [];
+    const ok = await useUi.getState().askConfirm({
+      title,
+      message: `Closing${what} interrupts ${pluralize(blockers.length, 'operation')}: transactions roll back, queries, exports and imports are cancelled, live views stop.`,
+      items: blockers.map((b) => b.label), confirmLabel: 'Interrupt and close', danger: true,
+    });
+    if (!ok) return null;
+    try {
+      return await call(true);
+    } catch (e2) {
+      toast('error', `Could not close${what}`, errorMessage(e2));
+      return null;
+    }
+  }
+}
+
+/** "2 sessions released · 1 transaction rolled back · 1 MB of metadata freed". */
+function closeDetail(r: CloseResourcesResult): string | undefined {
+  const parts = [
+    r.sessions ? `${pluralize(r.sessions, 'session')} released` : null,
+    r.rolledBack ? `${pluralize(r.rolledBack, 'transaction')} rolled back` : null,
+    r.cancelled ? `${pluralize(r.cancelled, 'operation')} cancelled` : null,
+    r.streams ? `${pluralize(r.streams, 'live view')} stopped` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
+/**
+ * Explorer "Close connection" (Navicat-like): the engine releases this window's sessions of the connection (open
+ * tabs keep their results and reconnect lazily on the next run), closes its streams, source client and jobs, and drops
+ * its catalog cache. Another window's sessions stay open.
+ */
+export async function disconnectConnection(connectionId: string): Promise<void> {
+  const conn = getConnection(connectionId);
+  const own = closableSessions(connectionId);
+  const r = await closeWithConfirm('Close connection', ` on “${conn?.name ?? 'this connection'}”`, own.filter((s) => s.txOpen), runningItems(connectionId),
+    (force) => api.resources.close(connectionId, { force }));
+  if (!r) return;
+  useSessions.getState().markReleased(own.map((s) => s.sessionId), 'closed');
+  useCatalog.getState().forget(connectionId);
+  if (conn && providerKind(conn.providerId) !== 'relational') {
+    // M2: the engine closed the source client (its streams ended); the module drops cached data.
+    useSourceClients.getState().apply(connectionId, 'closed');
+    getSourceModule(conn.providerId)?.onDisconnect?.(connectionId);
+  }
+  toast('info', `Closed ${conn?.name ?? 'the connection'}`, closeDetail(r));
+}
+
+/** Explorer "Close database": releases this window's sessions on that database and drops its cached catalog. */
+export async function closeDatabase(connectionId: string, database: string | null): Promise<void> {
+  const conn = getConnection(connectionId);
+  const own = closableSessions(connectionId, database);
+  const label = database ?? conn?.name ?? 'the database';
+  const r = await closeWithConfirm('Close database', ` on “${label}”`, own.filter((s) => s.txOpen), runningItems(connectionId),
+    (force) => api.resources.close(connectionId, { database, force }));
+  if (!r) return;
+  useSessions.getState().markReleased(own.map((s) => s.sessionId), 'closed');
+  useCatalog.getState().forgetDatabase(connectionId, database);
+  toast('info', `Closed ${label}`, closeDetail(r));
+}
+
+/** Connections ▸ Disconnect all: every connection this window holds or has cached (another window's sessions stay open). */
 export async function disconnectAll(): Promise<void> {
-  const mine = ownSessions();
+  const mine = closableSessions();
   const ids = [...new Set(mine.map((s) => s.connectionId))];
   const cached = Object.keys(useCatalog.getState().conns);
   const all = [...new Set([...ids, ...cached, ...Object.keys(useSourceClients.getState().clients)])];
   if (!all.length) return;
-  const withTx = mine.filter((s) => s.txOpen);
-  if (withTx.length) {
-    const ok = await useUi.getState().askConfirm({
-      title: 'Disconnect all',
-      message: `${uncommittedText(withTx)}. Disconnecting rolls ${withTx.length === 1 ? 'it' : 'them'} back.`,
-      confirmLabel: 'Roll back and disconnect',
-      danger: true,
-    });
-    if (!ok) return;
-  }
-  const closed = await Promise.all(ids.map((cid) => useSessions.getState().closeConnection(cid, true)));
+  const r = await closeWithConfirm('Disconnect all', '', mine.filter((s) => s.txOpen), runningItems(), (force) => api.resources.closeAll(force));
+  if (!r) return;
+  useSessions.getState().markReleased(mine.map((s) => s.sessionId), 'closed');
   for (const cid of all) useCatalog.getState().forget(cid);
-  // M2: source clients too.
-  await Promise.all(Object.keys(useSourceClients.getState().clients).map((cid) => useSourceClients.getState().close(cid).catch(() => undefined)));
-  const nSessions = closed.reduce((a, b) => a + b, 0);
-  toast('info', `Disconnected ${pluralize(all.length, 'connection')}`, nSessions ? `${pluralize(nSessions, 'session')} closed` : undefined);
+  for (const cid of Object.keys(useSourceClients.getState().clients)) {
+    useSourceClients.getState().apply(cid, 'closed');
+    const c = getConnection(cid);
+    if (c) getSourceModule(c.providerId)?.onDisconnect?.(cid);
+  }
+  toast('info', `Disconnected ${pluralize(all.length, 'connection')}`, mine.length ? `${pluralize(mine.length, 'session')} released` : closeDetail(r));
 }
 
 /** Explorer folder "Connect all": loads every connection of the folder in parallel (per-root spinners). */
