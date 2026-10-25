@@ -86,6 +86,13 @@ export interface DbStudioBridge {
    * window is not focused; clicking it brings the window back. Fire-and-forget.
    */
   showNotification?(opts: NotificationOptions): void;
+
+  // ---- file drops
+  /**
+   * Additive (optional, older preloads lack it): the file-system path of a File from a drag & drop or an <input>
+   * (Electron webUtils.getPathForFile; File.path was removed in Electron 32). Empty string when the file has no path.
+   */
+  getPathForFile?(file: File): string;
 }
 
 // ---- notifications

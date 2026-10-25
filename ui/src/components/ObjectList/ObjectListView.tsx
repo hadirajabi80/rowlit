@@ -2,7 +2,7 @@
 // counts, sizes and dates, a live filter, type groups with counts, a list (sortable, virtualized) and a card grid.
 // Enter / double-click opens an object like the explorer does; the context menu is the explorer's.
 import {
-  ArrowDown, ArrowUp, ChevronDown, Database, FolderOpen, Grid3x3, LayoutGrid, List, LoaderCircle, PencilRuler, Play, Plus, RefreshCw, Search, SearchX,
+  ArrowDown, ArrowUp, ChevronDown, Database, FileInput, FolderOpen, Grid3x3, LayoutGrid, List, LoaderCircle, PencilRuler, Play, Plus, RefreshCw, Search, SearchX,
   Trash2, TriangleAlert, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -347,6 +347,8 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
   const execute = target ? cv('routine.execute', target, 'Execute…') : null;
   const design = target && DESIGNABLE.has(target.ref.type) ? cv('designer.edit', target, target.ref.type === 'table' ? 'Design' : 'Edit') : null;
   const drop = target ? cv('explorer.drop', target) : null;
+  // Import Wizard (components/ImportWizard): into the selected table, else into a new table of this schema
+  const importData = current?.type === 'table' && target ? cv('import.open', target, 'Import…') : cv('import.openNew', container, 'Import…');
   const newMenu = (el: HTMLElement) => {
     const entries = commandMenuItems(NEW_ENTRIES, container);
     if (entries.length) showMenuBelow(el, entries);
@@ -515,6 +517,11 @@ export function ObjectList({ state, patch, visible, highlight, header }: ObjectL
         <button className="btn btn-xs" disabled={!design?.enabled} onClick={() => design?.run()} title={design?.tooltip ?? 'Design or edit the selected object'}>
           <PencilRuler size={13} /> {design?.title ?? 'Design'}
         </button>
+        {importData.command && (
+          <button className="btn btn-xs" disabled={!importData.enabled} onClick={() => importData.run()} title="Import data from a CSV, Excel or JSON file">
+            <FileInput size={13} /> Import…
+          </button>
+        )}
         {(execute?.enabled || (current && ROUTINES.has(current.type))) && (
           <button className="btn btn-xs ol-execute" disabled={!execute?.enabled} onClick={() => execute?.run()} title="Execute with a parameter form">
             <Play size={12} fill="currentColor" /> Execute…

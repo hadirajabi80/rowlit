@@ -27,6 +27,7 @@ import { activityTitle } from '../common/text';
 import { EmptyState } from '../EmptyState/EmptyState';
 import { contextMenu } from '../layout/commandMenu';
 import { savedQueryTooltip } from '../SavedQueries/model';
+import { importDropHandlers } from '../ImportWizard/fileDrop';
 import { activeChips, ALL_CONNECTIONS, chipsFor, TYPE_CHIPS, useExplorer } from './explorerStore';
 import { buildTree, databasesOf, isSourceConnection, nodeId, parseSystemTypesId, queriesShown, refOf, singleSchema, typesOfChips, type TreeRow } from './tree';
 
@@ -609,6 +610,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
         else if (r.kind === 'database' || r.kind === 'schema' || r.kind === 'folder' || r.kind === 'qfolder') onActivate(); // WP3: the Objects tab
       }}
       onContextMenu={onMenu}
+      {...importDropHandlers(targetOfRow(r))}
       title={title}
     >
       {r.kind === 'connection' && color && <span className="tree-conn-bar" aria-hidden="true" />}
