@@ -30,7 +30,8 @@ describe('Settings › Snippets', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Snippets' }));
     expect(await screen.findByRole('listbox', { name: 'Snippets' }, LAZY)).toBeInTheDocument();
     expect(screen.queryByText(/Something went wrong/)).toBeNull();
-    expect(screen.getAllByRole('option').some((o) => o.textContent?.startsWith('sel'))).toBe(true);
+    // the built-in library loads on demand, one chunk per dialect
+    await waitFor(() => expect(screen.getAllByRole('option').some((o) => o.textContent?.startsWith('sel'))).toBe(true), LAZY);
 
     fireEvent.click(screen.getAllByRole('button', { name: /New snippet/ })[0]);
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Top customers' } });

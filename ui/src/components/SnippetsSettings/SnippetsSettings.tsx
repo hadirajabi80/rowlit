@@ -1,10 +1,10 @@
 // Settings → Snippets (PLAN-M1.5 A4): user snippets (name, prefix, dialect filter, Monaco snippet body) stored as
 // Settings.snippets, next to the read-only built-ins. A user snippet with a built-in's prefix overrides it.
 import { Braces, Copy, Plus, Save, Trash2, Undo2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Select } from '../common/Select';
 import type { Dialect, Snippet } from '../../api/types';
-import { BUILTIN_SNIPPETS, newSnippetId, snippetPreview, validateSnippet, type SnippetDef } from '../../snippets';
+import { CATEGORY_LABELS, SNIPPET_CATEGORIES, loadAllBuiltins, newSnippetId, snippetPreview, validateSnippet, type SnippetDef } from '../../snippets';
 import { useSettings } from '../../store/settings';
 import { displayShortcut } from '../../commands/keys';
 import type { EffectiveTheme } from '../../theme/useTheme';
@@ -20,6 +20,10 @@ const DIALECTS: { id: Dialect; label: string }[] = [
   { id: 'plsql', label: 'Oracle' },
   { id: 'sqlite', label: 'SQLite' },
   { id: 'pgsql', label: 'PostgreSQL' },
+  { id: 'mysql', label: 'MySQL / MariaDB' },
+  { id: 'clickhouse', label: 'ClickHouse' },
+  { id: 'snowflake', label: 'Snowflake' },
+  { id: 'cql', label: 'Cassandra (CQL)' },
 ];
 
 type Selection = { kind: 'user'; id: string } | { kind: 'builtin'; id: string } | null;
@@ -48,14 +52,23 @@ export function SnippetsSettings({ snippets, onChange, theme: themeProp }: Snipp
   const [draft, setDraft] = useState<Snippet | null>(snippets[0] ?? null);
   const [touched, setTouched] = useState(false);
 
-  const matches = (s: { prefix: string; name: string; dialects: Dialect[] | null }) =>
+  // the built-in library loads on demand (one chunk per dialect, ~400 snippets in all)
+  const [builtinAll, setBuiltinAll] = useState<SnippetDef[]>([]);
+  useEffect(() => {
+    let live = true;
+    loadAllBuiltins().then((list) => { if (live) setBuiltinAll(list); }, () => undefined);
+    return () => { live = false; };
+  }, []);
+
+  const matches = (s: { prefix: string; name: string; dialects: Dialect[] | null; description?: string | null; category?: SnippetDef['category'] }) =>
     (dialect === 'all' || !s.dialects || s.dialects.length === 0 || s.dialects.includes(dialect))
-    && (!query || `${s.prefix} ${s.name}`.toLowerCase().includes(query.toLowerCase()));
+    && (!query || `${s.prefix} ${s.name} ${s.description ?? ''} ${s.category ? CATEGORY_LABELS[s.category] : ''}`.toLowerCase().includes(query.toLowerCase()));
   const userList = snippets.filter(matches);
   const overridden = new Set(snippets.map((s) => s.prefix.toLowerCase()));
-  const builtins = BUILTIN_SNIPPETS.filter(matches);
+  const builtins = builtinAll.filter(matches);
+  const builtinGroups = SNIPPET_CATEGORIES.map((cat) => ({ cat, items: builtins.filter((b) => (b.category ?? 'Query') === cat) })).filter((g) => g.items.length);
 
-  const selectedBuiltin: SnippetDef | null = sel?.kind === 'builtin' ? BUILTIN_SNIPPETS.find((b) => b.id === sel.id) ?? null : null;
+  const selectedBuiltin: SnippetDef | null = sel?.kind === 'builtin' ? builtinAll.find((b) => b.id === sel.id) ?? null : null;
   const others = snippets.filter((s) => s.id !== draft?.id);
   const problems = useMemo(() => (draft ? validateSnippet(draft, others.filter((o) => overlaps(o.dialects, draft.dialects))) : []), [draft, others]);
   const problem = (f: 'name' | 'prefix' | 'body') => (touched ? problems.find((p) => p.field === f)?.message : undefined);
@@ -128,15 +141,21 @@ export function SnippetsSettings({ snippets, onChange, theme: themeProp }: Snipp
             </div>
           ))}
           <div className="snip-group">Built-in</div>
-          {builtins.map((b) => (
-            <div key={b.id} role="option" tabIndex={0} aria-selected={sel?.kind === 'builtin' && sel.id === b.id}
-              className={`snip-item${sel?.kind === 'builtin' && sel.id === b.id ? ' selected' : ''}${overridden.has(b.prefix) ? ' overridden' : ''}`}
-              onClick={() => pickBuiltin(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickBuiltin(b); } }}
-              title={overridden.has(b.prefix) ? 'Overridden by one of your snippets' : undefined}>
-              <span className="snip-prefix">{b.prefix}</span>
-              <span className="snip-name">{b.name}</span>
-              <span className="snip-tag">{dialectText(b.dialects)}</span>
-              {preview(b)}
+          {builtinAll.length === 0 && <div className="snip-empty">Loading…</div>}
+          {builtinGroups.map((g) => (
+            <div key={g.cat} role="group" aria-label={CATEGORY_LABELS[g.cat]}>
+              <div className="snip-subgroup">{CATEGORY_LABELS[g.cat]} <span className="snip-count">{g.items.length}</span></div>
+              {g.items.map((b) => (
+                <div key={b.id} role="option" tabIndex={0} aria-selected={sel?.kind === 'builtin' && sel.id === b.id}
+                  className={`snip-item${sel?.kind === 'builtin' && sel.id === b.id ? ' selected' : ''}${overridden.has(b.prefix) ? ' overridden' : ''}`}
+                  onClick={() => pickBuiltin(b)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickBuiltin(b); } }}
+                  title={overridden.has(b.prefix) ? 'Overridden by one of your snippets' : undefined}>
+                  <span className="snip-prefix">{b.prefix}</span>
+                  <span className="snip-name">{b.name}</span>
+                  <span className="snip-tag">{dialectText(b.dialects)}</span>
+                  {preview(b)}
+                </div>
+              ))}
             </div>
           ))}
         </div>
