@@ -75,9 +75,14 @@ public sealed class ExportService
 
     /// <summary>
     /// Starts an unlimited streaming export of <paramref name="sql"/> on the session; returns the export id. Only a single
-    /// query is accepted (403 READ_ONLY for data changes on read-only connections, else 400 VALIDATION).
+    /// query is accepted (403 READ_ONLY for data changes on read-only connections, else 400 VALIDATION). The statement
+    /// runs through the session like any other (so a provider's own adaptations apply: Cassandra drops ORDER BY and adds
+    /// ALLOW FILTERING), with no row cap, <paramref name="parameters"/> bound as in <c>POST /sessions/{id}/execute</c>.
+    /// Cancelling the session's running statement (<c>POST /sessions/{id}/cancel</c>) cancels the export
+    /// (<c>export.done</c> with status "cancelled", no file is left behind).
     /// </summary>
-    public string StartQueryExport(string sessionId, string sql, string format, string path, ExportOptions options)
+    public string StartQueryExport(string sessionId, string sql, string format, string path, ExportOptions options,
+        IReadOnlyList<DbStudio.Core.Params.QueryParam>? parameters = null)
     {
         if (string.IsNullOrWhiteSpace(sql)) throw EngineException.Validation("sql is required.", new { field = "sql" });
         if (!ExportFormats.IsKnown(format)) throw EngineException.Validation($"Unknown export format '{format}'.", new { field = "format" });
@@ -87,7 +92,7 @@ public sealed class ExportService
         var exportId = Ids.New("e");
         if (!h.TryReserve(exportId))
             throw new EngineException(409, ErrorCodes.SessionBusy, "The session is already executing a statement.");
-        _ = Task.Run(() => RunQueryExportAsync(h, exportId, sql, format, path, options));
+        _ = Task.Run(() => RunQueryExportAsync(h, exportId, sql, format, path, options, parameters is { Count: > 0 } ? parameters : null));
         return exportId;
     }
 
@@ -105,7 +110,8 @@ public sealed class ExportService
         return full;
     }
 
-    private async Task RunQueryExportAsync(SessionHandle h, string exportId, string sql, string format, string path, ExportOptions options)
+    private async Task RunQueryExportAsync(SessionHandle h, string exportId, string sql, string format, string path, ExportOptions options,
+        IReadOnlyList<DbStudio.Core.Params.QueryParam>? parameters)
     {
         var startedAt = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
@@ -119,7 +125,7 @@ public sealed class ExportService
             await using var fs = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
             sink = new ExportSink(exportId, fs, format, options, h.Dialect, _events);
             var summary = await h.Session.ExecuteAsync(
-                new ExecuteRequest([new SqlBatch(sql, 1, 1)], 0, true, false, "statement"), sink, CancellationToken.None).ConfigureAwait(false);
+                new ExecuteRequest([new SqlBatch(sql, 1, 1)], 0, true, false, "statement", parameters), sink, CancellationToken.None).ConfigureAwait(false);
             await sink.CompleteAsync().ConfigureAwait(false);
             status = summary.Status;
             error = sink.ErrorMessage;

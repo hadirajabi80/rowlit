@@ -299,10 +299,15 @@ export type CellValue =
 export interface RowsPage { columns: ColumnInfo[]; rows: CellValue[][]; total: number; truncated: boolean }
 export interface CellResponse { kind: 'string' | 'binary'; value: string; len: number }
 
-export type ExportFormat = 'csv' | 'json' | 'sql-insert' | 'xlsx';
-export interface ExportOptions { delimiter?: string; header?: boolean; nullAs?: string; tableName?: string }
+export type ExportFormat = 'csv' | 'tsv' | 'json' | 'sql-insert' | 'markdown' | 'xlsx';
+/** bom: UTF-8 byte order mark (text formats); dateFormat: pattern for date/time columns (components/Export/dateFormat.ts); targetDialect: SQL INSERT literals. */
+export interface ExportOptions {
+  delimiter?: string; header?: boolean; nullAs?: string; tableName?: string;
+  bom?: boolean; dateFormat?: string; sheetName?: string; targetDialect?: Dialect;
+}
 export interface ResultSetExportRequest { format: ExportFormat; path: string | null; options: ExportOptions }
-export interface QueryExportRequest { sessionId: string; sql: string; format: ExportFormat; path: string; options: ExportOptions }
+/** Streams one SELECT (no row cap) to a file on the engine's computer; `params` are its bind values. Progress and the end arrive as export.progress / export.done. */
+export interface QueryExportRequest { sessionId: string; sql: string; format: ExportFormat; path: string; options: ExportOptions; params?: QueryParam[] }
 
 export interface HistoryEntry {
   id: number;

@@ -1,0 +1,104 @@
+/* Export dialog: scope list with counts, format options, progress. Tokens only. */
+.ex-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.ex-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.ex-scope:hover:not(.off) {
+  background: var(--bg-hover);
+}
+.ex-scope.on {
+  border-color: var(--accent);
+  background: var(--bg-sunken);
+}
+.ex-scope.off {
+  opacity: 0.6;
+  cursor: default;
+}
+.ex-scope input {
+  accent-color: var(--accent);
+  margin: 3px 0 0;
+}
+.ex-scope-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ex-scope-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.ex-scope-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--weight-strong);
+}
+.ex-scope-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ex-scope-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.ex-form {
+  grid-template-columns: 96px 1fr;
+}
+.ex-date {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ex-progress {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-sm);
+}
+.ex-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.ex-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width var(--dur) var(--ease);
+}
+.ex-bar > span.indeterminate {
+  width: 30%;
+  animation: ex-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes ex-indeterminate {
+  0% { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ex-bar > span.indeterminate {
+    animation: none;
+  }
+}

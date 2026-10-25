@@ -135,7 +135,7 @@ public sealed partial class XlsxResultWriter : IResultWriter
         _sheetEntry!.Dispose();
         _sheetEntry = null;
         // written last: the filter's defined name spans the rows written
-        var sheetName = SheetName(_options.TableName ?? _columns.FirstOrDefault(c => !string.IsNullOrEmpty(c.Table))?.Table);
+        var sheetName = SheetName(_options.SheetName ?? _options.TableName ?? _columns.FirstOrDefault(c => !string.IsNullOrEmpty(c.Table))?.Table);
         WritePart("xl/workbook.xml", Workbook(sheetName, filterRef));
         _zip.Dispose();
         if (_ownsZipStream)

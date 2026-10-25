@@ -146,7 +146,7 @@ public static class SessionEndpoints
         {
             if (req is null || string.IsNullOrWhiteSpace(req.SessionId)) throw EngineException.Validation("sessionId is required.", new { field = "sessionId" });
             Touch(http, sessions, req.SessionId);
-            var id = exports.StartQueryExport(req.SessionId, req.Sql ?? "", req.Format ?? ExportFormats.Csv, req.Path ?? "", req.Options ?? new ExportOptions());
+            var id = exports.StartQueryExport(req.SessionId, req.Sql ?? "", req.Format ?? ExportFormats.Csv, req.Path ?? "", req.Options ?? new ExportOptions(), req.Params);
             return Results.Json(new QueryExportResponse(id), CoreJson.Options, statusCode: StatusCodes.Status202Accepted);
         });
 

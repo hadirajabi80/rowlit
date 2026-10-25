@@ -122,10 +122,8 @@ export function wireSocket(): void {
     useSessions.getState().refreshSoon(400);
   });
   engineSocket.on('catalog.changed', (ev) => useCatalog.getState().applyChanged(ev));
-  engineSocket.on('export.done', (ev) => {
-    if (ev.status === 'ok') toast('success', `Exported ${pluralize(ev.rows, 'row')}`, ev.path);
-    else toast('error', 'Export failed', ev.error ?? undefined);
-  });
+  // export.progress / export.done belong to the export that was started: the export dialog follows them and reports the
+  // end (components/Export/serverExport.ts), so there is no global listener here.
   engineSocket.on('source.client', (ev) => useSourceClients.getState().apply(ev.connectionId, ev.state));
   engineSocket.on('engine.log', (ev) => {
     if (ev.level === 'error') toast('error', ev.message, undefined, openEngineLogAction());

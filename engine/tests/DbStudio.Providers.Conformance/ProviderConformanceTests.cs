@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using DbStudio.Core.Export;
 using DbStudio.Core.Models;
 using DbStudio.Core.Providers;
 using DbStudio.Core.Services;
@@ -226,6 +227,90 @@ public abstract class ProviderConformanceTests<TFixture> : IClassFixture<TFixtur
             Assert.Equal("UPDATE", affected.First(a => a.BatchIndex == 1).StatementKind, StringComparer.OrdinalIgnoreCase);
             Assert.Equal(6, summary.RowsAffected);
             Assert.Equal(0, summary.ResultSets);
+        }
+        finally
+        {
+            await RunAsync(session, Request(Fixture.DropScratchTableSql(table)));
+        }
+    }
+
+    // ------------------------------------------------------------------ export scopes
+
+    /// <summary>
+    /// "Current filter &amp; sort" of the Data tab: the grid's SELECT (WHERE with a bind value, ORDER BY, no page) streamed by the
+    /// engine's export job to a file. Cassandra drops the ORDER BY and adds ALLOW FILTERING itself, so only the rows are checked.
+    /// </summary>
+    [SkippableFact]
+    public async Task Export_FilteredQuery_WritesTheMatchingRowsInOrder()
+    {
+        RequireAvailable();
+        var table = NewScratchName();
+        await using var session = await Fixture.OpenSessionAsync();
+        try
+        {
+            var (s1, k1) = await RunAsync(session, Request(Fixture.CreateScratchTableSql(table)));
+            AssertOk(s1, k1);
+            var (s2, k2) = await RunAsync(session, Request(Fixture.InsertScratchRowsSql(table, 1, 60)));
+            AssertOk(s2, k2);
+
+            await using var harness = new ExportHarness(Fixture);
+            var ph = Dialect == Dialect.PlSql ? ":fp1" : "@fp1";
+            var sql = $"SELECT *\nFROM {table}\nWHERE id > {ph}\nORDER BY id DESC";
+            var (done, path, handle) = await harness.ExportAsync(sql, ExportFormats.Csv,
+                [new DbStudio.Core.Params.QueryParam("fp1", "int", System.Text.Json.Nodes.JsonValue.Create(50))]);
+
+            Assert.True(done.Status == ExecutionStatus.Ok, done.Error);
+            Assert.Equal(10, done.Rows);
+            Assert.False(handle.IsReserved);
+            var lines = await File.ReadAllLinesAsync(path);
+            Assert.Equal(11, lines.Length);
+            Assert.Equal("id,val", lines[0], ignoreCase: true);
+            var ids = lines.Skip(1).Select(l => int.Parse(l.Split(',')[0], CultureInfo.InvariantCulture)).ToList();
+            if (Dialect == Dialect.Cql) Assert.Equal(Enumerable.Range(51, 10), ids.Order());
+            else Assert.Equal(Enumerable.Range(51, 10).Reverse(), ids);
+        }
+        finally
+        {
+            await RunAsync(session, Request(Fixture.DropScratchTableSql(table)));
+        }
+    }
+
+    [SkippableFact]
+    public async Task Export_WholeTable_AndCancel()
+    {
+        RequireAvailable();
+        var table = NewScratchName();
+        await using var session = await Fixture.OpenSessionAsync();
+        try
+        {
+            var (s1, k1) = await RunAsync(session, Request(Fixture.CreateScratchTableSql(table)));
+            AssertOk(s1, k1);
+            var (s2, k2) = await RunAsync(session, Request(Fixture.InsertScratchRowsSql(table, 1, 25)));
+            AssertOk(s2, k2);
+
+            await using var harness = new ExportHarness(Fixture);
+            // "All records": no filter, natural order, every row (and Markdown / TSV / BOM formats work against a real provider)
+            var (done, path, _) = await harness.ExportAsync($"SELECT *\nFROM {table}", ExportFormats.Markdown);
+            Assert.True(done.Status == ExecutionStatus.Ok, done.Error);
+            Assert.Equal(25, done.Rows);
+            Assert.Equal(27, (await File.ReadAllLinesAsync(path)).Length);
+
+            var (tsv, tsvPath, _) = await harness.ExportAsync($"SELECT *\nFROM {table}", ExportFormats.Tsv, options: new ExportOptions(Bom: true));
+            Assert.Equal(25, tsv.Rows);
+            Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, (await File.ReadAllBytesAsync(tsvPath))[..3]);
+
+            if (!Fixture.SupportsCancel) return;
+            // an export takes SELECTs only (WAITFOR is refused), so T-SQL cancels a CPU-bound count instead
+            var slow = Dialect == Dialect.TSql
+                ? "SELECT COUNT_BIG(*) FROM sys.all_objects a CROSS JOIN sys.all_objects b CROSS JOIN sys.all_objects c CROSS JOIN sys.all_objects d"
+                : Fixture.LongRunningQuery;
+            var (id, cancelPath, h) = await harness.StartAsync(slow, ExportFormats.Csv);
+            await Task.Delay(1500);
+            harness.Cancel(h);
+            var cancelled = await harness.WaitAsync<ExportDoneEvent>(e => e.ExportId == id, TimeSpan.FromSeconds(60));
+            Assert.NotEqual(ExecutionStatus.Ok, cancelled.Status);
+            Assert.False(File.Exists(cancelPath));
+            Assert.False(File.Exists(cancelPath + ".partial"));
         }
         finally
         {

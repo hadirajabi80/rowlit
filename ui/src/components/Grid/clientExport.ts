@@ -1,18 +1,17 @@
 // Client-side export of grid rows to a file (Data tab, filtered/sorted console results): full values of truncated
 // cells are fetched first (logic-12); SQL INSERT is refused while values are still truncated.
 import { api } from '../../api/client';
-import type { CellValue, ColumnInfo, Dialect } from '../../api/types';
+import type { CellValue, ColumnInfo, Dialect, ExportFormat } from '../../api/types';
 import { resolvePartialValues, serializeComplete, truncationWarning, type CellFetcher, type CellLocator } from '../../lib/serialize';
+import { EXPORT_EXT, EXPORT_FILTER_NAME, EXPORT_MIME, XLSX_MIME } from '../../lib/exportFormats';
 import { getPlatform } from '../../platform';
 import { toast } from '../../store/ui';
-// the writer is loaded on first use (kept out of the initial bundle)
-const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-export type FileFormat = 'csv' | 'json' | 'sql-insert' | 'xlsx';
+export type FileFormat = ExportFormat;
 
-export const FILE_EXT: Record<FileFormat, string> = { csv: 'csv', json: 'json', 'sql-insert': 'sql', xlsx: 'xlsx' };
-export const FILE_MIME: Record<FileFormat, string> = { csv: 'text/csv', json: 'application/json', 'sql-insert': 'application/sql', xlsx: XLSX_MIME };
-const FILTER_NAME: Record<FileFormat, string> = { csv: 'CSV', json: 'JSON', 'sql-insert': 'SQL', xlsx: 'Excel workbook' };
+export const FILE_EXT = EXPORT_EXT;
+export const FILE_MIME = EXPORT_MIME;
+const FILTER_NAME = EXPORT_FILTER_NAME;
 
 export const fetchCellFromEngine: CellFetcher = (l) => api.cell(l.executionId, l.resultSetId, l.row, l.col);
 

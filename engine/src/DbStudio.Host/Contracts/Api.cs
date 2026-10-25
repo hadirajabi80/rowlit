@@ -76,7 +76,8 @@ public sealed record ResultSetExportRequest(string? Format, string? Path, Export
 
 public sealed record ExportFileResponse(string Path, long Rows);
 
-public sealed record QueryExportRequest(string? SessionId, string? Sql, string? Format, string? Path, ExportOptions? Options);
+public sealed record QueryExportRequest(string? SessionId, string? Sql, string? Format, string? Path, ExportOptions? Options,
+    List<DbStudio.Core.Params.QueryParam>? Params = null);
 
 public sealed record QueryExportResponse(string ExportId);
 

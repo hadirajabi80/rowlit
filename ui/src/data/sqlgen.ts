@@ -408,12 +408,16 @@ export function orderByClause(sort: SortSpec[] | undefined, keyColumns: string[]
   return all.map((s) => `${quoteIdent(s.column, dialect)}${s.dir === 'desc' ? ' DESC' : ''}`).join(', ');
 }
 
+/** The WHERE and ORDER BY of every read of a table (page, export): one place, so a file holds what the grid shows. */
+function whereAndOrder(t: TableTarget, dialect: Dialect, where: string | null | undefined, sort: SortSpec[] | undefined): { where: string; order: string | null } {
+  return { where: where ? `\nWHERE ${where}` : '', order: orderByClause(sort, t.keyColumns, dialect, t.orderFallback) };
+}
+
 /** `SELECT * FROM t [WHERE …] ORDER BY … OFFSET/FETCH | LIMIT/OFFSET` (row counts are generated integers). */
 export function selectPageSql(t: TableTarget, dialect: Dialect, o: PageOptions): PageSql {
   const table = tableSql(t, dialect);
   const cols = selectList(t, dialect, table);
-  const where = o.where ? `\nWHERE ${o.where}` : '';
-  const order = orderByClause(o.sort, t.keyColumns, dialect, t.orderFallback);
+  const { where, order } = whereAndOrder(t, dialect, o.where, o.sort);
   const limit = Math.max(1, Math.floor(o.limit));
   const offset = Math.max(0, Math.floor(o.offset));
   const major = majorOf(o.serverVersion);
@@ -431,6 +435,26 @@ export function selectPageSql(t: TableTarget, dialect: Dialect, o: PageOptions):
     return { sql: `SELECT ${cols}\nFROM ${table}${where}${order ? `\nORDER BY ${order}` : ''}\nOFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`, pageable: true };
   }
   return { sql: `SELECT *\nFROM ${table}${where}${order ? `\nORDER BY ${order}` : ''}\nLIMIT ${limit} OFFSET ${offset}`, pageable: true };
+}
+
+export interface ExportSelectOptions {
+  /** The grid's server predicate (null = no filter). */
+  where?: string | null;
+  /** The grid's sort; the key / fallback order of the grid is appended exactly as for a page (orderByClause). */
+  sort?: SortSpec[];
+  /** Keep the grid's ORDER BY (filtered export) or read the table in its natural order (all records). Default: true. */
+  ordered?: boolean;
+}
+
+/**
+ * The statement of an export of the whole table or of what a filter matches: the page statement of `selectPageSql`
+ * without the page (no LIMIT / OFFSET / FETCH / TOP), with the same WHERE and ORDER BY text, so the file holds exactly
+ * the rows the grid pages through. The Oracle ROWID of a keyless table is not exported (it is no column of the table).
+ * The engine adapts the statement per provider like any other (Cassandra: ORDER BY dropped, ALLOW FILTERING added).
+ */
+export function exportSelectSql(t: TableTarget, dialect: Dialect, o: ExportSelectOptions = {}): string {
+  const { where, order } = whereAndOrder(t, dialect, o.where, o.sort);
+  return `SELECT *\nFROM ${tableSql(t, dialect)}${where}${order && o.ordered !== false ? `\nORDER BY ${order}` : ''}`;
 }
 
 export function countSql(t: TableTarget, dialect: Dialect, where?: string | null): string {

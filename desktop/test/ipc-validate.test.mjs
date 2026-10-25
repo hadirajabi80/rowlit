@@ -26,6 +26,18 @@ describe('validateFilePath (win32 rules)', () => {
   });
 });
 
+describe('validateExportedFilePath (open exported file)', () => {
+  const ok = (p) => v.validateExportedFilePath(p, 'win32');
+  it('accepts absolute paths of exported data files', () => {
+    for (const p of ['C:\\out\\a.csv', 'C:\\out\\a.TSV', 'C:\\out\\a.json', 'C:\\out\\a.sql', 'C:\\out\\a.md', 'C:\\out\\a.xlsx']) assert.equal(ok(p), p);
+  });
+  it('rejects programs, scripts, shortcuts, relative paths and non-strings', () => {
+    for (const bad of ['C:\\out\\a.exe', 'C:\\out\\a.bat', 'C:\\out\\a.ps1', 'C:\\out\\a.lnk', 'C:\\out\\a', 'a.csv', '', 42, null]) {
+      assert.throws(() => ok(bad), v.ValidationError, String(bad));
+    }
+  });
+});
+
 describe('dialog options', () => {
   it('normalizes filters', () => {
     const o = v.validateSaveDialogArgs({ title: 'Save', defaultPath: 'q.sql', filters: [{ name: 'SQL', extensions: ['sql', '.txt', '*.csv', '*'] }] });

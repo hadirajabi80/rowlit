@@ -177,6 +177,18 @@ export function validateMenuPosition(v: unknown): { x: number; y: number } {
   return { x: coord(v.x, 'x'), y: coord(v.y, 'y') };
 }
 
+// ---- exported files
+/** What "Open file after export" may hand to the shell: only the file types an export writes, never programs or scripts. */
+export const EXPORT_FILE_EXTENSIONS = ['.csv', '.tsv', '.json', '.sql', '.md', '.xlsx', '.txt'];
+
+/** openPath(path): an absolute path of an exported data file (checked by extension; the shell opens it with its default app). */
+export function validateExportedFilePath(v: unknown, platform: NodeJS.Platform = process.platform): string {
+  const p = validateFilePath(v, 'path', platform);
+  const ext = (platform === 'win32' ? path.win32 : path.posix).extname(p).toLowerCase();
+  if (!EXPORT_FILE_EXTENSIONS.includes(ext)) throw new ValidationError('only exported data files can be opened');
+  return p;
+}
+
 // ---- notifications
 /** showNotification({ title, body }): plain one-line strings (control characters become spaces), capped. */
 export function validateNotification(v: unknown): { title: string; body: string } {

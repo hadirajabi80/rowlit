@@ -19,6 +19,9 @@ export interface Platform {
   openTextFile(opts: { filters?: FileFilter[] }): Promise<{ name: string; path: string | null; content: string } | null>;
   writeTextFile(path: string, content: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** Desktop only: open an exported data file with the default app / show a file in its folder. */
+  openPath?(path: string): Promise<void>;
+  revealInFolder?(path: string): Promise<void>;
   onMenuCommand(cb: (cmd: MenuCommand) => void): () => void;
   onEngineRestarted(cb: (info: EngineInfo) => void): () => void;
   loadWorkspace(): Promise<unknown | null>;

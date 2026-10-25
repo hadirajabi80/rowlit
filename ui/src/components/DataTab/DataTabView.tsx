@@ -50,6 +50,7 @@ import type { EditContext } from '../PendingChanges/submit';
 import { RecordView } from '../RecordView/RecordView';
 import { ExecutedQueryLine } from '../ResultsPane/ExecutedQueryLine';
 import type { ExecutedQuery } from '../ResultsPane/executedQuery';
+import { openExportDialog } from '../Export/open';
 import { GRID_EXPORT_MENU } from '../ResultsPane/toolbarModel';
 import { consumeGridFocus, dataGridKey, hasPendingGridFocus, openDataTab, type DataTabState, type SortByName } from './open';
 import { getSqlRunner } from './runner';
@@ -268,6 +269,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const uniqueKey = useRef<string[] | null | undefined>(undefined);
   /** ORDER BY fallback the loaded rows were read with (keyless objects; null = no ORDER BY). */
   const loadedFallback = useRef<string[] | null>(null);
+  /** Key columns and sort the loaded rows were paged with (the export of "filter & sort" repeats them). */
+  const loadedKeys = useRef<string[]>([]);
+  const loadedSort = useRef<SortSpec[]>([]);
   /** The loaded rows carry the hidden Oracle ROWID column (keyless table, see TableTarget.rowid). */
   const withRowid = useRef(false);
   /** Selecting ROWID failed once for this object: read it without (and read-only) from now on. */
@@ -473,6 +477,8 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       colsRef.current = set?.columns ?? cols;
       hasMoreRef.current = page.pageable && fetched.length >= limit;
       loadedFallback.current = fallback;
+      loadedKeys.current = keys;
+      loadedSort.current = spec;
       // The next page is read with the same fallback: the hint shows only while that order is "none" (pages may then
       // repeat or skip rows), and stays once unordered pages were appended.
       const unordered = !keys.length && !fallback && (hasMoreRef.current || offset > 0);
@@ -616,6 +622,21 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     await g.exportVisible(format, {
       baseName: target.name,
       note: hasMoreRef.current ? `Only the ${formatCount(rowsRef.current.length)} loaded rows were exported; load more rows to include the rest.` : null,
+    });
+  };
+
+  /** "Export…": the dialog offers the loaded rows, the selection, everything the filter matches and the whole table. */
+  const openExport = () => {
+    const applied = data.applied;
+    void openExportDialog({
+      kind: 'table', connectionId, dialect, gridKey, title: target.name, columns,
+      // the target the pages were read with, without the Oracle ROWID (it is not a column of the table)
+      target: { ...target, keyColumns: loadedKeys.current, ...(loadedFallback.current ? { orderFallback: loadedFallback.current } : {}) },
+      where: applied?.where ?? null, params: applied?.params ?? [], clientOnlyFilter: !!applied?.clientOnly, sort: loadedSort.current,
+      filteredCount: count.value, loaded: rowsRef.current.length, hasMore: hasMoreRef.current,
+      withSession: (run) => exclusive(async () => run((await ensureSession()).sessionId)),
+      estimateRows: () => api.objectDetails(connectionId, database, { database, schema: target.schema, name: target.name, type: isView ? 'view' : 'table' })
+        .then((d) => d.rowCountEstimate, () => null),
     });
   };
 
@@ -841,7 +862,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}
-                controllerExtras={{ refresh: () => void refresh(), loadMore, exportAs: (f) => void exportAs(f), ...(editCtx ? pendingActions.controller : {}) }}
+                controllerExtras={{ refresh: () => void refresh(), loadMore, exportAs: (f) => void exportAs(f), openExport, ...(editCtx ? pendingActions.controller : {}) }}
               />
               {noMatch && (
                 <div className="rs-empty-filter" role="status">

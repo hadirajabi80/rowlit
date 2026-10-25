@@ -9,6 +9,9 @@ export const IPC = {
   readTextFile: 'dbstudio:read-text-file',
   writeTextFile: 'dbstudio:write-text-file',
   openExternal: 'dbstudio:open-external',
+  /** Export dialog: open an exported data file / show it in its folder. */
+  openPath: 'dbstudio:open-path',
+  revealInFolder: 'dbstudio:reveal-in-folder',
   loadWorkspace: 'dbstudio:load-workspace',
   saveWorkspace: 'dbstudio:save-workspace',
   setTitle: 'dbstudio:set-title',
