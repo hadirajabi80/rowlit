@@ -161,7 +161,7 @@ export async function runInTab(tabId: string, label: RunLabel, batches: SqlBatch
   noteFirstRun(tabId);
 
   try {
-    const session = await useSessions.getState().ensure(tabId, conn.id, effectiveDatabase(conn.id, tab.database), tab.txMode);
+    const session = await useSessions.getState().ensure(tabId, conn.id, effectiveDatabase(conn.id, tab.database), tab.txMode, tab.schema);
     useConnections.getState().touch(conn.id);
     const res = await api.execute(session.sessionId, {
       batches, maxRows, stopOnError: true, label, source: { tabId, title: tab.title },
@@ -346,6 +346,21 @@ export async function switchDatabase(tabId: string, database: string | null): Pr
     } catch (e) {
       toast('error', 'Could not change database', errorMessage(e));
     }
+  }
+}
+
+/**
+ * Chooses the console's default schema (schema switcher). PostgreSQL / Snowflake: the session runs SET search_path /
+ * USE SCHEMA (applied on the next run when there is no session yet) and the tab remembers it; SQL Server: only the tab's
+ * "Editor schema" for IntelliSense changes. null returns to the server's own default.
+ */
+export async function switchSchema(tabId: string, schema: string | null): Promise<void> {
+  const tab = consoleTab(tabId);
+  if (!tab) return;
+  try {
+    await useSessions.getState().changeSchema(tabId, schema);
+  } catch (e) {
+    toast('error', 'Could not change schema', errorMessage(e));
   }
 }
 

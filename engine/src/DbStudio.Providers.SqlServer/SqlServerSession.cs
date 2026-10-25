@@ -155,6 +155,26 @@ public sealed class SqlServerSession : AdoSessionBase
         _ => base.MapException(exception, batch),
     };
 
+    // ------------------------------------------------------------------ default schema (read-only)
+
+    /// <summary>SQL Server has no per-session default schema: it is the user's default schema in the current database.</summary>
+    public override SchemaMode SchemaMode => SchemaMode.ReadOnly;
+
+    protected override async Task ReadSchemaCoreAsync(CancellationToken ct)
+    {
+        await using var cmd = CreateCommand("SELECT SCHEMA_NAME()");
+        var v = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        CurrentSchema = v as string;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex SchemaChangers = new(
+        @"\b(use|execute\s+as|exec\s+as|revert)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>USE changes the database (and with it the user's default schema); EXECUTE AS / REVERT change the user.</summary>
+    protected override bool SchemaMayChange(BatchContext context) => MayChangeSchema(context.Batch.Sql);
+
+    internal static bool MayChangeSchema(string sql) => SchemaChangers.IsMatch(sql);
+
     protected override async Task ChangeDatabaseCoreAsync(string database, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(database);

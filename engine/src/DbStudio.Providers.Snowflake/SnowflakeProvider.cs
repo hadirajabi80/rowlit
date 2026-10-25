@@ -66,7 +66,9 @@ public sealed class SnowflakeProvider : IDbProvider, IObjectBrowserProvider, IDa
         try
         {
             var info = await ReadServerInfoAsync(conn, ct).ConfigureAwait(false);
-            return new SnowflakeSession(conn, profile, options, info, c => _gateways.OpenAsync(profile, password, c));
+            var session = new SnowflakeSession(conn, profile, options, info, c => _gateways.OpenAsync(profile, password, c));
+            await session.InitializeSchemaAsync(ct).ConfigureAwait(false);
+            return session;
         }
         catch
         {

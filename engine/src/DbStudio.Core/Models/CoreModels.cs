@@ -19,6 +19,13 @@ public enum Dialect { TSql, PlSql, Sqlite, PgSql, MySql, ClickHouse, Snowflake, 
 public enum SourceKind { Relational, KeyValue, Document, Stream, Search }
 public enum SessionState { Idle, Executing, Broken, Closed }
 public enum TransactionMode { Auto, Manual }
+
+/// <summary>
+/// What a session offers for its default schema (the schema unqualified names resolve to): <see cref="None"/> (single-level
+/// providers: the database switcher already is the schema), <see cref="ReadOnly"/> (SQL Server: the login's default
+/// schema, no per-session change) or <see cref="Session"/> (PostgreSQL search_path, Oracle CURRENT_SCHEMA, Snowflake USE SCHEMA).
+/// </summary>
+public enum SchemaMode { None, ReadOnly, Session }
 public enum MessageSeverity { Info, Warning, Error }
 public enum MessageSource { Server, DbmsOutput, Engine }
 public enum BatchStatus { Ok, Error, Cancelled }

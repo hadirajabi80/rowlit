@@ -32,6 +32,12 @@ export interface ConsoleTab {
   title: string;
   connectionId: string | null;
   database: string | null;
+  /**
+   * The default schema chosen for this console (schema switcher: SQL Server / PostgreSQL / Snowflake). PostgreSQL and
+   * Snowflake apply it to the session (search_path / USE SCHEMA) when it is (re)opened, so a restored workspace comes back
+   * in the same schema; on SQL Server it is the "Editor schema" for IntelliSense only. Null = the server's default.
+   */
+  schema?: string | null;
   text: string;
   /** Text as last saved to / loaded from a file; dirty = text !== savedText. */
   savedText: string;
@@ -159,6 +165,8 @@ interface TabsState extends GroupsState {
   markSaved(id: string, filePath: string | null, title?: string): void;
   setConnection(id: string, connectionId: string | null, database?: string | null): void;
   setDatabase(id: string, database: string | null): void;
+  /** The console's default schema (see ConsoleTab.schema); null returns to the server's own. */
+  setSchema(id: string, schema: string | null): void;
   setTxMode(id: string, mode: TxMode): void;
   setMaxRows(id: string, maxRows: number | null): void;
   rename(id: string, title: string): void;
@@ -464,11 +472,18 @@ export const useTabs = create<TabsState>((set, get) => {
     },
 
     setConnection(id, connectionId, database = null) {
-      patch(id, { connectionId, database });
+      // another connection / database has other schemas: the remembered schema does not carry over
+      patch(id, { connectionId, database, schema: null });
     },
 
     setDatabase(id, database) {
-      patch(id, { database });
+      const t = get().tabs.find((x) => x.id === id);
+      patch(id, t?.kind === 'console' && t.database === database ? { database } : { database, schema: null });
+    },
+
+    setSchema(id, schema) {
+      const t = get().tabs.find((x) => x.id === id);
+      if (t?.kind === 'console' && (t.schema ?? null) !== schema) patch(id, { schema });
     },
 
     setTxMode(id, mode) {

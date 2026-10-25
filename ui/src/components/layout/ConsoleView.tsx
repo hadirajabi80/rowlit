@@ -9,6 +9,8 @@ import { SqlEditor } from '../../editor/SqlEditor';
 import type { SqlEditorHandle } from '../../editor/SqlEditor.types';
 import { peekEditSession } from '../../designer/editSession';
 import { useDesignerUi } from '../../designer/store';
+import { snapshotWithSchema } from '../../lib/schemaScope';
+import { useConsoleSchema } from '../../store/consoleSchema';
 import { requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
 import { getConnection, useConnection, useDialect } from '../../store/connections';
 import { useTabExecution } from '../../store/results';
@@ -73,7 +75,14 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
   const conn = useConnection(tab.connectionId);
   const dialect = useDialect(tab.connectionId);
   const catDb = useCatalog(() => catalogDatabase(tab.connectionId, tab.database));
-  const snapshot = useSnapshot(tab.connectionId, catDb);
+  const catalogSnapshot = useSnapshot(tab.connectionId, catDb);
+  // IntelliSense completes and resolves bare names in the console's default schema (schema switcher): the session's own,
+  // or on SQL Server the tab's editor schema.
+  const schemaState = useConsoleSchema(tab);
+  const snapshot = useMemo(
+    () => (schemaState.enabled ? snapshotWithSchema(catalogSnapshot, schemaState.schema, schemaState.searchPath) : catalogSnapshot),
+    [catalogSnapshot, schemaState.enabled, schemaState.schema, schemaState.searchPath],
+  );
   // SQL Server: the server's other databases, as far as they are loaded (`Other.dbo.Orders`, `USE Other`)
   const foreignCatalogs = useForeignCatalogs(tab.connectionId, catDb, dialect);
   const editorSettings = useSettings((s) => s.settings.editor);

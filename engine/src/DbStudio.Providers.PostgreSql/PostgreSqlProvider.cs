@@ -63,7 +63,9 @@ public sealed class PostgreSqlProvider : IDbProvider, IObjectBrowserProvider, ID
         {
             await conn.OpenAsync(ct).ConfigureAwait(false);
             var info = await ReadServerInfoAsync(conn, profile, ct).ConfigureAwait(false);
-            return new PgSession(conn, profile, options, info);
+            var session = new PgSession(conn, profile, options, info);
+            await session.InitializeSchemaAsync(ct).ConfigureAwait(false);
+            return session;
         }
         catch
         {

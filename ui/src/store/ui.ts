@@ -53,7 +53,8 @@ export type PaletteMode = 'commands' | 'objects';
 /** Connection / database switcher popover (Ctrl+Shift+K / Ctrl+Shift+D). */
 export interface SwitcherState {
   tabId: string;
-  mode: 'connection' | 'database';
+  /** `schema`: the schema picker (components/Toolbar/SchemaPicker) for SQL Server / PostgreSQL / Snowflake consoles. */
+  mode: 'connection' | 'database' | 'schema';
   /** Anchor rectangle (viewport coordinates); centred under the top bar when absent. */
   anchor?: { left: number; top: number; bottom: number } | null;
 }

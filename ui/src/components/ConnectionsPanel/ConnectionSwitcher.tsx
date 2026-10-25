@@ -27,7 +27,7 @@ interface Row {
 /** MRU-first, folder-grouped connection list with fuzzy search; database/schema mode for Ctrl+Shift+D. */
 export function ConnectionSwitcher() {
   const sw = useUi((s) => s.switcher);
-  if (!sw) return null;
+  if (!sw || sw.mode === 'schema') return null; // the schema picker is its own (lazy) component
   return <Switcher key={`${sw.tabId}:${sw.mode}`} />;
 }
 

@@ -442,6 +442,92 @@ public sealed class PgSession : AdoSessionBase
         return PgSqlText.MapPosition(sent.Text, original, inBatch + 1);
     }
 
+    // ------------------------------------------------------------------ default schema (search_path)
+
+    private volatile string? _startupSearchPath;
+
+    public override SchemaMode SchemaMode => SchemaMode.Session;
+
+    /// <summary>SET is part of the transaction: a ROLLBACK brings the previous search_path back.</summary>
+    protected override bool SchemaIsTransactional => true;
+
+    private static readonly System.Text.RegularExpressions.Regex SchemaChangers = new(
+        @"search_path|\bset\s+(session\s+|local\s+)?schema\b|set_config|\breset\b|\bdiscard\b|\brollback\b|\babort\b|\bset\s+(session\s+|local\s+)?role\b|\bsession\s+authorization\b|\bcall\b|\bdo\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    protected override bool SchemaMayChange(BatchContext context) => MayChangeSchema(context.Batch.Sql);
+
+    internal static bool MayChangeSchema(string sql) => SchemaChangers.IsMatch(sql);
+
+    protected override async Task ReadSchemaCoreAsync(CancellationToken ct)
+    {
+        await using var cmd = CreateCommand("SELECT current_schema(), current_schemas(false), current_setting('search_path')");
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await r.ReadAsync(ct).ConfigureAwait(false)) return;
+        CurrentSchema = r.IsDBNull(0) ? null : r.GetString(0);
+        SearchPath = r.IsDBNull(1) ? null : r.GetFieldValue<string[]>(1);
+        _startupSearchPath ??= r.IsDBNull(2) ? null : r.GetString(2);
+    }
+
+    protected override async Task ChangeSchemaCoreAsync(string? schema, CancellationToken ct)
+    {
+        if (schema is null)
+        {
+            await using (var reset = CreateCommand("RESET search_path"))
+                await reset.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
+            return;
+        }
+        await using (var exists = CreateCommand("SELECT 1 FROM pg_namespace WHERE nspname = " + PgSqlText.Literal(schema)))
+        {
+            if (await exists.ExecuteScalarAsync(ct).ConfigureAwait(false) is null)
+                throw EngineException.Validation($"Schema '{schema}' does not exist in database '{CurrentDatabase}'.", new { field = "schema" });
+        }
+        var sql = BuildSetSearchPath(schema, _startupSearchPath);
+        await using (var set = CreateCommand(sql))
+            await set.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <c>SET search_path TO "schema", &lt;the rest of the path the session started with&gt;</c>: the chosen schema first, the
+    /// startup entries (<c>"$user", public</c>) after it, without a second copy of the chosen schema.
+    /// </summary>
+    internal static string BuildSetSearchPath(string schema, string? startupSearchPath)
+    {
+        var parts = new List<string> { "\"" + schema.Replace("\"", "\"\"") + "\"" };
+        foreach (var token in SplitSearchPath(startupSearchPath ?? "public"))
+        {
+            var name = token.Length >= 2 && token[0] == '"' && token[^1] == '"'
+                ? token[1..^1].Replace("\"\"", "\"")
+                : token.ToLowerInvariant();
+            if (string.Equals(name, schema, StringComparison.Ordinal)) continue;
+            parts.Add(token);
+        }
+        return "SET search_path TO " + string.Join(", ", parts);
+    }
+
+    /// <summary>Splits a <c>search_path</c> setting on commas outside double quotes; entries keep their quotes.</summary>
+    internal static IEnumerable<string> SplitSearchPath(string setting)
+    {
+        var sb = new System.Text.StringBuilder();
+        var quoted = false;
+        foreach (var ch in setting)
+        {
+            if (ch == '"') quoted = !quoted;
+            if (ch == ',' && !quoted)
+            {
+                var t = sb.ToString().Trim();
+                if (t.Length > 0) yield return t;
+                sb.Clear();
+                continue;
+            }
+            sb.Append(ch);
+        }
+        var last = sb.ToString().Trim();
+        if (last.Length > 0) yield return last;
+    }
+
     protected override Task ChangeDatabaseCoreAsync(string database, CancellationToken ct) =>
         throw new NotSupportedException("PostgreSQL connections are bound to one database; the session is reopened on the new database.");
 
