@@ -1,0 +1,44 @@
+{
+  "name": "seed (WP0): two members, inner join, text filter, aggregate, sort by alias, limit",
+  "catalog": {
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "name", "kind": "string", "type": "VARCHAR" },
+      { "name": "country", "kind": "string", "type": "VARCHAR" }
+    ],
+    "shop.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "customer_id", "kind": "int", "type": "BIGINT" },
+      { "name": "status", "kind": "string", "type": "VARCHAR" },
+      { "name": "total", "kind": "decimal", "type": "DECIMAL(38,2)" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "crm", "table": "customers", "as": "customers", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "shop", "table": "orders", "as": "orders", "x": 360, "y": 40, "collapsed": false }
+    ],
+    "joins": [
+      { "id": "j1", "type": "inner", "left": "t1", "right": "t2", "on": [ { "leftColumn": "id", "rightColumn": "customer_id", "op": "=", "ignoreCase": false, "trim": false } ] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "name", "expr": null, "alias": null, "agg": null, "output": true },
+      { "id": "c2", "tableId": "t2", "column": "total", "expr": null, "alias": "total", "agg": "sum", "output": true }
+    ],
+    "filter": {
+      "kind": "group", "id": "g1", "logic": "and",
+      "items": [ { "kind": "condition", "id": "f1", "column": "t2.status", "op": "eq", "values": ["paid"], "enabled": true } ]
+    },
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [ { "ref": { "columnId": "c2" }, "dir": "desc", "nulls": null } ],
+    "limit": 10,
+    "offset": null,
+    "distinct": false
+  },
+  "sql": "SELECT customers.name, sum(orders.total) AS total\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nWHERE lower(orders.status) = lower($fp1)\nGROUP BY customers.name\nORDER BY total DESC\nLIMIT 10",
+  "params": [ { "name": "fp1", "kind": "string", "value": "paid" } ],
+  "warnings": []
+}

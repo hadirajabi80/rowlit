@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Linked databases (federated queries, plan-links): a link is a connection (provider "linked", dialect duckdb) whose
+       session pulls rows from its member connections through Rowlit's own drivers into an embedded DuckDB and runs the
+       query there. WP0 committed the compiling skeleton and the FROZEN contracts (Contracts/*.cs); see
+       docs/wp-notes/links/wp0.md for which work package owns which folder. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded federation engine. The .Full package carries libduckdb per runtime (win-x64/arm64, linux, osx): the
+         Windows single-file publish extracts it with the other native libraries (IncludeNativeLibrariesForSelfExtract),
+         on macOS it is published next to Rowlit.Engine. No DuckDB extension is installed or loaded (phase 1). -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.6.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbStudio.Core\DbStudio.Core.csproj" />
+    <!-- TargetWriter / ImportDialect / ImportConnections (materialize) and, through it, the relational provider drivers. -->
+    <ProjectReference Include="..\DbStudio.Import\DbStudio.Import.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Sqlite\DbStudio.Providers.Sqlite.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.SqlServer\DbStudio.Providers.SqlServer.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Oracle\DbStudio.Providers.Oracle.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.PostgreSql\DbStudio.Providers.PostgreSql.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.MySql\DbStudio.Providers.MySql.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.ClickHouse\DbStudio.Providers.ClickHouse.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Snowflake\DbStudio.Providers.Snowflake.csproj" />
+    <ProjectReference Include="..\DbStudio.Providers.Cassandra\DbStudio.Providers.Cassandra.csproj" />
+    <!-- P3 fetchers (WP-B): MongoDB collections and Elasticsearch indices as link tables. -->
+    <ProjectReference Include="..\DbStudio.Sources.Mongo\DbStudio.Sources.Mongo.csproj" />
+    <ProjectReference Include="..\DbStudio.Sources.Elasticsearch\DbStudio.Sources.Elasticsearch.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbStudio.Federation.Tests" />
+  </ItemGroup>
+
+</Project>

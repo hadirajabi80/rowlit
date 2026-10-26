@@ -43,7 +43,8 @@ public sealed class Batch3FoundationTests
     public void Unknown_dialect_message_lists_all_eight()
     {
         var ex = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Dialect>("\"db2\"", CoreJson.Options));
-        Assert.Contains("mysql, clickhouse, snowflake or cql", ex.Message);
+        // LINKS-WP0: duckdb (linked databases) is the ninth
+        Assert.Contains("mysql, clickhouse, snowflake, cql or duckdb", ex.Message);
     }
 
     [Fact]

@@ -64,6 +64,7 @@ export const DEFAULT_PARAM_TYPE: Record<Dialect, string> = {
   // WP-CS begin
   cql: 'int',
   // WP-CS end
+  duckdb: 'INTEGER', // LINKS-WP0
 };
 export const DEFAULT_RETURN_TYPE: Record<Dialect, string> = {
   tsql: 'int', plsql: 'NUMBER', sqlite: 'INTEGER', pgsql: 'integer',
@@ -79,6 +80,7 @@ export const DEFAULT_RETURN_TYPE: Record<Dialect, string> = {
   // WP-CS begin
   cql: 'int',
   // WP-CS end
+  duckdb: 'INTEGER', // LINKS-WP0
 };
 
 /** Escape literal text for a snippet. */

@@ -21,11 +21,18 @@ beforeAll(async () => {
 });
 
 /** Minimum number of built-ins per dialect (the shared ones included). */
-const MIN: Record<Dialect, number> = { tsql: 80, plsql: 70, pgsql: 80, mysql: 70, clickhouse: 70, snowflake: 70, sqlite: 45, cql: 40 };
+const MIN: Record<Dialect, number> = {
+  tsql: 80, plsql: 70, pgsql: 80, mysql: 70, clickhouse: 70, snowflake: 70, sqlite: 45, cql: 40,
+  // LINKS-WPD begin (WP-D adds 'duckdb' to DIALECTS once data/duckdb.ts has its library)
+  duckdb: 0,
+  // LINKS-WPD end
+};
+/** LINKS-WP0: dialects whose library is still a stub (not held to the shape rules below yet). */
+const PENDING: Dialect[] = ['duckdb'];
 
 describe('library shape', () => {
   it('every dialect is covered and big enough', () => {
-    expect(SNIPPET_DIALECTS.slice().sort()).toEqual(DIALECTS.slice().sort());
+    expect(SNIPPET_DIALECTS.filter((d) => !PENDING.includes(d)).sort()).toEqual(DIALECTS.slice().sort());
     for (const d of DIALECTS) expect(lists.get(d)!.length, d).toBeGreaterThanOrEqual(MIN[d]);
   });
 

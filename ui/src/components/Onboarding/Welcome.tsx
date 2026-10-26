@@ -27,6 +27,8 @@ const PROVIDERS: { id: ProviderId; blurb: string; whenListed?: boolean }[] = [
   { id: 'snowflake', blurb: 'Snowflake: password, key pair, SSO', whenListed: true },
   { id: 'elasticsearch', blurb: 'Elasticsearch 7/8, OpenSearch', whenListed: true },
   { id: 'cassandra', blurb: 'Cassandra 4/5, ScyllaDB', whenListed: true },
+  // LINKS-WP0: always shown; the connection dialog host routes provider 'linked' to the links editor (links.new)
+  { id: 'linked', blurb: 'Join tables across your connections in one query' },
 ];
 
 /** First launch / no tabs: welcome screen in the centre area (no modal). */

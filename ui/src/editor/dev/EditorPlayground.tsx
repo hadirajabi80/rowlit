@@ -13,6 +13,7 @@ import mysqlShop from '../../intel/__tests__/fixtures/shop-mysql.json';
 import clickhouseShop from '../../intel/__tests__/fixtures/shop-clickhouse.json';
 import snowflakeShop from '../../intel/__tests__/fixtures/shop-snowflake.json';
 import cqlShop from '../../intel/__tests__/fixtures/shop-cql.json';
+import duckdbShop from '../../intel/__tests__/fixtures/shop-duckdb.json';
 
 const CATALOGS: Record<Dialect, CatalogSnapshot> = {
   tsql: tsqlShop as unknown as CatalogSnapshot,
@@ -24,6 +25,7 @@ const CATALOGS: Record<Dialect, CatalogSnapshot> = {
   clickhouse: clickhouseShop as unknown as CatalogSnapshot,
   snowflake: snowflakeShop as unknown as CatalogSnapshot,
   cql: cqlShop as unknown as CatalogSnapshot,
+  duckdb: duckdbShop as unknown as CatalogSnapshot, // LINKS-WP0
 };
 
 const SAMPLES: Record<Dialect, string> = {
@@ -184,6 +186,16 @@ SELECT product_id, line_total(qty, unit_price) AS line FROM order_lines WHERE or
 DESCRIBE TABLE shop.orders_by_customer;
 `,
   // WP-CS end
+  // LINKS-WPD begin
+  duckdb: `-- Linked database playground (DuckDB; schemas = member aliases)
+SELECT c.name, sum(o.total) AS total
+FROM shop.customers c
+JOIN shop.orders o ON o.customer_id = c.id
+GROUP BY ALL
+ORDER BY total DESC
+LIMIT 10;
+`,
+  // LINKS-WPD end
 };
 
 const SETTINGS: Settings['editor'] = {
@@ -231,6 +243,7 @@ export function EditorPlayground() {
             options={[
               { value: 'tsql', label: 'SQL Server (T-SQL)' }, { value: 'plsql', label: 'Oracle (PL/SQL)' }, { value: 'sqlite', label: 'SQLite' }, { value: 'pgsql', label: 'PostgreSQL' },
               { value: 'mysql', label: 'MySQL / MariaDB' }, { value: 'clickhouse', label: 'ClickHouse' }, { value: 'snowflake', label: 'Snowflake' }, { value: 'cql', label: 'CQL (Cassandra)' },
+              { value: 'duckdb', label: 'DuckDB (linked)' },
             ]}
             onChange={(d) => { setDialect(d); setTexts({ a: SAMPLES[d], b: 'SELECT * FROM ' }); }}
           />

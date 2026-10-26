@@ -5,7 +5,9 @@ import { clickhousePack } from './clickhouse';
 import { snowflakePack } from './snowflake';
 import { cassandraPack } from './cassandra';
 import { elasticsearchPack } from './elasticsearch';
+// LINKS-WP0: linked databases (WP-C owns ./linked.ts)
+import { linkedPack } from './linked';
 
-export const MOCK_PACKS: readonly MockProviderPack[] = [mysqlPack, clickhousePack, snowflakePack, cassandraPack, elasticsearchPack];
+export const MOCK_PACKS: readonly MockProviderPack[] = [mysqlPack, clickhousePack, snowflakePack, cassandraPack, elasticsearchPack, linkedPack];
 
 export type { MockProviderPack } from './types';

@@ -4,7 +4,7 @@ import type { IntelOptions } from '../intel';
 import type { SqlEditorProps } from './SqlEditor.types';
 
 /** Dialects whose scripts end statements at ';' only (no blank-line culture, PLAN 4.4); Batch 3 adds its four. */
-const SEMICOLON_ONLY: ReadonlySet<string> = new Set(['sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake', 'cql']);
+const SEMICOLON_ONLY: ReadonlySet<string> = new Set(['sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake', 'cql', 'duckdb']);
 
 export function intelOptionsFromSettings(s: Settings['editor'] | undefined, dialect: SqlEditorProps['dialect']): Partial<IntelOptions> {
   if (!s) return {};

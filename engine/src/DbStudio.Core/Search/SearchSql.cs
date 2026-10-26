@@ -69,6 +69,9 @@ public static class SearchSql
         // WP-CS begin (CQL: data search is names/columns only, see TextExpression)
         Dialect.Cql => ":" + name,
         // WP-CS end
+        // LINKS-WPA begin (DuckDB named parameter)
+        Dialect.DuckDb => "$" + name,
+        // LINKS-WPA end
         _ => "@" + name,
     };
 
@@ -96,6 +99,9 @@ public static class SearchSql
             // WP-CS begin
             Dialect.Cql => $"{expr} LIKE {param}",
             // WP-CS end
+            // LINKS-WPA begin
+            Dialect.DuckDb => $"{expr} {(matchCase ? "LIKE" : "ILIKE")} {param}{esc}",
+            // LINKS-WPA end
             _ => matchCase ? $"{expr} LIKE {param}{esc}" : $"UPPER({expr}) LIKE UPPER({param}){esc}",
         };
     }
@@ -122,6 +128,9 @@ public static class SearchSql
         // WP-CS begin
         Dialect.Cql => null,
         // WP-CS end
+        // LINKS-WPA begin (RE2; 'i' option = case-insensitive)
+        Dialect.DuckDb => matchCase ? $"regexp_matches({expr}, {param})" : $"regexp_matches({expr}, {param}, 'i')",
+        // LINKS-WPA end
         _ => null,
     };
 
@@ -249,6 +258,15 @@ public static class SearchSql
                     _ => null,
                 };
             // WP-SF end
+            // LINKS-WPA begin (DuckDB type names, as the link catalog reports them)
+            case Dialect.DuckDb:
+                return t switch
+                {
+                    "varchar" or "text" or "string" or "char" or "bpchar" => quotedColumn,
+                    "uuid" or "json" => $"CAST({quotedColumn} AS VARCHAR)",
+                    _ => null,
+                };
+            // LINKS-WPA end
             // WP-CS begin (CQL cannot filter a non-key column without an index: find in database covers names/columns only)
             case Dialect.Cql:
                 return null;

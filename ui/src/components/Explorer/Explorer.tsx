@@ -7,12 +7,14 @@ import type { CatalogObjectType, ConnectionProfile } from '../../api/types';
 import { activateObject, connectAndOpen, newConsole, openObjectDefault } from '../../app/actions';
 import { displayShortcut } from '../../commands/keys';
 import { hasCommand, runCommand } from '../../commands/registry';
+import { hasContextMenu, LINK_MENU_IDS } from '../../commands/menuModel';
 import type { CommandTarget } from '../../commands/types';
 import { useCommandContext } from '../../commands/useCommands';
 import { qualifiedName } from '../../lib/sql';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { getSourceModule, useSourceModules } from '../../lib/sources';
-import { dialectOf, kindOf, providerKind, useConnections } from '../../store/connections';
+import { dialectOf, getConnection, kindOf, providerKind, useConnections } from '../../store/connections';
+import { ROWLIT_OBJECT_MIME, type RowlitObjectDrag } from '../../lib/dragObject';
 import { useSavedQueries } from '../../store/savedQueries';
 import { useSettings } from '../../store/settings';
 import { useSystemTypes } from '../../store/systemTypes';
@@ -129,7 +131,20 @@ export function targetOfRow(r: TreeRow): CommandTarget | null {
 
 const ROUTINES = new Set<CatalogObjectType>(['proc', 'func', 'tablefunc', 'package', 'trigger']);
 
+/**
+ * LINKS-WP0: rows of a linked database use the links package's menus (`explorer.link` on the connection row,
+ * `explorer.linkTable` on its tables and views), once components/Links registered them; until then the shell's.
+ */
+function linkMenuOf(r: TreeRow): string | null {
+  if (!r.connectionId || getConnection(r.connectionId)?.providerId !== 'linked') return null;
+  const id = r.kind === 'connection' ? LINK_MENU_IDS.link
+    : (r.kind === 'object' || r.kind === 'column') && (r.objectType === 'table' || r.objectType === 'view') ? LINK_MENU_IDS.linkTable : null;
+  return id && hasContextMenu(id) ? id : null;
+}
+
 export function contextMenuIdOf(r: TreeRow): string | null {
+  const linked = linkMenuOf(r);
+  if (linked) return linked;
   if (r.kind === 'cfolder') return 'explorer.folder';
   if (r.kind === 'connection') return r.connectionId && kindOf(r.connectionId) !== 'relational' ? 'explorer.sourceConnection' : 'explorer.connection';
   if (r.kind === 'source') return r.source ? getSourceModule(r.source.providerId)?.contextMenuId(r) ?? null : null;
@@ -596,6 +611,14 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
         }
         e.dataTransfer.setData('text/plain', text);
         e.dataTransfer.setData('application/x-dbstudio-object', JSON.stringify({ connectionId: r.connectionId, name: text }));
+        // LINKS-WP0: the structured object (query builder canvas, link editor, "Add to link" drops)
+        if (ref) {
+          const drag: RowlitObjectDrag = {
+            connectionId: r.connectionId, providerId: getConnection(r.connectionId)?.providerId ?? null, database: ref.database ?? null,
+            schema: ref.schema ?? null, name: ref.name, type: ref.type, column: r.kind === 'column' ? r.column?.name ?? null : null,
+          };
+          e.dataTransfer.setData(ROWLIT_OBJECT_MIME, JSON.stringify(drag));
+        }
         e.dataTransfer.effectAllowed = 'copy';
       }}
       onMouseDown={() => onSelect()}

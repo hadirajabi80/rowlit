@@ -144,6 +144,7 @@ public static class StatementClassifier
             Dialect.ClickHouse => ClassifyClickHouse(t, i, u, hasWhere, start),
             Dialect.Snowflake => ClassifySnowflake(t, i, u, hasWhere, start),
             Dialect.Cql => ClassifyCql(t, i, u, hasWhere, start),
+            Dialect.DuckDb => ClassifyDuckDb(t, i, u, hasWhere, start), // LINKS-WP0
             _ => null,
         };
         if (special is not null) return special;
@@ -540,6 +541,28 @@ public static class StatementClassifier
     private static string Unquote(SqlToken t) =>
         t.Kind == SqlTokenKind.QuotedIdentifier && t.Value.Length >= 2 ? t.Value[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : t.Value;
     // WP-CS end
+
+    // LINKS-WPA begin (DuckDB, the dialect of a linked database: FROM-first queries, DESCRIBE/SUMMARIZE/SHOW, PIVOT;
+    // ATTACH/INSTALL/LOAD/COPY/EXPORT reach outside the session and are never queries, so the read-only guard stops them)
+    private static StatementClassification? ClassifyDuckDb(List<SqlToken> t, int i, string u, bool hasWhere, int start)
+    {
+        switch (u)
+        {
+            case "FROM" or "SUMMARIZE" or "SHOW" or "PIVOT" or "UNPIVOT" or "TABLE":
+                return new(StatementCategory.Query, u, hasWhere, null, start);
+            case "DESCRIBE" or "DESC":
+                return new(StatementCategory.Query, "DESCRIBE", false, null, start);
+            case "PRAGMA":
+                return ClassifyPragma(t, i);
+            case "SET" or "RESET":
+                return new(StatementCategory.Session, u, false, null, start);
+            case "ATTACH" or "DETACH" or "INSTALL" or "LOAD" or "COPY" or "EXPORT" or "IMPORT" or "CHECKPOINT" or "FORCE":
+                return new(StatementCategory.Other, u, false, null, start);
+            default:
+                return null;
+        }
+    }
+    // LINKS-WPA end
 
     private static StatementClassification ClassifyPragma(List<SqlToken> t, int i)
     {

@@ -16,7 +16,7 @@ import './pendingchanges.css';
 
 const DIALECT_NAME = {
   tsql: 'SQL Server', plsql: 'Oracle', sqlite: 'SQLite', pgsql: 'PostgreSQL',
-  mysql: 'MySQL', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cql: 'Cassandra',
+  mysql: 'MySQL', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cql: 'Cassandra', duckdb: 'DuckDB',
 } as const;
 
 export { verifyDefault } from './save';

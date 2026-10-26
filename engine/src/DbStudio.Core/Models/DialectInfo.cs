@@ -26,11 +26,14 @@ public static class DialectInfo
         Dialect.ClickHouse => "default",
         Dialect.Snowflake => "PUBLIC",
         Dialect.Cql => "",
+        // LINKS-WP0: a link's schemas are its member aliases; "main" is DuckDB's own default schema (the link catalog
+        // reader answers with the first alias instead, so this is only a last resort).
+        Dialect.DuckDb => "main",
         _ => "",
     };
 
-    /// <summary><c>/* /* */ */</c> nests (SQL Server, PostgreSQL).</summary>
-    public static bool NestedBlockComments(Dialect d) => d is Dialect.TSql or Dialect.PgSql;
+    /// <summary><c>/* /* */ */</c> nests (SQL Server, PostgreSQL, DuckDB: its parser is PostgreSQL's).</summary>
+    public static bool NestedBlockComments(Dialect d) => d is Dialect.TSql or Dialect.PgSql or Dialect.DuckDb;
 
     /// <summary><c>`name`</c> is a quoted identifier (SQLite accepts it as an alternative; MySQL and ClickHouse use it).</summary>
     public static bool BacktickIdentifiers(Dialect d) => d is Dialect.Sqlite or Dialect.MySql or Dialect.ClickHouse;
@@ -41,8 +44,8 @@ public static class DialectInfo
     /// <summary>A backslash escapes the next character inside <c>'…'</c> (doubled <c>''</c> still works).</summary>
     public static bool BackslashStringEscapes(Dialect d) => d is Dialect.MySql or Dialect.ClickHouse or Dialect.Snowflake;
 
-    /// <summary><c>$$…$$</c> / <c>$tag$…$tag$</c> string bodies (PostgreSQL, Snowflake, CQL function bodies).</summary>
-    public static bool DollarQuotedStrings(Dialect d) => d is Dialect.PgSql or Dialect.Snowflake or Dialect.Cql;
+    /// <summary><c>$$…$$</c> / <c>$tag$…$tag$</c> string bodies (PostgreSQL, Snowflake, CQL function bodies, DuckDB).</summary>
+    public static bool DollarQuotedStrings(Dialect d) => d is Dialect.PgSql or Dialect.Snowflake or Dialect.Cql or Dialect.DuckDb;
 
     /// <summary><c>// …</c> is a line comment (CQL).</summary>
     public static bool SlashLineComments(Dialect d) => d is Dialect.Cql;

@@ -73,6 +73,7 @@ const FALLBACK_DIALECT: Record<string, Dialect> = {
   sqlserver: 'tsql', oracle: 'plsql', sqlite: 'sqlite', postgresql: 'pgsql',
   // Batch 3
   mysql: 'mysql', mariadb: 'mysql', clickhouse: 'clickhouse', snowflake: 'snowflake', cassandra: 'cql',
+  linked: 'duckdb', // plan-links
 };
 
 /** M2: provider kinds when the engine's provider list is not loaded yet (or an older engine omits `kind`). */
@@ -82,6 +83,7 @@ const FALLBACK_KIND: Record<string, SourceKind> = {
   // Batch 3
   mysql: 'relational', mariadb: 'relational', clickhouse: 'relational', snowflake: 'relational', cassandra: 'relational',
   elasticsearch: 'search',
+  linked: 'relational', // plan-links
 };
 
 /** M2 (docs/PLAN-M2.md D1): kind of a provider id; unknown ids count as relational (M1 behaviour). */

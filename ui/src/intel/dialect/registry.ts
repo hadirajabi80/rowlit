@@ -18,6 +18,8 @@ const LOADERS: Partial<Record<Dialect, Loader>> = {
   clickhouse: () => import('./clickhouse').then((m) => m.define(KIT)),
   snowflake: () => import('./snowflake').then((m) => m.define(KIT)),
   cql: () => import('./cql').then((m) => m.define(KIT)),
+  // plan-links (WP-D owns ./duckdb.ts): the dialect of linked databases
+  duckdb: () => import('./duckdb').then((m) => m.define(KIT)),
 };
 
 const loaded = new Map<Dialect, DialectSpec>();

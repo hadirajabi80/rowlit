@@ -61,6 +61,7 @@ const LOADERS: Record<Dialect, Loader> = {
   clickhouse: () => import('./data/clickhouse').then((m) => m.SNIPPETS),
   snowflake: () => import('./data/snowflake').then((m) => m.SNIPPETS),
   cql: () => import('./data/cql').then((m) => m.SNIPPETS),
+  duckdb: () => import('./data/duckdb').then((m) => m.SNIPPETS), // LINKS-WP0 (WP-D fills data/duckdb.ts)
 };
 
 export const SNIPPET_DIALECTS = Object.keys(LOADERS) as Dialect[];

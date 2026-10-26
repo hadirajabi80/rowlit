@@ -25,10 +25,13 @@ export const LANGUAGE_IDS: Record<Dialect, string> = {
   clickhouse: 'dbstudio-clickhouse',
   snowflake: 'dbstudio-snowflake',
   cql: 'dbstudio-cql',
+  // LINKS-WP0: linked databases (lazy spec, intel/dialect/duckdb.ts)
+  duckdb: 'dbstudio-duckdb',
 };
 
 const LANGUAGE_ALIASES: Record<Dialect, string> = {
   tsql: 'T-SQL', plsql: 'PL/SQL', sqlite: 'SQLite', pgsql: 'PostgreSQL', mysql: 'MySQL', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cql: 'CQL',
+  duckdb: 'DuckDB',
 };
 
 /** Batch 3: dialects quoting identifiers with backticks (auto-closed like brackets) and with `#` line comments. */

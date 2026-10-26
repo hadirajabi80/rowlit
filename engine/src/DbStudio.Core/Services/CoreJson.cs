@@ -6,7 +6,7 @@ namespace DbStudio.Core.Services;
 
 /// <summary>
 /// JSON conventions shared by the REST API, the WebSocket and the engine's own files: camelCase properties,
-/// enums as camelCase strings, <see cref="Dialect"/> as "tsql" | "plsql" | "sqlite" | "pgsql" | "mysql" | "clickhouse" | "snowflake" | "cql",
+/// enums as camelCase strings, <see cref="Dialect"/> as "tsql" | "plsql" | "sqlite" | "pgsql" | "mysql" | "clickhouse" | "snowflake" | "cql" | "duckdb",
 /// <see cref="SourceKind"/> as "relational" | "keyvalue" | "document" | "stream" | "search".
 /// </summary>
 public static class CoreJson
@@ -38,6 +38,7 @@ public static class CoreJson
         Dialect.ClickHouse => "clickhouse",
         Dialect.Snowflake => "snowflake",
         Dialect.Cql => "cql",
+        Dialect.DuckDb => "duckdb", // LINKS-WP0: linked databases
         _ => d.ToString().ToLowerInvariant(),
     };
 
@@ -51,6 +52,7 @@ public static class CoreJson
         "clickhouse" => Dialect.ClickHouse,
         "snowflake" => Dialect.Snowflake,
         "cql" => Dialect.Cql,
+        "duckdb" => Dialect.DuckDb, // LINKS-WP0
         _ => null,
     };
 
@@ -81,7 +83,7 @@ public sealed class DialectJsonConverter : JsonConverter<Dialect>
     public override Dialect Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         var s = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
-        return CoreJson.ParseDialect(s) ?? throw new JsonException($"Unknown dialect '{s}'. Expected tsql, plsql, sqlite, pgsql, mysql, clickhouse, snowflake or cql.");
+        return CoreJson.ParseDialect(s) ?? throw new JsonException($"Unknown dialect '{s}'. Expected tsql, plsql, sqlite, pgsql, mysql, clickhouse, snowflake, cql or duckdb.");
     }
 
     public override void Write(Utf8JsonWriter writer, Dialect value, JsonSerializerOptions options) => writer.WriteStringValue(CoreJson.ToWire(value));

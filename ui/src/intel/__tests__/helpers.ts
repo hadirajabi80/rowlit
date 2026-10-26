@@ -10,6 +10,8 @@ import mysqlShop from './fixtures/shop-mysql.json';
 import clickhouseShop from './fixtures/shop-clickhouse.json';
 import snowflakeShop from './fixtures/shop-snowflake.json';
 import cqlShop from './fixtures/shop-cql.json';
+// LINKS-WP0: a link-shaped copy of the SQLite shop (schemas = aliases "shop" and "archive"); WP-D owns the file
+import duckdbShop from './fixtures/shop-duckdb.json';
 
 export const fixtures: Record<Dialect, CatalogSnapshot> = {
   tsql: tsqlShop as unknown as CatalogSnapshot,
@@ -20,6 +22,7 @@ export const fixtures: Record<Dialect, CatalogSnapshot> = {
   clickhouse: clickhouseShop as unknown as CatalogSnapshot,
   snowflake: snowflakeShop as unknown as CatalogSnapshot,
   cql: cqlShop as unknown as CatalogSnapshot,
+  duckdb: duckdbShop as unknown as CatalogSnapshot,
 };
 
 const cache = new Map<string, Intel>();

@@ -110,7 +110,7 @@ export function objectLabel(obj: CgObject): string {
 
 export const DIALECT_LABEL: Record<Dialect, string> = {
   tsql: 'SQL Server', plsql: 'Oracle', sqlite: 'SQLite', pgsql: 'PostgreSQL',
-  mysql: 'MySQL', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cql: 'Cassandra',
+  mysql: 'MySQL', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cql: 'Cassandra', duckdb: 'DuckDB',
 };
 
 /** Primary key members in key order. */

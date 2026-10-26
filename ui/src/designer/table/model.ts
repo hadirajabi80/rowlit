@@ -19,6 +19,7 @@ export const DEFAULT_COLUMN_TYPE: Record<Dialect, string> = {
   // WP-CS begin
   cql: 'text',
   // WP-CS end
+  duckdb: 'VARCHAR', // LINKS-WP0 (links are read-only; the designer never runs on them)
 };
 export const DEFAULT_KEY_TYPE: Record<Dialect, string> = {
   tsql: 'int', plsql: 'NUMBER(10)', sqlite: 'INTEGER', pgsql: 'bigint',
@@ -34,6 +35,7 @@ export const DEFAULT_KEY_TYPE: Record<Dialect, string> = {
   // WP-CS begin
   cql: 'int',
   // WP-CS end
+  duckdb: 'BIGINT', // LINKS-WP0
 };
 
 /**

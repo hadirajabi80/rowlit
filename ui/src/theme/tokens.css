@@ -94,6 +94,8 @@
   --provider-snowflake: #1f8ac7;
   --provider-elasticsearch: #008c6f;
   --provider-cassandra: #1287b1;
+  /* plan-links: linked databases */
+  --provider-linked: #6b4fbb;
   --provider-fg: #ffffff;
   /* parts of the provider logos (theme/brand) that are black or very dark in the artwork */
   --logo-ink: #231f20;
@@ -266,6 +268,7 @@
   --provider-snowflake: #63bdf0;
   --provider-elasticsearch: #3fcfac;
   --provider-cassandra: #67c1e6;
+  --provider-linked: #b7a3ea;
   --provider-fg: #0b1220;
   --logo-ink: #e6e8eb;
   --logo-sqlite-feather: #d4ecfb;

@@ -11,19 +11,68 @@
 //      answers ENGINE_ERROR with detail "librdkafka-missing" instead.
 //   4. POST /api/v1/connections/test  -> provider snowflake with a bogus account: must FAIL with a provider error, never
 //      ENGINE_ERROR (the driver and its natives load on every platform).
+//   5. GET  /api/v1/links/engine      -> plan-links: libduckdb (DuckDB.NET.Data.Full) loads and json_serialize_sql works
+//      ({ engine: "duckdb", serializeSql: true }); "sqlite" means the native library did not load (error says why).
 // macOS extras (D8: librdkafka.dylib next to the apphost, signed with the app; likewise libMono.Unix.dylib and
-// libsf_mini_core.dylib of Snowflake.Data):
-//   - the three dylibs exist next to the engine, `file` shows the expected architecture, `otool -L` lists only system
+// libsf_mini_core.dylib of Snowflake.Data, and libduckdb.dylib of DuckDB.NET, a universal x86_64+arm64 binary):
+//   - the dylibs exist next to the engine, `file` shows the expected architecture, `otool -L` lists only system
 //     libraries (/usr/lib, /System), for osx-arm64 and (when published) the sibling osx-x64 engine;
 //   - osx-x64 runs through the same REST checks when Rosetta is available (`arch -x86_64`), else static checks only;
 //   - `codesign --verify --strict` on every one of them inside desktop/dist/**/Rowlit.app (when packaged).
 //
 // Usage: node scripts/ci/kafka-native-smoke.mjs <path to Rowlit.Engine[.exe]> [--no-mac-extras]
+//        node scripts/ci/kafka-native-smoke.mjs --mac-static <osx publish dir> [arm64|x64]
+//          (any OS: the dylibs exist next to the apphost and their Mach-O headers contain the architecture; for a
+//          macOS engine cross-published on Windows/Linux with scripts/build.ps1 -EngineOnly -Runtime osx-arm64)
 // Exit codes: 0 ok, 1 check failed, 2 usage / engine did not start.
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+
+/** Native libraries that must sit next to the macOS apphost: librdkafka (Kafka), Mono.Unix and sf_mini_core (Snowflake.Data), duckdb (linked databases). */
+const MAC_DYLIBS = ['librdkafka.dylib', 'libMono.Unix.dylib', 'libsf_mini_core.dylib', 'libduckdb.dylib'];
+
+/** Architectures in a Mach-O file's header (thin or universal "fat"), e.g. ['x86_64', 'arm64']. */
+function machOArchs(file) {
+  const b = Buffer.alloc(4096);
+  const fd = openSync(file, 'r');
+  try { readSync(fd, b, 0, b.length, 0); } finally { closeSync(fd); }
+  const CPU = { 0x01000007: 'x86_64', 0x0100000c: 'arm64' };
+  const be = b.readUInt32BE(0);
+  if (be === 0xcafebabe || be === 0xcafebabf) {
+    const n = b.readUInt32BE(4);
+    const step = be === 0xcafebabe ? 20 : 32;
+    return Array.from({ length: n }, (_, i) => CPU[b.readUInt32BE(8 + i * step)] ?? `cpu ${b.readUInt32BE(8 + i * step).toString(16)}`);
+  }
+  if (b.readUInt32LE(0) === 0xfeedfacf) return [CPU[b.readUInt32LE(4)] ?? `cpu ${b.readUInt32LE(4).toString(16)}`];
+  return [];
+}
+
+// --mac-static <dir> [arm64|x64]: header checks of a (cross-)published macOS engine, runnable on any OS.
+if (process.argv[2] === '--mac-static') {
+  const dir = process.argv[3];
+  const arch = process.argv[4] === 'x64' ? 'x86_64' : 'arm64';
+  if (!dir || !existsSync(join(dir, 'Rowlit.Engine')) && !existsSync(join(dir, 'DbStudio.Engine'))) {
+    console.error(`Usage: node scripts/ci/kafka-native-smoke.mjs --mac-static <osx publish dir> [arm64|x64] (no apphost in ${dir ?? 'nothing'})`);
+    process.exit(2);
+  }
+  const problems = [];
+  const lines = [];
+  for (const name of MAC_DYLIBS) {
+    const p = join(dir, name);
+    if (!existsSync(p)) { problems.push(`${name} is missing next to the apphost`); continue; }
+    const archs = machOArchs(p);
+    if (!archs.includes(arch)) problems.push(`${name} has no ${arch} slice (${archs.join(', ') || 'not a Mach-O file'})`);
+    lines.push(`${name}: ${archs.join('+')}, ${(statSync(p).size / 1024 / 1024).toFixed(1)} MB`);
+  }
+  if (problems.length) {
+    console.error(`Engine native smoke (mac static) failed:\n  ${problems.join('\n  ')}`);
+    process.exit(1);
+  }
+  console.log(`Engine native smoke (mac static, ${arch}) ok:\n  ${lines.join('\n  ')}`);
+  process.exit(0);
+}
 
 const exe = process.argv[2];
 const macExtras = !process.argv.includes('--no-mac-extras');
@@ -39,9 +88,6 @@ const EXPECTED = [
   ['mysql', 'relational'], ['mariadb', 'relational'], ['clickhouse', 'relational'], ['snowflake', 'relational'],
   ['cassandra', 'relational'], ['elasticsearch', 'search'],
 ];
-
-/** Native libraries that must sit next to the macOS apphost: librdkafka (Kafka), Mono.Unix and sf_mini_core (Snowflake.Data). */
-const MAC_DYLIBS = ['librdkafka.dylib', 'libMono.Unix.dylib', 'libsf_mini_core.dylib'];
 
 class CheckFailed extends Error {}
 const fail = (message) => { throw new CheckFailed(message); };
@@ -108,8 +154,14 @@ async function smoke(engine, { launcher = null } = {}) {
       fail(`POST /connections/test (snowflake, invalid account): expected a failed test result, got ${sf.status} ${JSON.stringify(sf.json)}`);
     }
     if (sfErr.code === 'ENGINE_ERROR') fail(`POST /connections/test (snowflake): the driver did not load: ${sfErr.code} ${sfErr.message} (${sfErr.detail})`);
+    // plan-links: the federation engine (libduckdb) loads and parses (json_serialize_sql is statically linked).
+    const duck = await api(info, 'GET', '/links/engine');
+    if (duck.status !== 200 || duck.json?.engine !== 'duckdb' || duck.json?.serializeSql !== true) {
+      fail(`GET /links/engine: DuckDB is not usable (${duck.status} ${JSON.stringify(duck.json)})`);
+    }
     return `${basename(dirname(resolve(engine)))}: ready in ${readyMs} ms, librdkafka ${lib.json.version}`
-      + `${lib.json.loadedFrom ? ` (loaded from ${lib.json.loadedFrom})` : ''}; kafka test -> ${err.message}; snowflake test -> ${sfErr.code}`;
+      + `${lib.json.loadedFrom ? ` (loaded from ${lib.json.loadedFrom})` : ''}; kafka test -> ${err.message}; snowflake test -> ${sfErr.code}`
+      + `; duckdb ${duck.json.version}`;
   } catch (e) {
     if (output) console.error(`---- engine output (${engine}) ----\n${output.slice(-4000)}`);
     throw e;
@@ -156,7 +208,7 @@ function checkDylibs(engineDir, arch) {
     const ownId = run('otool', ['-D', dylib]).split('\n').slice(1).map((l) => l.trim()).find(Boolean);
     const deps = run('otool', ['-L', dylib]).split('\n').slice(1).map((l) => l.trim().split(' ')[0]).filter(Boolean)
       .filter((d) => d !== ownId);
-    const foreign = deps.filter((d) => !/^(\/usr\/lib\/|\/System\/|@rpath\/(librdkafka|libMono\.Unix|libsf_mini_core)|@loader_path\/(librdkafka|libMono\.Unix|libsf_mini_core)|librdkafka)/.test(d));
+    const foreign = deps.filter((d) => !/^(\/usr\/lib\/|\/System\/|@rpath\/(librdkafka|libMono\.Unix|libsf_mini_core|libduckdb)|@loader_path\/(librdkafka|libMono\.Unix|libsf_mini_core|libduckdb)|librdkafka)/.test(d));
     if (foreign.length > 0) fail(`${dylib} links non-system libraries: ${foreign.join(', ')}`);
     const mb = (statSync(dylib).size / 1024 / 1024).toFixed(1);
     summary.push(`${name} ${deps.length} system deps, ${mb} MB`);
