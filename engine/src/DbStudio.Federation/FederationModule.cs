@@ -30,8 +30,11 @@ public sealed class FederationModule : IEngineModule
         // LINKS-WPA end
 
         // LINKS-WPB begin (engine services: views, materialize, native scripts, compile/parse, P3 fetchers)
-        //   services.AddSingleton<LinkedViewStore>(); services.AddSingleton<MaterializeService>(); …
-        //   services.AddKeyedSingleton<ISourceFetcher, MongoFetcher>("mongodb"); …("elasticsearch"); …(FetcherKeys.Files);
+        services.TryAddSingleton<Views.LinkedViewStore>();
+        services.TryAddSingleton<Materialize.MaterializeService>();
+        services.AddKeyedSingleton<ISourceFetcher, Fetchers.MongoFetcher>("mongodb");
+        services.AddKeyedSingleton<ISourceFetcher, Fetchers.ElasticFetcher>("elasticsearch");
+        services.AddKeyedSingleton<ISourceFetcher, Fetchers.FileFetcher>(FetcherKeys.Files);
         // LINKS-WPB end
     }
 
@@ -44,7 +47,7 @@ public sealed class FederationModule : IEngineModule
 
         // LINKS-WPB begin (Endpoints/LinkEndpoints.cs: validate, catalog, compile, parse, plan, views, materialize,
         // native-script, refresh-sources; route table in Contracts/LinkApi.cs)
-        //   LinkEndpoints.Map(links);
+        Endpoints.LinkEndpoints.Map(links);
         // LINKS-WPB end
     }
 }

@@ -1,0 +1,137 @@
+{
+  "name": "one table, SELECT *, LIMIT without ORDER BY",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      }
+    ],
+    "limit": 25
+  },
+  "sql": "SELECT *\nFROM crm.customers AS customers\nLIMIT 25",
+  "params": [],
+  "warnings": [
+    "limitWithoutOrder"
+  ]
+}

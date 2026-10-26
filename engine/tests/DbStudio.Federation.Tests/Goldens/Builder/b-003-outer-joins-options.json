@@ -1,0 +1,230 @@
+{
+  "name": "LEFT join with trim/ignore case and two conditions, RIGHT and FULL joins",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "t2",
+        "alias": "shop",
+        "table": "orders",
+        "as": "orders",
+        "x": 360,
+        "y": 40
+      },
+      {
+        "id": "t3",
+        "alias": "shop",
+        "table": "Order Lines",
+        "as": "lines",
+        "x": 680,
+        "y": 40
+      },
+      {
+        "id": "t4",
+        "alias": "inv",
+        "table": "products",
+        "as": "p",
+        "x": 1000,
+        "y": 40
+      }
+    ],
+    "joins": [
+      {
+        "id": "j1",
+        "type": "left",
+        "left": "t1",
+        "right": "t2",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "customer_id",
+            "op": "="
+          },
+          {
+            "leftColumn": "email",
+            "rightColumn": "ref",
+            "op": "=",
+            "ignoreCase": true,
+            "trim": true
+          }
+        ]
+      },
+      {
+        "id": "j2",
+        "type": "right",
+        "left": "t2",
+        "right": "t3",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "order_id"
+          }
+        ]
+      },
+      {
+        "id": "j3",
+        "type": "full",
+        "left": "t1",
+        "right": "t4",
+        "on": [
+          {
+            "leftColumn": "name",
+            "rightColumn": "sku",
+            "op": "<>",
+            "ignoreCase": true
+          },
+          {
+            "leftColumn": "country",
+            "rightColumn": "sku",
+            "op": ">=",
+            "trim": true
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "tableId": "t1",
+        "column": "name"
+      },
+      {
+        "id": "c2",
+        "tableId": "t3",
+        "column": "qty"
+      },
+      {
+        "id": "c3",
+        "tableId": "t4",
+        "column": "sku",
+        "alias": "product"
+      }
+    ]
+  },
+  "sql": "SELECT customers.name, lines.qty, p.sku AS product\nFROM crm.customers AS customers\nLEFT JOIN shop.orders AS orders ON customers.id = orders.customer_id AND lower(trim(customers.email)) = lower(trim(orders.ref))\nRIGHT JOIN shop.\"Order Lines\" AS lines ON orders.id = lines.order_id\nFULL JOIN inv.products AS p ON lower(customers.name) <> lower(p.sku) AND trim(customers.country) >= trim(p.sku)",
+  "params": [],
+  "warnings": []
+}
