@@ -55,6 +55,16 @@ public sealed class PgPrepareDiagnostics : ISqlDiagnostics
         };
     }
 
+    /// <summary>The (pooled) connection the diagnostics use; Close connection clears its pool (ClearPooledConnections).</summary>
+    internal static NpgsqlConnectionStringBuilder PoolBuilder(ConnectionProfile profile, string? password)
+    {
+        var b = PgConnectionStrings.Builder(profile, password, pooling: true);
+        b.Options = ((b.Options ?? "") + " -c default_transaction_read_only=on -c statement_timeout=3000").Trim();
+        b.ApplicationName = "Rowlit diagnostics";
+        b.Timeout = Math.Min(b.Timeout, 10);
+        return b;
+    }
+
     public async Task<IReadOnlyList<SqlDiagnostic>> AnalyzeAsync(string sql, ConnectionProfile? profile, string? password, CancellationToken ct)
     {
         if (profile is null || string.IsNullOrWhiteSpace(sql)) return [];
@@ -62,10 +72,7 @@ public sealed class PgPrepareDiagnostics : ISqlDiagnostics
         if (candidates.Count == 0) return [];
         PgDriver.EnsureInitialized();
 
-        var b = PgConnectionStrings.Builder(profile, password, pooling: true);
-        b.Options = ((b.Options ?? "") + " -c default_transaction_read_only=on -c statement_timeout=3000").Trim();
-        b.ApplicationName = "Rowlit diagnostics";
-        b.Timeout = Math.Min(b.Timeout, 10);
+        var b = PoolBuilder(profile, password);
 
         var diagnostics = new List<SqlDiagnostic>();
         await using var conn = new NpgsqlConnection(b.ConnectionString);

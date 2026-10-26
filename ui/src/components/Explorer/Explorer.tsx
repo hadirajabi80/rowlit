@@ -10,7 +10,7 @@ import { hasContextMenu, LINK_MENU_IDS } from '../../commands/menuModel';
 import type { CommandTarget } from '../../commands/types';
 import { useCommandContext } from '../../commands/useCommands';
 import { qualifiedName } from '../../lib/sql';
-import { dbKey, useCatalog } from '../../store/catalog';
+import { dbKey, isCatalogClosed, useCatalog } from '../../store/catalog';
 import { getSourceModule, useSourceModules } from '../../lib/sources';
 import { dialectOf, getConnection, kindOf, providerKind, useConnections } from '../../store/connections';
 import { ROWLIT_OBJECT_MIME, type RowlitObjectDrag } from '../../lib/dragObject';
@@ -44,6 +44,7 @@ function useLazyLoads(connections: ConnectionProfile[]) {
   const expanded = useExplorer((s) => s.expanded);
   const conns = useCatalog((s) => s.conns);
   const dbs = useCatalog((s) => s.dbs);
+  const closed = useCatalog((s) => s.closed);
   const modules = useSourceModules((s) => s.modules);
   useEffect(() => {
     const cat = useCatalog.getState();
@@ -58,6 +59,8 @@ function useLazyLoads(connections: ConnectionProfile[]) {
     };
     for (const c of connections) {
       if (!expanded.has(nodeId.conn(c.id))) continue;
+      // Close connection: nothing reloads until the user expands the node again (explorerStore.toggle reopens it).
+      if (isCatalogClosed(closed, c.id)) continue;
       if (isSourceConnection(c)) {
         // M2: Redis/MongoDB/Kafka never load the SQL catalog; their module loads what its expanded nodes need.
         modules[c.providerId]?.ensureLoaded?.(c, expanded);
@@ -74,17 +77,18 @@ function useLazyLoads(connections: ConnectionProfile[]) {
       if (!list) continue;
       if (list.length === 1 && (list[0] === null || c.providerId === 'sqlite')) ensureDb(c.id, list[0]);
       for (const db of list) {
-        if (db !== null && expanded.has(nodeId.db(c.id, db))) ensureDb(c.id, db);
+        if (db !== null && expanded.has(nodeId.db(c.id, db)) && !isCatalogClosed(closed, c.id, db)) ensureDb(c.id, db);
       }
     }
     for (const d of Object.values(dbs)) {
+      if (isCatalogClosed(closed, d.connectionId, d.database)) continue;
       for (const s of d.schemasResp?.schemas ?? []) {
         if (expanded.has(nodeId.schema(d.connectionId, d.database, s.name)) && !d.schemaStatus[s.name]) {
           void cat.loadSchema(d.connectionId, d.database, s.name);
         }
       }
     }
-  }, [expanded, conns, dbs, connections, modules]);
+  }, [expanded, conns, dbs, closed, connections, modules]);
 }
 
 function Highlight({ text, positions }: { text: string; positions?: number[] }) {

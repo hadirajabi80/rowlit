@@ -2,6 +2,7 @@
 // the current selection without importing React code.
 import { create } from 'zustand';
 import type { CommandTarget, ObjectTarget } from '../../commands/types';
+import { useCatalog } from '../../store/catalog';
 
 const EXPANDED_KEY = 'dbstudio.explorer.expanded.v1';
 const CHIPS_KEY = 'dbstudio.explorer.chips.v2';
@@ -58,6 +59,21 @@ function loadChips(): StoredChips {
 }
 
 const initialChips = loadChips();
+
+/**
+ * Expanding a connection or database node is the user asking for it: when it was closed (Close connection / Close
+ * database), its catalog may load again (store/catalog.ts `closed`).
+ */
+function reopenCatalogFor(ids: Iterable<string>): void {
+  const cat = useCatalog.getState();
+  for (const id of ids) {
+    if (id.startsWith('c:')) cat.reopen(id.slice(2));
+    else if (id.startsWith('d:')) {
+      const i = id.indexOf(':', 2);
+      if (i > 0) cat.reopen(id.slice(2, i), id.slice(i + 1) || null);
+    }
+  }
+}
 
 interface ExplorerState {
   expanded: Set<string>;
@@ -117,14 +133,17 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     toggle(id, open) {
       const next = new Set(get().expanded);
       const willOpen = open ?? !next.has(id);
-      if (willOpen) next.add(id);
-      else next.delete(id);
+      if (willOpen) {
+        next.add(id);
+        reopenCatalogFor([id]);
+      } else next.delete(id);
       set({ expanded: next });
       save(EXPANDED_KEY, [...next].slice(-500));
     },
     expandAll(ids) {
       const next = new Set(get().expanded);
       for (const id of ids) next.add(id);
+      reopenCatalogFor(ids);
       set({ expanded: next });
       save(EXPANDED_KEY, [...next].slice(-500));
     },

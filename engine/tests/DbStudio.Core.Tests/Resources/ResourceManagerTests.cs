@@ -457,6 +457,78 @@ public class CloseConnectionTests
     }
 
     [Fact]
+    public async Task Close_WithReleasedAndActiveSessions_ReleasesOnlyTheActiveOnes_AndIsRepeatable()
+    {
+        await using var env = new ResourceEnv();
+        var c = env.AddSqlite("mixed.sqlite");
+        var active = await env.SessionAsync(c); // a console that ran something
+        await env.RunAsync(active.Id, "CREATE TABLE t (a INTEGER)");
+        var data = await env.SessionAsync(c);   // a Data tab whose session was already released when it went idle
+        await env.Sessions.ReleaseAsync(data, "idle");
+        Assert.True(data.Released);
+
+        var r = await env.Resources.CloseAsync(c.Id, null, force: false, clientId: null);
+        Assert.Equal(1, r.Sessions); // the released one is not counted again
+        Assert.Equal("idle", data.ReleasedReason); // and keeps its own reason
+        Assert.Equal("closed", active.ReleasedReason);
+        Assert.False(env.Resources.Describe(c.Id).Connected);
+        Assert.Equal(2, env.Resources.Describe(c.Id).ReleasedSessions);
+
+        // closing again with every session released is a no-op, never a 409
+        var again = await env.Resources.CloseAsync(c.Id, null, force: false, clientId: null);
+        Assert.Equal(0, again.Sessions);
+        Assert.Empty(env.Resources.Describe(c.Id).Blockers);
+    }
+
+    [Fact]
+    public async Task ReleasedSessions_ReconnectOnDemand_WithoutRunningAnything()
+    {
+        await using var env = new ResourceEnv();
+        var c = env.AddSqlite("reconnect.sqlite");
+        var h = await env.SessionAsync(c);
+        await env.RunAsync(h.Id, "CREATE TABLE t (a INTEGER)");
+        await env.Resources.CloseAsync(c.Id, null, force: false, clientId: null);
+        Assert.True(h.Released);
+        Assert.False(env.Resources.Describe(c.Id).Connected);
+
+        // POST /sessions/{id}/reconnect: the Data tab's "Reconnect" button opens the connection again
+        await env.Sessions.ReopenIfReleasedAsync(h, CancellationToken.None);
+        Assert.False(h.Released);
+        Assert.Null(h.ToInfo().ReleasedReason);
+        Assert.True(env.Resources.Describe(c.Id).Connected);
+        // ... and does nothing when it already holds its connection
+        await env.Sessions.ReopenIfReleasedAsync(h, CancellationToken.None);
+        Assert.False(h.Released);
+        var done = await env.RunAsync(h.Id, "SELECT COUNT(*) FROM t");
+        Assert.Equal(ExecutionStatus.Ok, done.Status);
+    }
+
+    [Fact]
+    public async Task Close_WithABusySession_AnswersResourceBusy_ThenClosesOnceItIsFree()
+    {
+        await using var env = new ResourceEnv();
+        var c = env.AddSqlite("busy.sqlite");
+        var h = await env.SessionAsync(c);
+        // a session that is reserved by something else (an export, a describe) is reported as a blocker and, without
+        // force, nothing is closed
+        Assert.True(h.TryReserve("export"));
+        try
+        {
+            var blockers = env.Resources.Describe(c.Id).Blockers;
+            Assert.Contains(blockers, b => b.SessionId == h.Id);
+            var busy = await Assert.ThrowsAsync<EngineException>(() => env.Resources.CloseAsync(c.Id, null, force: false, clientId: null));
+            Assert.Equal(ErrorCodes.ResourceBusy, busy.Code);
+            Assert.False(h.Released);
+        }
+        finally
+        {
+            h.Release();
+        }
+        var r = await env.Resources.CloseAsync(c.Id, null, force: false, clientId: null);
+        Assert.Equal(1, r.Sessions);
+    }
+
+    [Fact]
     public async Task Close_IgnoresAnotherLiveWindowsSessions()
     {
         await using var env = new ResourceEnv();

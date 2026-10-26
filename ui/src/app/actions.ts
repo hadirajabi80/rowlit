@@ -16,6 +16,10 @@ import { dialectOf, getConnection, providerKind, schemaIsDatabase, useConnection
 import { ensureDialect } from '../intel/dialect/registry';
 import { useSourceClients } from '../store/sourceClients';
 import { useHistory } from '../store/history';
+import { useEdits } from '../store/edits';
+import { useResources } from '../store/resources';
+import { useExplorer } from '../components/Explorer/explorerStore';
+import { pendingGrids } from './pendingGrids';
 import { useResults, viewKey } from '../store/results';
 import { createExecution, isRunning, type ExecutionState, type ResultSetState } from '../store/resultsReducer';
 import { isForeignSession, useSessions } from '../store/sessions';
@@ -370,6 +374,7 @@ export async function preloadCatalog(connectionId: string, database: string | nu
   const c = getConnection(connectionId);
   if (c && providerKind(c.providerId) !== 'relational') return;
   const cat = useCatalog.getState();
+  cat.reopen(connectionId); // every caller is the user opening / switching / connecting: a closed connection opens again
   await cat.loadDatabases(connectionId);
   await cat.ensureDefault(connectionId, catalogDatabase(connectionId, database));
 }
@@ -798,6 +803,55 @@ function runningItems(connectionId?: string): string[] {
 }
 
 /**
+ * Close connection / Close database / Disconnect all with unsaved grid edits (Data tabs, console results): the user
+ * saves them, discards them or cancels. True = go on closing. Saving a Data tab reopens its connection for the save and
+ * the close then releases it again.
+ */
+async function resolvePendingEdits(title: string, where: string, connectionId?: string, database?: string | null): Promise<boolean> {
+  const grids = pendingGrids(connectionId, database);
+  if (!grids.length) return true;
+  const canSave = grids.every((g) => g.save);
+  const n = grids.length;
+  const message = n === 1
+    ? `“${grids[0].title}” has row changes that are not saved${where}.`
+    : `${n} grids have row changes that are not saved${where}.`;
+  const items = n > 1 ? grids.map((g) => g.title) : undefined;
+  let choice: 'ok' | 'alt' | 'cancel';
+  if (canSave) {
+    choice = await useUi.getState().askConfirmChoice({ title, message: `${message} Save them before closing, or discard them.`, items, confirmLabel: 'Save', altLabel: 'Discard', cancelLabel: 'Cancel' });
+  } else {
+    // A console result's edits cannot be saved from here (its grid does that): discard or cancel.
+    const ok = await useUi.getState().askConfirm({ title, message: `${message} Save them in their tab first, or discard them to close.`, items, confirmLabel: 'Discard changes', danger: true });
+    choice = ok ? 'alt' : 'cancel';
+  }
+  if (choice === 'cancel') return false;
+  if (choice === 'ok') {
+    for (const g of grids) {
+      let saved = false;
+      try {
+        saved = (await g.save?.()) ?? false;
+      } catch (e) {
+        console.warn('[close] saving pending edits failed', e);
+      }
+      if (!saved) {
+        toast('error', `Not closed: “${g.title}” could not be saved`, 'Fix the changes and save again, or discard them.');
+        return false;
+      }
+    }
+    return true;
+  }
+  for (const g of grids) useEdits.getState().revertAll(g.gridKey);
+  return true;
+}
+
+/** After a successful close: the explorer node folds up (it reloads on the next expand) and the Resources numbers refresh. */
+function afterClose(nodeIds: string[]): void {
+  const ex = useExplorer.getState();
+  for (const id of nodeIds) if (ex.expanded.has(id)) ex.toggle(id, false);
+  void useResources.getState().refresh();
+}
+
+/**
  * Resources (docs/resources.md): asks the engine to release a connection (or one database), first confirming what
  * that interrupts — this window's open transactions and running queries, then whatever else the engine reports
  * (409 RESOURCE_BUSY: exports, imports, live streams). Null when the user cancelled or the request failed.
@@ -856,16 +910,20 @@ function closeDetail(r: CloseResourcesResult): string | undefined {
 export async function disconnectConnection(connectionId: string): Promise<void> {
   const conn = getConnection(connectionId);
   const own = closableSessions(connectionId);
-  const r = await closeWithConfirm('Close connection', ` on “${conn?.name ?? 'this connection'}”`, own.filter((s) => s.txOpen), runningItems(connectionId),
+  const where = ` on “${conn?.name ?? 'this connection'}”`;
+  if (!(await resolvePendingEdits('Close connection', where, connectionId))) return;
+  const r = await closeWithConfirm('Close connection', where, own.filter((s) => s.txOpen), runningItems(connectionId),
     (force) => api.resources.close(connectionId, { force }));
   if (!r) return;
   useSessions.getState().markReleased(own.map((s) => s.sessionId), 'closed');
-  useCatalog.getState().forget(connectionId);
+  // Open tabs stay (their text and rows are kept) but nothing reloads the catalog or reconnects until the user acts.
+  useCatalog.getState().close(connectionId);
   if (conn && providerKind(conn.providerId) !== 'relational') {
     // M2: the engine closed the source client (its streams ended); the module drops cached data.
     useSourceClients.getState().apply(connectionId, 'closed');
     getSourceModule(conn.providerId)?.onDisconnect?.(connectionId);
   }
+  afterClose([`c:${connectionId}`]);
   toast('info', `Closed ${conn?.name ?? 'the connection'}`, closeDetail(r));
 }
 
@@ -874,11 +932,13 @@ export async function closeDatabase(connectionId: string, database: string | nul
   const conn = getConnection(connectionId);
   const own = closableSessions(connectionId, database);
   const label = database ?? conn?.name ?? 'the database';
+  if (!(await resolvePendingEdits('Close database', ` on “${label}”`, connectionId, database))) return;
   const r = await closeWithConfirm('Close database', ` on “${label}”`, own.filter((s) => s.txOpen), runningItems(connectionId),
     (force) => api.resources.close(connectionId, { database, force }));
   if (!r) return;
   useSessions.getState().markReleased(own.map((s) => s.sessionId), 'closed');
-  useCatalog.getState().forgetDatabase(connectionId, database);
+  useCatalog.getState().close(connectionId, database);
+  afterClose([`d:${connectionId}:${database ?? ''}`]);
   toast('info', `Closed ${label}`, closeDetail(r));
 }
 
@@ -889,15 +949,17 @@ export async function disconnectAll(): Promise<void> {
   const cached = Object.keys(useCatalog.getState().conns);
   const all = [...new Set([...ids, ...cached, ...Object.keys(useSourceClients.getState().clients)])];
   if (!all.length) return;
+  if (!(await resolvePendingEdits('Disconnect all', ''))) return;
   const r = await closeWithConfirm('Disconnect all', '', mine.filter((s) => s.txOpen), runningItems(), (force) => api.resources.closeAll(force));
   if (!r) return;
   useSessions.getState().markReleased(mine.map((s) => s.sessionId), 'closed');
-  for (const cid of all) useCatalog.getState().forget(cid);
+  for (const cid of all) useCatalog.getState().close(cid);
   for (const cid of Object.keys(useSourceClients.getState().clients)) {
     useSourceClients.getState().apply(cid, 'closed');
     const c = getConnection(cid);
     if (c) getSourceModule(c.providerId)?.onDisconnect?.(cid);
   }
+  afterClose(all.map((cid) => `c:${cid}`));
   toast('info', `Disconnected ${pluralize(all.length, 'connection')}`, mine.length ? `${pluralize(mine.length, 'session')} released` : closeDetail(r));
 }
 

@@ -93,6 +93,23 @@ exposes it) with its 30 s poll (`POST /resources/report`, kept for 2 min). Used 
   streams), and the window confirms those before retrying with `force`.
 - The explorer's filled dot means "holds server resources"; a dim dot means only a cached catalog or released sessions.
 
+### Closing with tabs open
+
+Open consoles and Data tabs stay open when their connection (or database) is closed: the console keeps its text and
+results (status bar: "Disconnected" with a **Reconnect** button), the Data tab keeps its loaded rows under a
+"Disconnected — Reconnect" banner (editing is read-only until it reconnects). **Nothing reconnects by itself.** The
+catalog store marks the connection / database `closed` (`store/catalog.ts`): the explorer node folds up and its lazy
+loads, a Data tab's catalog loads, console IntelliSense, server diagnostics and `catalog.changed` reloads all stay
+quiet. The mark clears — and things load again — only on a user action: expanding the node, running a statement /
+loading or paging a Data tab (`useSessions.ensure`), **Reconnect** (`POST /sessions/{id}/reconnect`: reopens the
+released session on its database and transaction mode, no query), a catalog refresh, or opening a console on it
+(`preloadCatalog`). Engine side, Close also clears the PostgreSQL diagnostics pool ("Rowlit diagnostics") next to the
+catalog pools, so no pooled connection is left on the server.
+
+Unsaved grid edits (Data tabs, console results) block the close with a prompt: **Save** (Data tabs save through their
+tab; a failed save keeps the connection open), **Discard**, or **Cancel**. Edits of console results cannot be saved from
+here, so the prompt then only offers Discard or Cancel.
+
 ## Status bar and popover
 
 The status bar shows memory in use (amber at `high`, red at `critical`). A click opens the Resources popover (loaded

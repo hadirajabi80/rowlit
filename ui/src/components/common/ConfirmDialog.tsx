@@ -69,6 +69,11 @@ function ConfirmBody({ c }: { c: ConfirmRequest }) {
           <button className="btn" data-autofocus={c.danger ? true : undefined} onClick={() => resolve(false)}>
             {c.cancelLabel ?? 'Cancel'}
           </button>
+          {c.altLabel && (
+            <button className={c.danger ? 'btn btn-danger-outline' : 'btn'} onClick={() => resolve(false, ack, true)}>
+              {c.altLabel}
+            </button>
+          )}
           <button
             className={confirmCls}
             data-autofocus={c.danger ? undefined : true}

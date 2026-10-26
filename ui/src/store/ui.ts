@@ -22,6 +22,8 @@ export interface ConfirmResult {
   ok: boolean;
   /** State of the `ack` checkbox (false when there is none). */
   ack: boolean;
+  /** The middle button (`altLabel`) was chosen: neither OK nor Cancel ("Save" / "Discard" / "Cancel" prompts). */
+  alt?: boolean;
 }
 
 export interface ConfirmRequest {
@@ -31,6 +33,8 @@ export interface ConfirmRequest {
   items?: string[];
   confirmLabel?: string;
   cancelLabel?: string;
+  /** A third choice between Cancel and the confirm button (e.g. "Discard"); see askConfirmChoice. */
+  altLabel?: string;
   /** Danger dialogs focus Cancel (Enter = Cancel) and style the confirm button as destructive. */
   danger?: boolean;
   /** Optional acknowledgement checkbox (read-only override, writes on read-only multi-run targets). */
@@ -170,7 +174,9 @@ interface UiState extends Layout {
   askConfirm(req: Omit<ConfirmRequest, 'resolve'>): Promise<boolean>;
   /** Like askConfirm, also returning the state of the `ack` checkbox. */
   askConfirmAck(req: Omit<ConfirmRequest, 'resolve'>): Promise<ConfirmResult>;
-  resolveConfirm(ok: boolean, ack?: boolean): void;
+  /** A three-way prompt (`altLabel` required): the confirm button, the middle button, or Cancel / Escape. */
+  askConfirmChoice(req: Omit<ConfirmRequest, 'resolve'>): Promise<'ok' | 'alt' | 'cancel'>;
+  resolveConfirm(ok: boolean, ack?: boolean, alt?: boolean): void;
   toast(kind: Toast['kind'], text: string, detail?: string, action?: Toast['action']): void;
   dismissToast(id: number): void;
   setCursor(tabId: string, c: { line: number; col: number } | null): void;
@@ -295,11 +301,14 @@ export const useUi = create<UiState>((set, get) => ({
     if (prev) prev.resolve({ ok: false, ack: false });
     return new Promise<ConfirmResult>((resolve) => set({ confirm: { ...req, resolve, seq: ++confirmSeq } }));
   },
-  resolveConfirm(ok, ack = false) {
+  askConfirmChoice(req) {
+    return get().askConfirmAck(req).then((r) => (r.ok ? 'ok' : r.alt ? 'alt' : 'cancel'));
+  },
+  resolveConfirm(ok, ack = false, alt = false) {
     const c = get().confirm;
     set({ confirm: null });
     // A required acknowledgement that was not ticked never confirms.
-    c?.resolve({ ok: ok && (!c.ack?.required || ack), ack: !!c.ack && ack });
+    c?.resolve({ ok: ok && (!c.ack?.required || ack), ack: !!c.ack && ack, ...(alt ? { alt: true } : {}) });
   },
   toast(kind, text, detail, action) {
     const id = ++toastSeq;

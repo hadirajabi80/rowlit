@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, isApiError } from '../api/client';
 import type { SessionInfo, TxMode, WsEventOf } from '../api/types';
+import { useCatalog } from './catalog';
 import { useTabs } from './tabs';
 
 /**
@@ -23,6 +24,8 @@ interface SessionsState {
   ensure(tabId: string, connectionId: string, database: string | null, txMode: TxMode, schema?: string | null): Promise<SessionInfo>;
   forTab(tabId: string): SessionInfo | undefined;
   setTxMode(tabId: string, mode: TxMode): Promise<SessionInfo | undefined>;
+  /** Reopens the connection of a tab whose session was released by Close connection / Close database. */
+  reconnect(tabId: string): Promise<SessionInfo | undefined>;
   commit(tabId: string): Promise<void>;
   rollback(tabId: string): Promise<void>;
   changeDatabase(tabId: string, database: string): Promise<void>;
@@ -147,6 +150,9 @@ export const useSessions = create<SessionsState>((set, get) => ({
   },
 
   async ensure(tabId, connectionId, database, txMode, schema) {
+    // Every caller is a user action that needs the connection (a run, a page load, a save): a connection or database
+    // the user closed (Close connection / Close database) opens again, and its catalog may load.
+    useCatalog.getState().reopen(connectionId, database);
     const existing = get().forTab(tabId);
     if (existing && existing.connectionId === connectionId && existing.state !== 'closed') {
       if (database && existing.database !== database) {
@@ -180,6 +186,15 @@ export const useSessions = create<SessionsState>((set, get) => ({
     })().finally(() => creating.delete(tabId));
     creating.set(tabId, p);
     return p;
+  },
+
+  async reconnect(tabId) {
+    const s = get().forTab(tabId);
+    if (!s) return undefined;
+    const info = await api.reconnectSession(s.sessionId);
+    get().upsert(info, tabId);
+    useCatalog.getState().reopen(info.connectionId, info.database);
+    return info;
   },
 
   async setTxMode(tabId, mode) {

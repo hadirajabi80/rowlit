@@ -81,6 +81,17 @@ export function searchPathOf(r: SchemasResponse | null | undefined): string[] | 
 interface CatalogState {
   conns: Record<string, ConnCatalog>;
   dbs: Record<string, DbCatalog>;
+  /**
+   * "Close connection" / "Close database" (docs/resources.md): the user gave these back. Keys: a connection id (the
+   * whole connection) or a dbKey (one database). Nothing may load their catalog on its own while they are closed
+   * (explorer lazy loads, data tabs, IntelliSense, catalog.changed); `reopen` clears the mark on the next user action
+   * (expanding the node, a run, Reconnect, a refresh).
+   */
+  closed: Record<string, true>;
+  /** Forgets the cached catalog (the whole connection, or one database) and marks it closed. */
+  close(connectionId: string, database?: string | null): void;
+  /** Clears the closed mark of the connection (and every database of it), or of one database (and the connection). */
+  reopen(connectionId: string, database?: string | null): void;
   loadDatabases(connectionId: string, force?: boolean): Promise<DatabasesResponse | null>;
   loadSchemas(connectionId: string, database: string | null, force?: boolean): Promise<SchemasResponse | null>;
   /** Default schema(s), the engine decides which (GET /catalog without `schemas`). */
@@ -102,6 +113,13 @@ interface CatalogState {
    * reload lazily (the explorer or IntelliSense asks again; ETags keep it cheap). Returns the keys evicted.
    */
   evict(opts: { budgetBytes: number; minIdleMs: number; inUse: (d: DbCatalog) => boolean; now?: number }): string[];
+}
+
+const closedKey = (connectionId: string, database: string | null | undefined) => `${connectionId}\u0001${(database ?? '').toLowerCase()}`;
+
+/** True while the connection (or this database of it) is closed by the user: automatic loads must not run. */
+export function isCatalogClosed(closed: Record<string, true>, connectionId: string, database?: string | null): boolean {
+  return !!closed[connectionId] || (database !== undefined && !!closed[closedKey(connectionId, database)]);
 }
 
 /** Last time each cached database entry changed or was read (LRU of `evict`). */
@@ -193,6 +211,35 @@ export const useCatalog = create<CatalogState>((set, get) => {
   return {
     conns: {},
     dbs: {},
+    closed: {},
+
+    close(cid, database) {
+      if (database === undefined) {
+        get().forget(cid);
+        set({ closed: { ...get().closed, [cid]: true } });
+      } else {
+        get().forgetDatabase(cid, database);
+        set({ closed: { ...get().closed, [closedKey(cid, database)]: true } });
+      }
+    },
+
+    reopen(cid, database) {
+      const next = { ...get().closed };
+      const prefix = `${cid}\u0001`;
+      let changed = false;
+      const drop = (k: string) => {
+        if (!(k in next)) return;
+        delete next[k];
+        changed = true;
+      };
+      drop(cid);
+      if (database === undefined) {
+        for (const k of Object.keys(next)) if (k.startsWith(prefix)) drop(k);
+      } else {
+        drop(closedKey(cid, database));
+      }
+      if (changed) set({ closed: next });
+    },
 
     loadDatabases(cid, force = false) {
       const cur = get().conns[cid];
@@ -305,6 +352,7 @@ export const useCatalog = create<CatalogState>((set, get) => {
     },
 
     async refresh(cid, database) {
+      get().reopen(cid, database); // an explicit refresh is a user action
       const keys = Object.values(get().dbs).filter((d) => d.connectionId === cid && (database === undefined || d.database === (database ?? null)));
       try {
         await Promise.all(keys.map((d) => api.refreshCatalog(cid, d.database, null)));
@@ -339,6 +387,7 @@ export const useCatalog = create<CatalogState>((set, get) => {
 
     applyChanged(ev) {
       for (const d of cachedEntries(ev.connectionId, ev.database)) {
+        if (isCatalogClosed(get().closed, d.connectionId, d.database)) continue;
         if (d.schemasStatus === 'ready') void get().loadSchemas(ev.connectionId, d.database, true);
         const schemas = ev.schemas.length ? ev.schemas : Object.keys(d.loaded);
         for (const s of schemas) if (d.loaded[s] || d.schemaStatus[s] === 'ready') void get().loadSchema(ev.connectionId, d.database, s, true);
@@ -466,6 +515,7 @@ export function requestForeignCatalog(connectionId: string, database: string, sc
   foreignPending.add(key);
   setTimeout(() => {
     foreignPending.delete(key);
+    if (isCatalogClosed(useCatalog.getState().closed, connectionId, database)) return; // closed by the user: no reconnect
     void (async () => {
       const cat = useCatalog.getState();
       await cat.loadSchemas(connectionId, database);

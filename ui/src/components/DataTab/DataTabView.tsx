@@ -9,9 +9,10 @@ import {
   Search, Table2, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, isApiError } from '../../api/client';
+import { api, errorMessage, isApiError } from '../../api/client';
 import type { CellValue, ColumnInfo } from '../../api/types';
 import { catalogDatabase, idleSessionTabs, offerCloseIdle } from '../../app/actions';
+import { registerGridSaver } from '../../app/pendingGrids';
 import { runCommand } from '../../commands/registry';
 import { commandView, useCommandContext } from '../../commands/useCommands';
 import { countSql, describeSql, distinctSql, isRowidColumn, keylessOrder, selectPageSql, uniqueOrderKey, type SortSpec, type TableTarget } from '../../data/sqlgen';
@@ -22,7 +23,7 @@ import type { ExecParam } from '../../filter/wire';
 import { ChunkedList } from '../../lib/chunked';
 import { formatCount, formatDuration } from '../../lib/format';
 import type { CellLocator } from '../../lib/serialize';
-import { dbKey, useCatalog, useSnapshot } from '../../store/catalog';
+import { dbKey, isCatalogClosed, useCatalog, useSnapshot } from '../../store/catalog';
 import { useConnection, useDialect } from '../../store/connections';
 import { hasPending, pendingCount, useEditBuffer, useEdits } from '../../store/edits';
 import { useSessions } from '../../store/sessions';
@@ -47,6 +48,8 @@ import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
 import { PendingBar } from '../PendingChanges/PendingBar';
 import { usePendingChanges } from '../PendingChanges/usePendingChanges';
+import { savePendingChanges } from '../PendingChanges/save';
+import { DisconnectedBanner } from '../common/DisconnectedBanner';
 import type { EditContext } from '../PendingChanges/submit';
 import { RecordView } from '../RecordView/RecordView';
 import { ExecutedQueryLine } from '../ResultsPane/ExecutedQueryLine';
@@ -194,8 +197,11 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   // The table's schema may not be loaded in the catalog yet (opened from search, FK navigation, a restored tab): its
   // primary key, identity and computed columns decide what can be edited, so load it.
   const schemasKnown = useCatalog((s) => !!s.dbs[dbKey(connectionId, catDb)]?.schemasResp);
+  // Close connection / Close database: the open tab keeps its rows and must not reconnect on its own (the catalog loads
+  // again after a Reconnect, a refresh, a run — anything that reopens the connection — clears the mark).
+  const catalogClosed = useCatalog((s) => isCatalogClosed(s.closed, connectionId, catDb));
   useEffect(() => {
-    if (!connectionId || !state.schema) return;
+    if (!connectionId || !state.schema || catalogClosed) return;
     if (!schemasKnown) {
       // Nothing of this connection's catalog loaded yet (a restored tab, the explorer collapsed): the default schema
       // and the schema list first, then the table's own schema (this effect runs again).
@@ -206,7 +212,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     if (!d?.schemasResp || d.schemaStatus[state.schema]) return;
     if (!d.schemasResp.schemas.some((s) => s.name === state.schema)) return;
     void useCatalog.getState().loadSchema(connectionId, catDb, state.schema).catch(() => undefined);
-  }, [connectionId, catDb, state.schema, schemasKnown]);
+  }, [connectionId, catDb, state.schema, schemasKnown, catalogClosed]);
   const fks = useMemo<FkLink[]>(() => (data.columns ? foreignKeys(data.columns, target.schema, target.name, snapshot) : []), [data.columns, target, snapshot]);
   const refs = useMemo(() => referencingTables(target.schema, target.name, snapshot), [target, snapshot]);
   const overlay = useMemo(() => overlayRows(data.rows, buffer.committed), [data.rows, data.rev, buffer.committed]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -652,6 +658,25 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   } : null;
   // Ctrl+S / Save write the pending edits directly; the SQL preview is opt-in (user-02).
   const pendingActions = usePendingChanges(editCtx);
+  // Close connection / Close database with unsaved edits: the prompt's "Save" saves through this tab (app/pendingGrids.ts).
+  const editCtxRef = useRef(editCtx);
+  editCtxRef.current = editCtx;
+  useEffect(() => registerGridSaver(gridKey, async () => {
+    const c = editCtxRef.current;
+    if (!c) return !hasPending(useEdits.getState().get(gridKey));
+    const r = await savePendingChanges(c, { preview: () => undefined, direct: true });
+    return r ? r.ok : !hasPending(useEdits.getState().get(gridKey));
+  }), [gridKey]);
+  // The connection was closed by the user (Close connection / Close database): the tab keeps its rows and says so.
+  const disconnected = (!!session?.released && (session.releasedReason === 'closed' || catalogClosed)) || (!session && catalogClosed && !!data.columns);
+  const reconnect = useCallback(async () => {
+    try {
+      if (useSessions.getState().forTab(tab.id)) await useSessions.getState().reconnect(tab.id);
+      else await ensureSession(); // the idle timer had already dropped the released session
+    } catch (e) {
+      toast('error', 'Could not reconnect', errorMessage(e));
+    }
+  }, [tab.id, ensureSession]);
 
   const navigateFk = (fk: FkLink, values: CellValue[]) =>
     openDataTab({ connectionId, database, schema: fk.refSchema, name: fk.refTable, filter: fk.refColumns.map((c, i) => ({ column: c, value: values[i] ?? null })) });
@@ -740,7 +765,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         {editability && (editability.editable ? (
           <span className="rs-badge editable" title={`Key: ${editability.target?.keyColumns.join(', ')}`}><PencilLine size={11} /> Editable</span>
         ) : (
-          <span className="rs-badge" title={editability.reason ?? undefined}><Lock size={11} /> {editability.reason}</span>
+          <span className="rs-badge" title={disconnected ? 'Reconnect to edit this table' : editability.reason ?? undefined}><Lock size={11} /> {disconnected ? 'Read-only while disconnected' : editability.reason}</span>
         ))}
         {editability?.editable && (
           <span className="rs-pending">
@@ -805,6 +830,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
           onDiscard={pendingActions.discard}
         />
       )}
+      {disconnected && <DisconnectedBanner what="the loaded rows are kept; run, refresh or page to reconnect." onReconnect={reconnect} />}
       {data.error && (
         <div className="rs-error" role="alert">
           <CircleX size={14} />

@@ -159,6 +159,16 @@ export function createHandlers(engine: MockEngine) {
       engine.changed(s);
       return ok(engine.info(s));
     }),
+    http.post(`${P}/sessions/:sid/reconnect`, ({ params }) => {
+      const s = engine.sessions.get(String(params.sid));
+      if (!s) return err(404, 'NOT_FOUND', 'Session not found');
+      if (s.released) {
+        s.released = false;
+        s.releasedReason = null;
+        engine.changed(s);
+      }
+      return ok(engine.info(s));
+    }),
     http.post(`${P}/sessions/:sid/commit`, ({ params }) => {
       const s = engine.sessions.get(String(params.sid));
       if (!s) return err(404, 'NOT_FOUND', 'Session not found');

@@ -1,8 +1,8 @@
 import { ExternalLink, Plug } from 'lucide-react';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { ObjectRef, RunLabel, ServerDiagnostic, SqlBatch } from '../../api/types';
-import { cancelTab, catalogDatabase, openObject, openObjectDefault, runInTab } from '../../app/actions';
+import { cancelTab, catalogDatabase, openObject, openObjectDefault, preloadCatalog, runInTab } from '../../app/actions';
 import { interceptRoutineRun } from '../ExecuteRoutine/intercept';
 import { registerEditor } from '../../app/editors';
 import { SqlEditor } from '../../editor/SqlEditor';
@@ -11,7 +11,7 @@ import { peekEditSession } from '../../designer/editSession';
 import { useDesignerUi } from '../../designer/store';
 import { snapshotWithSchema } from '../../lib/schemaScope';
 import { useConsoleSchema } from '../../store/consoleSchema';
-import { requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
+import { isCatalogClosed, requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
 import { getConnection, useConnection, useDialect } from '../../store/connections';
 import { useTabExecution } from '../../store/results';
 import { useSettings } from '../../store/settings';
@@ -168,16 +168,33 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
       toast(timedOut ? 'warning' : 'info', `${target} was not found`, timedOut ? 'Its schema did not finish loading. Try again once the explorer has it.' : undefined),
     [],
   );
+  // Close connection / Close database: this console stays open but must not reach the server on its own (server
+  // diagnostics and catalog loads open connections) until the user runs, reconnects or refreshes.
+  const catalogClosed = useCatalog((s) => !!connectionId && isCatalogClosed(s.closed, connectionId, catDb));
   const requestServerDiagnostics = useMemo(() => {
     // Server diagnostics for every dialect but Oracle; PostgreSQL's ("pg-prepare") PREPAREs each statement inside a
     // read-only transaction that is always rolled back, so nothing runs.
     if (!connectionId || dialect === 'plsql') return undefined;
-    return (sql: string) =>
-      api.diagnostics({ dialect, sql, connectionId }).then((r) => r.diagnostics).catch(() => [] as ServerDiagnostic[]);
-  }, [connectionId, dialect]);
+    return (sql: string) => {
+      if (isCatalogClosed(useCatalog.getState().closed, connectionId, catDb)) return Promise.resolve([] as ServerDiagnostic[]);
+      return api.diagnostics({ dialect, sql, connectionId }).then((r) => r.diagnostics).catch(() => [] as ServerDiagnostic[]);
+    };
+  }, [connectionId, dialect, catDb]);
+  // The connection was closed and is open again (a run, Reconnect, expanding it in the explorer): IntelliSense needs its
+  // catalog back.
+  const wasClosed = useRef(false);
+  useEffect(() => {
+    if (catalogClosed) {
+      wasClosed.current = true;
+      return;
+    }
+    if (!wasClosed.current) return;
+    wasClosed.current = false;
+    if (connectionId) void preloadCatalog(connectionId, tab.database);
+  }, [catalogClosed, connectionId, tab.database]);
   const requestSchema = useCallback(
     (schema: string) => {
-      if (!connectionId) return;
+      if (!connectionId || isCatalogClosed(useCatalog.getState().closed, connectionId, catDb)) return;
       const d = useCatalog.getState().dbs[`${connectionId}\u0001${catDb ?? ''}`];
       const known = d?.schemasResp?.schemas.find((s) => s.name.toLowerCase() === schema.toLowerCase());
       if (known) void useCatalog.getState().loadSchema(connectionId, catDb, known.name);

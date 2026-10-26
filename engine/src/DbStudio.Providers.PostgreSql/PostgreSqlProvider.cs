@@ -52,6 +52,16 @@ public sealed class PostgreSqlProvider : IDbProvider, IObjectBrowserProvider, ID
                 // incomplete profile: nothing was pooled for it
             }
         }
+        // The editor's server diagnostics keep a pooled connection of their own ("Rowlit diagnostics"): close it too.
+        try
+        {
+            using var conn = new NpgsqlConnection(PgPrepareDiagnostics.PoolBuilder(profile, password).ConnectionString);
+            NpgsqlConnection.ClearPool(conn);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // incomplete profile: nothing was pooled for it
+        }
     }
 
     /// <summary>The session connection string (pooling disabled).</summary>

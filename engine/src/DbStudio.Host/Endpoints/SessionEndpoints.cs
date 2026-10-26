@@ -88,6 +88,15 @@ public static class SessionEndpoints
             return h.ToInfo();
         });
 
+        // "Reconnect" of a tab whose connection was closed (Close connection / Close database): opens the physical
+        // connection again on the database and transaction mode the session had. No-op when it already holds one.
+        g.MapPost("/{sid}/reconnect", async (HttpContext http, string sid, SessionManager sessions, CancellationToken ct) =>
+        {
+            var h = Touch(http, sessions, sid);
+            await sessions.ReopenIfReleasedAsync(h, ct);
+            return h.ToInfo();
+        });
+
         g.MapPost("/{sid}/commit", async (HttpContext http, string sid, SessionManager sessions, CancellationToken ct) =>
         {
             var h = Touch(http, sessions, sid);

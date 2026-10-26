@@ -232,6 +232,8 @@ export const api = {
   changeSchema: (sid: string, schema: string | null) =>
     json<SessionInfo>('POST', `/sessions/${enc(sid)}/schema`, { body: { schema } }),
   setTxMode: (sid: string, txMode: TxMode) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/tx-mode`, { body: { txMode } }),
+  /** Reopens the physical connection of a session released by Close connection / Close database. */
+  reconnectSession: (sid: string) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/reconnect`),
   commit: (sid: string) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/commit`),
   rollback: (sid: string) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/rollback`),
   execute: (sid: string, req: ExecuteRequest) => json<ExecuteResponse>('POST', `/sessions/${enc(sid)}/execute`, { body: req }),

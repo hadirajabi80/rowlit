@@ -314,6 +314,7 @@ export class MockEngine {
     if (s.released) {
       s.released = false;
       s.releasedReason = null;
+      this.changed(s); // the real engine publishes the reopen (session.changed, released: false)
     }
     const conn = this.conn(s.connectionId)!;
     if (conn.readOnly && !req.confirmedDestructive && req.batches.some((b) => /^\s*(insert|update|delete|merge|create|drop|alter|truncate)\b/i.test(stripComments(b.sql)))) {

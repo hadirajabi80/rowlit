@@ -11,7 +11,8 @@ import { useSourceClients } from '../../store/sourceClients';
 import { activityCounts, useSessions, useTabSession } from '../../store/sessions';
 import { pluralize } from '../common/text';
 import { useActiveTab } from '../../store/tabs';
-import { useUi } from '../../store/ui';
+import { toast, useUi } from '../../store/ui';
+import { errorMessage } from '../../api/client';
 import { connColorName } from '../../theme/connColors';
 import { ColorDot } from '../common/ConnectionBadge';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
@@ -94,6 +95,15 @@ export function StatusBar() {
         <span className="sb-item muted" title="The connection was closed to free resources; the next run reconnects on the same database">
           {session.releasedReason === 'idle' ? 'Disconnected (idle)' : 'Disconnected'}
         </span>
+      )}
+      {session?.released && session.releasedReason === 'closed' && tab?.kind === 'console' && (
+        <button
+          className="sb-item sb-button"
+          title="Open the connection again (running a statement does it too)"
+          onClick={() => void useSessions.getState().reconnect(tab.id).catch((e) => toast('error', 'Could not reconnect', errorMessage(e)))}
+        >
+          Reconnect
+        </button>
       )}
       {tab?.kind === 'console' && conn?.providerId === 'cassandra' && (
         <Suspense fallback={null}>

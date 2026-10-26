@@ -143,6 +143,36 @@ public sealed class PgResourceTests(PgFixture fixture) : IClassFixture<PgFixture
         Assert.Equal(0L, Convert.ToInt64((await ScalarRowAsync(env, h.Id, "SELECT COUNT(*) FROM zz_resources_keep"))[0]));
     }
 
+    [SkippableFact]
+    public async Task CloseConnection_AlsoClosesThePooledDiagnosticsConnection_AndKeepsTheSessionReopenable()
+    {
+        Skip.IfNot(fixture.IsAvailable, fixture.SkipReason ?? "PostgreSQL not available.");
+        var env = Create();
+        var h = await env.Sessions.CreateAsync(env.Profile.Id, null, TransactionMode.Auto, false, CancellationToken.None);
+        const string countSql = "SELECT COUNT(*) FROM pg_stat_activity WHERE application_name = 'Rowlit diagnostics'";
+
+        // The editor's server diagnostics keep a pooled connection of their own ("Rowlit diagnostics").
+        var diagnostics = new PostgreSqlProvider().Diagnostics!;
+        await diagnostics.AnalyzeAsync("SELECT 1", env.Profile, fixture.Password, CancellationToken.None);
+        Assert.True(Convert.ToInt64((await ScalarRowAsync(env, h.Id, countSql))[0]) >= 1);
+
+        var r = await env.Resources.CloseAsync(env.Profile.Id, null, force: false, clientId: null);
+        Assert.Equal(1, r.Sessions);
+        Assert.True(h.Released);
+
+        // the next run reconnects the session (an open console / data tab) and no diagnostics connection is left
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        long left;
+        do
+        {
+            left = Convert.ToInt64((await ScalarRowAsync(env, h.Id, countSql))[0]);
+            if (left == 0) break;
+            await Task.Delay(100);
+        } while (DateTime.UtcNow < deadline);
+        Assert.Equal(0, left);
+        Assert.False(h.Released);
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var d in Enumerable.Reverse(_owned)) await d.DisposeAsync();
