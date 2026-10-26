@@ -6,6 +6,7 @@ import { extendContextMenu } from '../../../commands/menuModel';
 import { registerCommands, type Command } from '../../../commands/registry';
 import { toast } from '../../../store/ui';
 import { useSessions } from '../../../store/sessions';
+import { resolveParams } from '../../ParamsDialog/ParamsDialog';
 import { activeLinkConsole, materializeSourceOf, tableSourceOf } from './args';
 import { hasSource, type MaterializeSource } from './model';
 
@@ -19,7 +20,6 @@ async function consoleSource(): Promise<MaterializeSource | null> {
     toast('info', 'Nothing to materialize', 'Put the cursor in a SELECT statement of the linked console.');
     return null;
   }
-  const { resolveParams } = await import('../../ParamsDialog/ParamsDialog');
   const params = await resolveParams(tab.id, tab.connectionId, 'duckdb', target.batches, { confirmLabel: 'Materialize' });
   if (params === null) return null;
   return { connectionId: tab.connectionId, sql, params: params ?? null, sessionId: useSessions.getState().byTab[tab.id] ?? null };

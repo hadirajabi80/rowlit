@@ -5,9 +5,9 @@ import { ClipboardCopy, CircleAlert, Info, LoaderCircle, SquareTerminal } from '
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '../../../api/client';
 import { linksApi, type NativeLinkKind, type NativeScriptResult } from '../../../api/links';
-import { copyText, preloadCatalog } from '../../../app/actions';
 import { useConnections } from '../../../store/connections';
 import { useTabs } from '../../../store/tabs';
+import { toast } from '../../../store/ui';
 import { Dialog } from '../../common/Dialog';
 import '../materialize/wizard.css';
 import { connectionMembers, kindLabel, nativeTargets, scriptParts, scriptTitle } from './model';
@@ -20,6 +20,15 @@ export interface NativeLinkRequest {
 }
 
 export const SCRIPT_DEBOUNCE_MS = 250;
+
+async function copyScript(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('success', 'Script copied');
+  } catch {
+    toast('error', 'Could not copy the script', 'Select the script in the box and copy it from there.');
+  }
+}
 
 export function NativeLinkDialog({ request, onClose }: { request: NativeLinkRequest; onClose: () => void }) {
   const connections = useConnections((c) => c.connections);
@@ -84,7 +93,6 @@ export function NativeLinkDialog({ request, onClose }: { request: NativeLinkRequ
   const openInConsole = () => {
     if (!result || !target) return;
     useTabs.getState().newConsole({ connectionId: target.id, database: null, text: result.script, title: scriptTitle(member?.alias ?? 'link') });
-    void preloadCatalog(target.id, null);
     onClose();
   };
 
@@ -98,7 +106,7 @@ export function NativeLinkDialog({ request, onClose }: { request: NativeLinkRequ
       footer={
         <>
           <button className="btn" onClick={onClose}>Close</button>
-          <button className="btn" disabled={!result} onClick={() => result && void copyText(result.script, 'Script copied')}>
+          <button className="btn" disabled={!result} onClick={() => result && void copyScript(result.script)}>
             <ClipboardCopy size={14} aria-hidden="true" /> Copy script
           </button>
           <button className="btn btn-primary" disabled={!result || !target} onClick={openInConsole}>

@@ -5,16 +5,15 @@ import { ArrowRight, CircleAlert, CircleCheck, LoaderCircle, Table2, TriangleAle
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorMessage, api } from '../../../api/client';
 import { linksApi, type MaterializeMode, type MaterializePreview, type MaterializeResult } from '../../../api/links';
-import { activateObject } from '../../../app/actions';
 import { useCatalog } from '../../../store/catalog';
 import { schemaLevelLabel } from '../../../lib/providerLevels';
 import { getConnection, useConnections } from '../../../store/connections';
+import { useTabs } from '../../../store/tabs';
 import { toast } from '../../../store/ui';
 import { Dialog } from '../../common/Dialog';
-import { formatCount, formatDuration } from '../../ImportWizard/model';
 import { listenForJobs, waitForMaterializeJob } from './jobs';
 import {
-  buildRequest, defaultTableName, hasSource, MODES, progressPercent, tableNameIssue, type MaterializeProgress, type MaterializeSource,
+  buildRequest, defaultTableName, formatCount, formatDuration, hasSource, MODES, progressPercent, tableNameIssue, type MaterializeProgress, type MaterializeSource,
 } from './model';
 import { lastTarget, materializeTargets, rememberTarget, usePlacement } from './target';
 import './wizard.css';
@@ -34,7 +33,7 @@ const oneLine = (sql: string) => sql.replace(/\s+/g, ' ').trim();
 export function MaterializeDialog({ source, onClose }: { source: MaterializeSource; onClose: () => void }) {
   const link = getConnection(source.connectionId);
   const targets = useConnections((c) => c.connections);
-  const remembered = useMemo(lastTarget, []);
+  const remembered = useMemo(() => lastTarget(), []);
   const firstTarget = useMemo(() => {
     const writable = materializeTargets(targets);
     return writable.find((c) => c.id === remembered?.connectionId)?.id ?? writable[0]?.id ?? '';
@@ -160,7 +159,7 @@ export function MaterializeDialog({ source, onClose }: { source: MaterializeSour
 
   const openTable = (r: MaterializeResult) => {
     const db = place.dbLevel ? r.database ?? database : null;
-    activateObject(r.targetConnectionId || cid, db, { database: db, schema: r.schema, name: r.table, type: 'table' });
+    useTabs.getState().openObject(r.targetConnectionId || cid, db, { database: db, schema: r.schema, name: r.table, type: 'table' });
     onClose();
   };
 

@@ -127,3 +127,15 @@ export function readEnd(ev: Pick<JobDoneEvent, 'status' | 'error' | 'result'>): 
     : null;
   return { status: ev.status, error: ev.error ?? null, result };
 }
+
+export function formatCount(n: number): string {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+export function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${(ms / 1000).toFixed(s < 10 ? 1 : 0)} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ${s % 60} s`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
