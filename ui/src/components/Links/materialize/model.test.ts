@@ -1,5 +1,7 @@
 // Materialize / Add to link / native link: the pure rules.
 import { describe, expect, it } from 'vitest';
+import { ensureDialect } from '../../../intel/dialect/registry';
+import { detectParams } from '../../ParamsDialog/detect';
 import type { ConnectionProfile } from '../../../api/types';
 import type { LinkDefinition } from '../../../api/links';
 import { addTableToDefinition, aliasProposal, initialMember, profileInput, type TableSource } from './addToLink';
@@ -146,5 +148,13 @@ describe('native link helpers', () => {
   it('names the kinds', () => {
     expect(kindLabel('fdw')).toMatch(/foreign data wrapper/i);
     expect(kindLabel('something')).toBe('something');
+  });
+});
+
+describe('parameters of a linked console', () => {
+  it('detects $name, $1 and ? binds (the Run / Materialize parameter dialog asks for them)', async () => {
+    await ensureDialect('duckdb');
+    const found = detectParams([{ sql: "SELECT * FROM shop.orders WHERE total > $min AND id = $1 AND note <> '$notaparam' AND x = ?", line: 1, col: 1 }], 'duckdb');
+    expect(found.map((p) => [p.display, p.positional])).toEqual([['$min', false], ['$1', true], ['?', true]]);
   });
 });

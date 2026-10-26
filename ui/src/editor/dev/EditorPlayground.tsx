@@ -187,13 +187,17 @@ DESCRIBE TABLE shop.orders_by_customer;
 `,
   // WP-CS end
   // LINKS-WPD begin
-  duckdb: `-- Linked database playground (DuckDB; schemas = member aliases)
-SELECT c.name, sum(o.total) AS total
+  duckdb: `-- Linked database playground (DuckDB; schemas = member aliases, $name = parameter)
+SELECT c.name, sum(o.total) AS total, list(DISTINCT o.id ORDER BY o.id) AS orders
 FROM shop.customers c
 JOIN shop.orders o ON o.customer_id = c.id
+WHERE o.total > $min AND o.order_date >= DATE '2024-01-01'
 GROUP BY ALL
-ORDER BY total DESC
-LIMIT 10;
+QUALIFY row_number() OVER (ORDER BY total DESC) <= 10;
+
+FROM shop.orders SELECT * EXCLUDE (total) WHERE id = $1;
+
+SELECT list_transform([1, 2, 3], x -> x * 2), {'a': 1}.a, 42::DOUBLE;
 `,
   // LINKS-WPD end
 };

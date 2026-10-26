@@ -8,7 +8,7 @@ import { tokenize } from '../lexer/lexer';
 import { createIntel } from '../index';
 import { formatSql } from '../../format';
 import { rulesFor } from '../../format/layout';
-import { complete, labels, find, indexOf } from './helpers';
+import { complete, fixtures, labels, find, indexOf } from './helpers';
 
 /**
  * A link over two members: `crm` (customers, orders) and `erp` (invoices, products). `erp.invoices.customer_id` →
@@ -191,6 +191,26 @@ describe('completion over the link catalog', () => {
 
   it('works after `;` in a multi-statement script', () => {
     expect(labels(cplt('SELECT 1;\n\nSELECT * FROM erp.|').items)).toContain('invoices');
+  });
+});
+
+describe('the shop fixture (aliases shop and archive)', () => {
+  it('suggests the virtual relation archive.orders_2020 -> shop.customers, in both directions', () => {
+    const fx = createIntel('duckdb');
+    fx.setCatalog(fixtures.duckdb);
+    const forward = complete('duckdb', 'SELECT * FROM archive.orders_2020 o JOIN |', undefined, fx);
+    const hit = forward.items.find((x) => /^customers c ON c.id = o.customer_id/.test(x.label));
+    expect(hit, labels(forward.items, 12).join(', ')).toBeDefined();
+    const back = complete('duckdb', 'SELECT * FROM shop.customers c JOIN |', undefined, fx);
+    expect(back.items.some((x) => /archive\.orders_2020 \w+ ON \w+\.customer_id = c\.id/.test(x.label + ' ' + x.insertText)), labels(back.items, 15).join(' | ')).toBe(true);
+  });
+
+  it('completes alias.table. columns with DuckDB types', () => {
+    const fx = createIntel('duckdb');
+    fx.setCatalog(fixtures.duckdb);
+    const r = complete('duckdb', 'SELECT archive.orders_2020.| FROM archive.orders_2020', undefined, fx);
+    expect(labels(r.items)).toEqual(expect.arrayContaining(['id', 'customer_id', 'total']));
+    expect(find(r.items, 'total')?.description ?? find(r.items, 'total')?.detail).toMatch(/DOUBLE/);
   });
 });
 
