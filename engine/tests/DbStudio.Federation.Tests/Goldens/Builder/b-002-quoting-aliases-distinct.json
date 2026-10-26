@@ -1,0 +1,170 @@
+{
+  "name": "quoted table/column/alias names, DISTINCT, output=false column left out",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "shop",
+        "table": "Order Lines",
+        "as": "Order Lines",
+        "x": 0,
+        "y": 0
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "tableId": "t1",
+        "column": "select",
+        "alias": "Select"
+      },
+      {
+        "id": "c2",
+        "tableId": "t1",
+        "column": "qty",
+        "alias": "qty"
+      },
+      {
+        "id": "c3",
+        "tableId": "t1",
+        "column": "order_id",
+        "output": false
+      }
+    ],
+    "distinct": true,
+    "sort": [
+      {
+        "ref": {
+          "columnId": "c1"
+        },
+        "dir": "asc"
+      },
+      {
+        "ref": {
+          "columnId": "c3"
+        },
+        "dir": "desc",
+        "nulls": "first"
+      }
+    ]
+  },
+  "sql": "SELECT DISTINCT \"Order Lines\".\"select\" AS \"Select\", \"Order Lines\".qty AS qty\nFROM shop.\"Order Lines\" AS \"Order Lines\"\nORDER BY \"Select\" ASC, \"Order Lines\".order_id DESC NULLS FIRST",
+  "params": [],
+  "warnings": []
+}

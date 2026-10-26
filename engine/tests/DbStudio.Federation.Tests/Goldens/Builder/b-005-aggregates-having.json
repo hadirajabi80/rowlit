@@ -1,0 +1,273 @@
+{
+  "name": "count(*), count distinct, avg/min/max, auto GROUP BY, HAVING on output and helper aggregates, ORDER BY an unaliased aggregate",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "t2",
+        "alias": "shop",
+        "table": "orders",
+        "as": "orders",
+        "x": 360,
+        "y": 40
+      }
+    ],
+    "joins": [
+      {
+        "id": "j1",
+        "type": "inner",
+        "left": "t1",
+        "right": "t2",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "customer_id",
+            "op": "="
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "tableId": "t1",
+        "column": "country"
+      },
+      {
+        "id": "c2",
+        "agg": "count",
+        "alias": "n_orders"
+      },
+      {
+        "id": "c3",
+        "tableId": "t1",
+        "column": "id",
+        "agg": "countDistinct",
+        "alias": "n_customers"
+      },
+      {
+        "id": "c4",
+        "tableId": "t2",
+        "column": "total",
+        "agg": "avg"
+      },
+      {
+        "id": "c5",
+        "tableId": "t2",
+        "column": "total",
+        "agg": "min",
+        "alias": "smallest"
+      },
+      {
+        "id": "c6",
+        "tableId": "t2",
+        "column": "ordered",
+        "agg": "max",
+        "alias": "last_order"
+      },
+      {
+        "id": "c7",
+        "tableId": "t2",
+        "column": "total",
+        "agg": "sum",
+        "output": false
+      },
+      {
+        "id": "c8",
+        "tableId": "t1",
+        "column": "name"
+      }
+    ],
+    "having": {
+      "kind": "group",
+      "id": "h1",
+      "logic": "and",
+      "items": [
+        {
+          "kind": "condition",
+          "id": "h2",
+          "column": "c2",
+          "op": "gte",
+          "values": [
+            2
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "h3",
+          "column": "c7",
+          "op": "gt",
+          "values": [
+            "100.50"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "h4",
+          "column": "c4",
+          "op": "lt",
+          "values": [
+            1000
+          ]
+        }
+      ]
+    },
+    "sort": [
+      {
+        "ref": {
+          "columnId": "c4"
+        },
+        "dir": "desc",
+        "nulls": "last"
+      },
+      {
+        "ref": {
+          "columnId": "c2"
+        },
+        "dir": "asc"
+      }
+    ]
+  },
+  "sql": "SELECT customers.country, count(*) AS n_orders, count(DISTINCT customers.id) AS n_customers, avg(orders.total), min(orders.total) AS smallest, max(orders.ordered) AS last_order, customers.name\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nGROUP BY customers.country, customers.name\nHAVING count(*) >= $fp1 AND sum(orders.total) > $fp2 AND avg(orders.total) < $fp3\nORDER BY avg(orders.total) DESC NULLS LAST, n_orders ASC",
+  "params": [
+    {
+      "name": "fp1",
+      "kind": "int",
+      "value": 2
+    },
+    {
+      "name": "fp2",
+      "kind": "decimal",
+      "value": "100.5"
+    },
+    {
+      "name": "fp3",
+      "kind": "float",
+      "value": 1000
+    }
+  ],
+  "warnings": []
+}

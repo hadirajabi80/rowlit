@@ -1,0 +1,387 @@
+{
+  "name": "text filters: like family (escaped), case-sensitive, IN/NOT IN, empty, null checks, OR group, NOT group, disabled and incomplete conditions dropped",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "t2",
+        "alias": "shop",
+        "table": "orders",
+        "as": "orders",
+        "x": 360,
+        "y": 40
+      }
+    ],
+    "joins": [
+      {
+        "id": "j1",
+        "type": "inner",
+        "left": "t1",
+        "right": "t2",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "customer_id",
+            "op": "="
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "tableId": "t1",
+        "column": "name"
+      },
+      {
+        "id": "c2",
+        "tableId": "t2",
+        "column": "status"
+      }
+    ],
+    "filter": {
+      "kind": "group",
+      "id": "g1",
+      "logic": "and",
+      "items": [
+        {
+          "kind": "condition",
+          "id": "f1",
+          "column": "t1.name",
+          "op": "contains",
+          "values": [
+            "50%_off\\"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f2",
+          "column": "t1.email",
+          "op": "endsWith",
+          "values": [
+            "@Example.com"
+          ],
+          "caseSensitive": true
+        },
+        {
+          "kind": "condition",
+          "id": "f3",
+          "column": "t1.country",
+          "op": "in",
+          "values": [
+            "DE",
+            "",
+            "FR"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f4",
+          "column": "t2.status",
+          "op": "notIn",
+          "values": [
+            "Cancelled"
+          ],
+          "caseSensitive": true
+        },
+        {
+          "kind": "condition",
+          "id": "f5",
+          "column": "t2.customer_id",
+          "op": "in",
+          "values": [
+            1,
+            "2",
+            3.5
+          ]
+        },
+        {
+          "kind": "group",
+          "id": "g2",
+          "logic": "or",
+          "items": [
+            {
+              "kind": "condition",
+              "id": "f6",
+              "column": "t2.ref",
+              "op": "isEmpty",
+              "values": []
+            },
+            {
+              "kind": "condition",
+              "id": "f7",
+              "column": "t2.ref",
+              "op": "isNull",
+              "values": []
+            },
+            {
+              "kind": "condition",
+              "id": "f8",
+              "column": "t2.ref",
+              "op": "startsWith",
+              "values": [
+                "it's"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "group",
+          "id": "g3",
+          "logic": "or",
+          "negate": true,
+          "items": [
+            {
+              "kind": "condition",
+              "id": "f9",
+              "column": "t2.status",
+              "op": "eq",
+              "values": [
+                "void"
+              ]
+            },
+            {
+              "kind": "condition",
+              "id": "f10",
+              "column": "t1.name",
+              "op": "notContains",
+              "values": [
+                "test"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f11",
+          "column": "t1.email",
+          "op": "isNotNull",
+          "values": []
+        },
+        {
+          "kind": "condition",
+          "id": "f12",
+          "column": "t1.name",
+          "op": "eq",
+          "values": [
+            "x"
+          ],
+          "enabled": false
+        },
+        {
+          "kind": "condition",
+          "id": "f13",
+          "column": "t2.status",
+          "op": "eq",
+          "values": [
+            ""
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f14",
+          "column": "t2.status",
+          "op": "neq",
+          "values": [
+            "Open"
+          ],
+          "caseSensitive": true
+        },
+        {
+          "kind": "condition",
+          "id": "f15",
+          "column": "t9.nothing",
+          "op": "isNull",
+          "values": []
+        }
+      ]
+    }
+  },
+  "sql": "SELECT customers.name, orders.status\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nWHERE customers.name ILIKE '%' || $fp1 || '%' ESCAPE '\\' AND customers.email LIKE '%' || $fp2 ESCAPE '\\' AND lower(customers.country) IN (lower($fp3), lower($fp4)) AND orders.status NOT IN ($fp5) AND orders.customer_id IN ($fp6, $fp7, $fp8) AND (orders.ref = '' OR orders.ref IS NULL OR orders.ref ILIKE $fp9 || '%' ESCAPE '\\') AND NOT (lower(orders.status) = lower($fp10) OR NOT (customers.name ILIKE '%' || $fp11 || '%' ESCAPE '\\')) AND customers.email IS NOT NULL AND orders.status <> $fp12",
+  "params": [
+    {
+      "name": "fp1",
+      "kind": "string",
+      "value": "50\\%\\_off\\\\"
+    },
+    {
+      "name": "fp2",
+      "kind": "string",
+      "value": "@Example.com"
+    },
+    {
+      "name": "fp3",
+      "kind": "string",
+      "value": "DE"
+    },
+    {
+      "name": "fp4",
+      "kind": "string",
+      "value": "FR"
+    },
+    {
+      "name": "fp5",
+      "kind": "string",
+      "value": "Cancelled"
+    },
+    {
+      "name": "fp6",
+      "kind": "int",
+      "value": 1
+    },
+    {
+      "name": "fp7",
+      "kind": "int",
+      "value": 2
+    },
+    {
+      "name": "fp8",
+      "kind": "decimal",
+      "value": "3.5"
+    },
+    {
+      "name": "fp9",
+      "kind": "string",
+      "value": "it's"
+    },
+    {
+      "name": "fp10",
+      "kind": "string",
+      "value": "void"
+    },
+    {
+      "name": "fp11",
+      "kind": "string",
+      "value": "test"
+    },
+    {
+      "name": "fp12",
+      "kind": "string",
+      "value": "Open"
+    }
+  ],
+  "warnings": []
+}

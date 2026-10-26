@@ -1,0 +1,240 @@
+{
+  "name": "explicit GROUP BY (table column + expression), calculated columns (plain and aggregated), sort by a table column, LIMIT with OFFSET",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "t2",
+        "alias": "shop",
+        "table": "orders",
+        "as": "orders",
+        "x": 360,
+        "y": 40
+      }
+    ],
+    "joins": [
+      {
+        "id": "j1",
+        "type": "inner",
+        "left": "t1",
+        "right": "t2",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "customer_id",
+            "op": "="
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "expr": "upper(customers.country)",
+        "alias": "Country"
+      },
+      {
+        "id": "c2",
+        "expr": "orders.total * 1.2",
+        "agg": "sum",
+        "alias": "gross"
+      },
+      {
+        "id": "c3",
+        "expr": "  date_trunc('month', orders.ordered)  "
+      }
+    ],
+    "autoGroup": false,
+    "groupBy": [
+      {
+        "columnId": "c1"
+      },
+      {
+        "tableId": "t1",
+        "column": "id"
+      },
+      {
+        "expr": "date_trunc('month', orders.ordered)"
+      }
+    ],
+    "having": {
+      "kind": "group",
+      "id": "h1",
+      "logic": "or",
+      "items": [
+        {
+          "kind": "condition",
+          "id": "h2",
+          "column": "c2",
+          "op": "isNotNull",
+          "values": []
+        },
+        {
+          "kind": "condition",
+          "id": "h3",
+          "column": "c1",
+          "op": "eq",
+          "values": [
+            "de"
+          ]
+        }
+      ]
+    },
+    "sort": [
+      {
+        "ref": {
+          "tableId": "t1",
+          "column": "id"
+        },
+        "dir": "asc"
+      },
+      {
+        "ref": {
+          "columnId": "c2"
+        },
+        "dir": "desc"
+      },
+      {
+        "ref": {
+          "columnId": "c3"
+        },
+        "dir": "asc",
+        "nulls": "last"
+      }
+    ],
+    "limit": 100,
+    "offset": 200
+  },
+  "sql": "SELECT upper(customers.country) AS Country, sum(orders.total * 1.2) AS gross, date_trunc('month', orders.ordered)\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nGROUP BY upper(customers.country), customers.id, date_trunc('month', orders.ordered)\nHAVING sum(orders.total * 1.2) IS NOT NULL OR lower(upper(customers.country)) = lower($fp1)\nORDER BY customers.id ASC, gross DESC, date_trunc('month', orders.ordered) ASC NULLS LAST\nLIMIT 100 OFFSET 200",
+  "params": [
+    {
+      "name": "fp1",
+      "kind": "string",
+      "value": "de"
+    }
+  ],
+  "warnings": []
+}

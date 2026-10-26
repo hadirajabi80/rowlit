@@ -1,0 +1,413 @@
+{
+  "name": "numbers (int/decimal/float), between, dates (day ranges, datetime, mixed precision), time, booleans",
+  "catalog": {
+    "crm.customers": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "name",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "email",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "created",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "vip",
+        "kind": "bool",
+        "type": "BOOLEAN"
+      }
+    ],
+    "shop.orders": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "customer_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "status",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "total",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      },
+      {
+        "name": "ordered",
+        "kind": "date",
+        "type": "DATE"
+      },
+      {
+        "name": "shipped_at",
+        "kind": "datetime",
+        "type": "TIMESTAMP"
+      },
+      {
+        "name": "ship_time",
+        "kind": "time",
+        "type": "TIME"
+      },
+      {
+        "name": "weight",
+        "kind": "float",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "ref",
+        "kind": "string",
+        "type": "VARCHAR"
+      }
+    ],
+    "shop.Order Lines": [
+      {
+        "name": "order_id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "select",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "qty",
+        "kind": "int",
+        "type": "BIGINT"
+      }
+    ],
+    "inv.products": [
+      {
+        "name": "id",
+        "kind": "int",
+        "type": "BIGINT"
+      },
+      {
+        "name": "sku",
+        "kind": "string",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "price",
+        "kind": "decimal",
+        "type": "DECIMAL(38,2)"
+      }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      {
+        "id": "t1",
+        "alias": "crm",
+        "table": "customers",
+        "as": "customers",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "t2",
+        "alias": "shop",
+        "table": "orders",
+        "as": "orders",
+        "x": 360,
+        "y": 40
+      }
+    ],
+    "joins": [
+      {
+        "id": "j1",
+        "type": "inner",
+        "left": "t1",
+        "right": "t2",
+        "on": [
+          {
+            "leftColumn": "id",
+            "rightColumn": "customer_id",
+            "op": "="
+          }
+        ]
+      }
+    ],
+    "columns": [
+      {
+        "id": "c1",
+        "tableId": "t2",
+        "column": "id"
+      }
+    ],
+    "filter": {
+      "kind": "group",
+      "id": "g1",
+      "logic": "and",
+      "items": [
+        {
+          "kind": "condition",
+          "id": "f1",
+          "column": "t2.id",
+          "op": "gt",
+          "values": [
+            " 1_000 "
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f2",
+          "column": "t2.total",
+          "op": "between",
+          "values": [
+            "10.50",
+            99
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f3",
+          "column": "t2.weight",
+          "op": "lte",
+          "values": [
+            2
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f4",
+          "column": "t2.total",
+          "op": "neq",
+          "values": [
+            "0012.300"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f5",
+          "column": "t2.ordered",
+          "op": "onDate",
+          "values": [
+            "2024-02-28"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f6",
+          "column": "t2.ordered",
+          "op": "before",
+          "values": [
+            "2024-12-31"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f7",
+          "column": "t2.ordered",
+          "op": "after",
+          "values": [
+            "2023-12-31"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f8",
+          "column": "t2.shipped_at",
+          "op": "between",
+          "values": [
+            "2024-01-01 08:30",
+            "2024-01-31"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f9",
+          "column": "t2.shipped_at",
+          "op": "after",
+          "values": [
+            "2024-01-01T10:00:00.5"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f10",
+          "column": "t1.created",
+          "op": "between",
+          "values": [
+            "2023-01-01",
+            "2023-06-30"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f11",
+          "column": "t1.created",
+          "op": "neq",
+          "values": [
+            "2023-03-01"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f12",
+          "column": "t2.ship_time",
+          "op": "before",
+          "values": [
+            "9:05"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f13",
+          "column": "t2.ship_time",
+          "op": "between",
+          "values": [
+            "08:00:00",
+            "17:30:15"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f14",
+          "column": "t1.vip",
+          "op": "isTrue",
+          "values": []
+        },
+        {
+          "kind": "condition",
+          "id": "f15",
+          "column": "t2.id",
+          "op": "lt",
+          "values": [
+            "abc"
+          ]
+        },
+        {
+          "kind": "condition",
+          "id": "f16",
+          "column": "t1.created",
+          "op": "lte",
+          "values": [
+            "2023-02-30"
+          ]
+        }
+      ]
+    }
+  },
+  "sql": "SELECT orders.id\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nWHERE orders.id > $fp1 AND orders.total BETWEEN $fp2 AND $fp3 AND orders.weight <= $fp4 AND orders.total <> $fp5 AND (orders.ordered >= $fp6 AND orders.ordered < $fp7) AND orders.ordered < $fp8 AND orders.ordered >= $fp9 AND (orders.shipped_at >= $fp10 AND orders.shipped_at < $fp11) AND orders.shipped_at > $fp12 AND (customers.created >= $fp13 AND customers.created < $fp14) AND NOT (customers.created >= $fp15 AND customers.created < $fp16) AND orders.ship_time < $fp17 AND orders.ship_time BETWEEN $fp18 AND $fp19 AND customers.vip = TRUE",
+  "params": [
+    {
+      "name": "fp1",
+      "kind": "int",
+      "value": 1000
+    },
+    {
+      "name": "fp2",
+      "kind": "decimal",
+      "value": "10.5"
+    },
+    {
+      "name": "fp3",
+      "kind": "int",
+      "value": 99
+    },
+    {
+      "name": "fp4",
+      "kind": "float",
+      "value": 2
+    },
+    {
+      "name": "fp5",
+      "kind": "decimal",
+      "value": "12.3"
+    },
+    {
+      "name": "fp6",
+      "kind": "datetime",
+      "value": "2024-02-28T00:00:00"
+    },
+    {
+      "name": "fp7",
+      "kind": "datetime",
+      "value": "2024-02-29T00:00:00"
+    },
+    {
+      "name": "fp8",
+      "kind": "datetime",
+      "value": "2024-12-31T00:00:00"
+    },
+    {
+      "name": "fp9",
+      "kind": "datetime",
+      "value": "2024-01-01T00:00:00"
+    },
+    {
+      "name": "fp10",
+      "kind": "datetime",
+      "value": "2024-01-01T08:30:00"
+    },
+    {
+      "name": "fp11",
+      "kind": "datetime",
+      "value": "2024-02-01T00:00:00"
+    },
+    {
+      "name": "fp12",
+      "kind": "datetime",
+      "value": "2024-01-01T10:00:00.5"
+    },
+    {
+      "name": "fp13",
+      "kind": "datetime",
+      "value": "2023-01-01T00:00:00"
+    },
+    {
+      "name": "fp14",
+      "kind": "datetime",
+      "value": "2023-07-01T00:00:00"
+    },
+    {
+      "name": "fp15",
+      "kind": "datetime",
+      "value": "2023-03-01T00:00:00"
+    },
+    {
+      "name": "fp16",
+      "kind": "datetime",
+      "value": "2023-03-02T00:00:00"
+    },
+    {
+      "name": "fp17",
+      "kind": "time",
+      "value": "09:05:00"
+    },
+    {
+      "name": "fp18",
+      "kind": "time",
+      "value": "08:00:00"
+    },
+    {
+      "name": "fp19",
+      "kind": "time",
+      "value": "17:30:15"
+    }
+  ],
+  "warnings": []
+}
