@@ -10,7 +10,7 @@ import {
 } from './index';
 import { SNIPPET_DIALECTS } from './builtins';
 
-const DIALECTS: Dialect[] = ['tsql', 'plsql', 'pgsql', 'sqlite', 'mysql', 'clickhouse', 'snowflake', 'cql'];
+const DIALECTS: Dialect[] = ['tsql', 'plsql', 'pgsql', 'sqlite', 'mysql', 'clickhouse', 'snowflake', 'cql', 'duckdb'];
 const lists = new Map<Dialect, readonly SnippetDef[]>();
 
 beforeAll(async () => {
@@ -23,12 +23,12 @@ beforeAll(async () => {
 /** Minimum number of built-ins per dialect (the shared ones included). */
 const MIN: Record<Dialect, number> = {
   tsql: 80, plsql: 70, pgsql: 80, mysql: 70, clickhouse: 70, snowflake: 70, sqlite: 45, cql: 40,
-  // LINKS-WPD begin (WP-D adds 'duckdb' to DIALECTS once data/duckdb.ts has its library)
-  duckdb: 0,
+  // LINKS-WPD begin
+  duckdb: 80,
   // LINKS-WPD end
 };
-/** LINKS-WP0: dialects whose library is still a stub (not held to the shape rules below yet). */
-const PENDING: Dialect[] = ['duckdb'];
+/** Dialects whose library is still a stub (not held to the shape rules below yet): none. */
+const PENDING: Dialect[] = [];
 
 describe('library shape', () => {
   it('every dialect is covered and big enough', () => {
@@ -128,14 +128,14 @@ describe('dialect hygiene', () => {
     only(/\bFROM\s+DUAL\b/i, ['plsql', 'snowflake', 'mysql']);
     only(/\bIDENTITY\s*\(/i, ['tsql']);
     only(/\bAUTO_INCREMENT\b/i, ['mysql']);
-    only(/\bILIKE\b/i, ['pgsql', 'snowflake']);
+    only(/\bILIKE\b/i, ['pgsql', 'snowflake', 'duckdb']);
     only(/\bROWNUM\b/i, ['plsql']);
-    only(/\bGENERATE_SERIES\b/i, ['pgsql']);
+    only(/\bGENERATE_SERIES\b/i, ['pgsql', 'duckdb']);
     only(/\bBEGIN\s+TRY\b/i, ['tsql']);
     only(/\bsp_executesql\b/i, ['tsql']);
-    only(/\bLIMIT\b/i, ['sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake', 'cql']);
+    only(/\bLIMIT\b/i, ['sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake', 'cql', 'duckdb']);
     only(/\bOFFSET\b[^\n]*\bROWS\b/i, ['tsql', 'plsql']);
-    only(/\bQUALIFY\b/i, ['snowflake']);
+    only(/\bQUALIFY\b/i, ['snowflake', 'duckdb']);
     only(/\bALLOW FILTERING\b/i, ['cql']);
   });
 

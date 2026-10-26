@@ -1,6 +1,117 @@
-// DuckDB, the dialect of a linked database (plan-links). WP-D fills this file (owned by WP-D): FROM-first queries,
-// GROUP BY ALL, QUALIFY, PIVOT, list/struct helpers, string_agg, date_trunc, SUMMARIZE, DESCRIBE… Until then the
-// shared snippets (./common.ts) are all a linked console offers.
-import type { SnippetDef } from '../builtins';
+// DuckDB, the SQL of a linked database (plan-links WP-D). A table of a link is `alias.table` (the alias of its member is the
+// DuckDB schema), so the bodies join across members with `crm.customers` / `erp.invoices` style names. Linked consoles are
+// read-only: the DML and DDL snippets are for the DuckDB scripts you materialize into a writable connection first.
+// Bodies are Monaco snippet syntax; `\$` is a literal dollar (`$name` parameters).
+import { CAT as C, defs, type SnippetDef } from '../builtins';
 
-export const SNIPPETS: SnippetDef[] = [];
+const s = defs(['duckdb']);
+
+export const SNIPPETS: SnippetDef[] = [
+  // ------------------------------------------------------------------ Query
+  s('cte', 'Common table expression', C.Q, 'WITH … AS (…) SELECT.', 'WITH ${1:cte} AS (\n\tSELECT ${2:*}\n\tFROM ${3:alias.table}\n)\nSELECT *\nFROM ${1:cte}$0'),
+  s('join', 'JOIN … ON', C.Q, 'Join clause with aliases (tables of two members: alias.table).', 'JOIN ${1:alias.table} ${2:t} ON ${2:t}.${3:id} = ${4:other}.${5:id}$0'),
+  s('case', 'CASE WHEN … END', C.Q, 'Searched CASE expression.', 'CASE\n\tWHEN ${1:id = 1} THEN ${2:result}\n\tELSE ${3:other}\nEND$0'),
+  s('fromfirst', 'FROM-first query', C.Q, 'DuckDB lets a query start with FROM; SELECT * is implied.', 'FROM ${1:alias.table}\nSELECT ${2:*}\nWHERE ${3:true}$0'),
+  s('xjoin', 'Join tables of two links members', C.Q, 'Two mounted tables of different sources joined on a key.', 'SELECT ${1:c}.*, ${2:o}.${3:total}\nFROM ${4:crm.customers} AS ${1:c}\nJOIN ${5:shop.orders} AS ${2:o} ON ${2:o}.${6:customer_id} = ${1:c}.${7:id}$0'),
+  s('xleft', 'Cross-source LEFT JOIN', C.Q, 'Rows of the first source with the optional match of the second.', 'SELECT ${1:c}.*, ${2:o}.${3:id} AS ${4:order_id}\nFROM ${5:crm.customers} AS ${1:c}\nLEFT JOIN ${6:shop.orders} AS ${2:o} ON ${2:o}.${7:customer_id} = ${1:c}.${8:id}$0'),
+  s('xanti', 'Anti join across sources', C.Q, 'Rows of one source that have no match in another (ANTI JOIN).', 'SELECT *\nFROM ${1:crm.customers} AS c\nANTI JOIN ${2:shop.orders} AS o ON o.${3:customer_id} = c.${4:id}$0'),
+  s('xsemi', 'Semi join across sources', C.Q, 'Rows of one source that have a match in another, without duplicating them.', 'SELECT *\nFROM ${1:crm.customers} AS c\nSEMI JOIN ${2:shop.orders} AS o ON o.${3:customer_id} = c.${4:id}$0'),
+  s('x3', 'Three-way join', C.Q, 'Customers, their orders and the order lines from three links members.', 'SELECT c.${1:name}, o.${2:id} AS order_id, l.${3:qty}\nFROM ${4:crm.customers} AS c\nJOIN ${5:shop.orders} AS o ON o.${6:customer_id} = c.${7:id}\nJOIN ${8:wh.order_lines} AS l ON l.${9:order_id} = o.${2:id}$0'),
+  s('xagg', 'Aggregate across sources', C.Q, 'Total per customer over a join of two members.', 'SELECT c.${1:name}, COUNT(o.${2:id}) AS orders, SUM(o.${3:total}) AS total\nFROM ${4:crm.customers} AS c\nLEFT JOIN ${5:shop.orders} AS o ON o.${6:customer_id} = c.${7:id}\nGROUP BY ALL\nORDER BY total DESC NULLS LAST$0'),
+  s('xmatch', 'Match rows with different keys', C.Q, 'Join keys of different spelling: trim and lower-case both sides.', 'SELECT a.*, b.*\nFROM ${1:crm.customers} AS a\nJOIN ${2:erp.accounts} AS b ON lower(trim(a.${3:email})) = lower(trim(b.${4:email}))$0'),
+  s('xrecon', 'Reconcile two sources', C.Q, 'Keys only in one side or only in the other (FULL JOIN).', 'SELECT coalesce(a.${1:id}, b.${1:id}) AS ${1:id},\n\tCASE WHEN a.${1:id} IS NULL THEN \'only in b\' WHEN b.${1:id} IS NULL THEN \'only in a\' ELSE \'both\' END AS status\nFROM ${2:crm.customers} AS a\nFULL JOIN ${3:erp.accounts} AS b ON a.${1:id} = b.${1:id}\nWHERE a.${1:id} IS NULL OR b.${1:id} IS NULL$0'),
+  s('xdiff', 'Rows in A but not in B (EXCEPT)', C.Q, 'Set difference of two sources with the same columns.', 'SELECT ${1:id}, ${2:name} FROM ${3:crm.customers}\nEXCEPT\nSELECT ${1:id}, ${2:name} FROM ${4:erp.accounts}$0'),
+  s('union', 'UNION ALL BY NAME', C.Q, 'Stack tables of different members; columns are matched by name, missing ones are NULL.', 'SELECT * FROM ${1:crm.customers}\nUNION ALL BY NAME\nSELECT * FROM ${2:erp.accounts}$0'),
+  s('grp', 'GROUP BY with HAVING', C.Q, 'Aggregate per group and filter the groups.', 'SELECT ${1:category}, COUNT(*) AS cnt, SUM(${2:amount}) AS total\nFROM ${3:alias.sales}\nGROUP BY ${1:category}\nHAVING COUNT(*) > ${4:1}\nORDER BY total DESC$0'),
+  s('gball', 'GROUP BY ALL', C.Q, 'Group by every non-aggregate column of the select list.', 'SELECT ${1:category}, ${2:region}, COUNT(*) AS cnt, SUM(${3:amount}) AS total\nFROM ${4:alias.sales}\nGROUP BY ALL\nORDER BY ALL$0'),
+  s('rollup', 'GROUP BY ROLLUP / CUBE', C.Q, 'Subtotals and a grand total.', 'SELECT ${1:category}, ${2:region}, SUM(${3:amount}) AS total\nFROM ${4:alias.sales}\nGROUP BY ROLLUP (${1:category}, ${2:region})$0'),
+  s('gsets', 'GROUPING SETS', C.Q, 'Several groupings in one pass.', 'SELECT ${1:category}, ${2:region}, SUM(${3:amount}) AS total\nFROM ${4:alias.sales}\nGROUP BY GROUPING SETS ((${1:category}), (${2:region}), ())$0'),
+  s('filter', 'Aggregate FILTER (WHERE …)', C.Q, 'Conditional aggregates without CASE.', "SELECT ${1:customer_id},\n\tCOUNT(*) AS orders,\n\tCOUNT(*) FILTER (WHERE ${2:status} = ${3:'paid'}) AS paid,\n\tSUM(${4:total}) FILTER (WHERE ${2:status} = ${3:'paid'}) AS paid_total\nFROM ${5:alias.orders}\nGROUP BY ALL$0"),
+  s('qualify', 'QUALIFY (filter on a window function)', C.Q, 'Latest row per key without a subquery.', 'SELECT *\nFROM ${1:alias.table}\nQUALIFY ROW_NUMBER() OVER (PARTITION BY ${2:key_col} ORDER BY ${3:updated_at} DESC) = 1$0'),
+  s('rown', 'ROW_NUMBER() per group', C.Q, 'Number the rows of each partition.', 'SELECT *, ROW_NUMBER() OVER (PARTITION BY ${1:group_col} ORDER BY ${2:created_at} DESC) AS rn\nFROM ${3:alias.table}$0'),
+  s('rank', 'RANK / DENSE_RANK / NTILE', C.Q, 'Ranking window functions.', 'SELECT ${1:name}, ${2:score},\n\tRANK() OVER (ORDER BY ${2:score} DESC) AS rnk,\n\tDENSE_RANK() OVER (ORDER BY ${2:score} DESC) AS dense_rnk,\n\tNTILE(${3:4}) OVER (ORDER BY ${2:score} DESC) AS bucket\nFROM ${4:alias.results}$0'),
+  s('lag', 'LAG / LEAD', C.Q, 'Previous and next value in an ordered partition.', 'SELECT ${1:id}, ${2:amount},\n\tLAG(${2:amount}) OVER (PARTITION BY ${3:customer_id} ORDER BY ${4:order_date}) AS prev_value,\n\tLEAD(${2:amount}) OVER (PARTITION BY ${3:customer_id} ORDER BY ${4:order_date}) AS next_value\nFROM ${5:alias.orders}$0'),
+  s('runtot', 'Running total', C.Q, 'Cumulative SUM over an ordered window.', 'SELECT ${1:order_date}, ${2:amount},\n\tSUM(${2:amount}) OVER (ORDER BY ${1:order_date}, ${3:id} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total\nFROM ${4:alias.orders}$0'),
+  s('movavg', 'Moving average (range window)', C.Q, 'Average over the last 7 days of each row (RANGE with an interval).', "SELECT ${1:day}, ${2:amount},\n\tAVG(${2:amount}) OVER (ORDER BY ${1:day} RANGE BETWEEN INTERVAL 6 DAYS PRECEDING AND CURRENT ROW) AS avg_7d\nFROM ${3:alias.daily}$0"),
+  s('winname', 'Named WINDOW', C.Q, 'Define a window once and reuse it by name.', 'SELECT ${1:id}, ${2:amount},\n\tSUM(${2:amount}) OVER w AS running,\n\tROW_NUMBER() OVER w AS rn\nFROM ${3:alias.orders}\nWINDOW w AS (PARTITION BY ${4:customer_id} ORDER BY ${5:order_date})$0'),
+  s('pctshare', 'Percent of total', C.Q, 'Each group as a share of the grand total.', 'SELECT ${1:category}, SUM(${2:amount}) AS total,\n\tround(100.0 * SUM(${2:amount}) / SUM(SUM(${2:amount})) OVER (), 1) AS pct\nFROM ${3:alias.sales}\nGROUP BY ${1:category}\nORDER BY total DESC$0'),
+  s('topn', 'Top N per group', C.Q, 'The n largest rows of each group (QUALIFY).', 'SELECT *\nFROM ${1:alias.orders}\nQUALIFY ROW_NUMBER() OVER (PARTITION BY ${2:customer_id} ORDER BY ${3:total} DESC) <= ${4:3}$0'),
+  s('argmax', 'arg_max / arg_min', C.Q, 'The value of one column at the row where another is largest or smallest.', 'SELECT ${1:customer_id}, arg_max(${2:id}, ${3:order_date}) AS last_order_id, max(${3:order_date}) AS last_order\nFROM ${4:alias.orders}\nGROUP BY ALL$0'),
+  s('pivot', 'PIVOT (rows to columns)', C.Q, 'DuckDB PIVOT: one column per value of the ON column.', 'PIVOT ${1:alias.sales}\nON ${2:year}\nUSING sum(${3:amount})\nGROUP BY ${4:category}$0'),
+  s('pivotin', 'PIVOT with a fixed list', C.Q, 'Pivot only the listed values (the column set is then known up front).', 'PIVOT ${1:alias.sales}\nON ${2:year} IN (${3:2023, 2024})\nUSING sum(${4:amount}) AS total\nGROUP BY ${5:category}$0'),
+  s('unpivot', 'UNPIVOT (columns to rows)', C.Q, 'Turn a set of columns into name/value rows.', 'UNPIVOT ${1:alias.stats}\nON ${2:q1, q2, q3, q4}\nINTO NAME ${3:quarter} VALUE ${4:amount}$0'),
+  s('exclude', 'SELECT * EXCLUDE', C.Q, 'All columns but a few.', 'SELECT * EXCLUDE (${1:password, notes})\nFROM ${2:alias.table}$0'),
+  s('replace', 'SELECT * REPLACE', C.Q, 'All columns, with some of them recomputed in place.', 'SELECT * REPLACE (upper(${1:name}) AS ${1:name}, round(${2:price}, 2) AS ${2:price})\nFROM ${3:alias.table}$0'),
+  s('columns', 'COLUMNS(…) expression', C.Q, 'Apply one expression to every column matching a pattern.', "SELECT min(COLUMNS('${1:amount_.*}')), max(COLUMNS('${1:amount_.*}'))\nFROM ${2:alias.table}$0"),
+  s('asof', 'ASOF JOIN (nearest earlier row)', C.Q, 'Match each event with the latest price at or before its time.', 'SELECT t.${1:ts}, t.${2:symbol}, p.${3:price}\nFROM ${4:alias.trades} AS t\nASOF LEFT JOIN ${5:alias.prices} AS p ON t.${2:symbol} = p.${2:symbol} AND t.${1:ts} >= p.${1:ts}$0'),
+  s('lateral', 'LATERAL join (top N per row)', C.Q, 'The first rows of a related table for each outer row.', 'SELECT c.*, x.*\nFROM ${1:crm.customers} AS c,\n\tLATERAL (\n\t\tSELECT o.*\n\t\tFROM ${2:shop.orders} AS o\n\t\tWHERE o.${3:customer_id} = c.${4:id}\n\t\tORDER BY o.${5:order_date} DESC\n\t\tLIMIT ${6:3}\n\t) AS x$0'),
+  s('exists', 'WHERE EXISTS', C.Q, 'Rows that have a related row.', 'SELECT *\nFROM ${1:crm.customers} AS c\nWHERE EXISTS (\n\tSELECT 1 FROM ${2:shop.orders} AS o WHERE o.${3:customer_id} = c.${4:id}\n)$0'),
+  s('notex', 'WHERE NOT EXISTS', C.Q, 'Rows that have no related row.', 'SELECT *\nFROM ${1:crm.customers} AS c\nWHERE NOT EXISTS (\n\tSELECT 1 FROM ${2:shop.orders} AS o WHERE o.${3:customer_id} = c.${4:id}\n)$0'),
+  s('inlist', 'IN with a subquery from another source', C.Q, 'Filter one source by the keys found in another.', 'SELECT *\nFROM ${1:crm.customers}\nWHERE ${2:id} IN (SELECT ${3:customer_id} FROM ${4:shop.orders} WHERE ${5:total} > ${6:100})$0'),
+  s('cterec', 'Recursive CTE (hierarchy)', C.Q, 'Walk a parent/child table from the roots down.', 'WITH RECURSIVE tree(id, parent_id, name, lvl) AS (\n\tSELECT ${1:id}, ${2:parent_id}, ${3:name}, 0\n\tFROM ${4:alias.categories}\n\tWHERE ${2:parent_id} IS NULL\n\tUNION ALL\n\tSELECT c.${1:id}, c.${2:parent_id}, c.${3:name}, t.lvl + 1\n\tFROM ${4:alias.categories} AS c\n\tJOIN tree AS t ON c.${2:parent_id} = t.id\n)\nSELECT * FROM tree$0'),
+  s('series', 'Date series (calendar)', C.Q, 'One row per day, from generate_series.', "SELECT d::DATE AS day\nFROM generate_series(DATE ${1:'2024-01-01'}, DATE ${2:'2024-01-31'}, INTERVAL 1 DAY) AS t(d)$0", true),
+  s('range', 'range / generate_series', C.Q, 'Numbers from a table function.', 'SELECT * FROM range(${1:1}, ${2:11}) AS t(n)$0', true),
+  s('page', 'Pagination (LIMIT / OFFSET)', C.Q, 'Page n of a sorted result.', 'SELECT ${1:*}\nFROM ${2:alias.table}\nORDER BY ${3:id}\nLIMIT ${4:50} OFFSET (${5:1} - 1) * ${4:50}$0'),
+  s('keyset', 'Keyset pagination', C.Q, 'Next page after the last key seen.', 'SELECT ${1:*}\nFROM ${2:alias.table}\nWHERE ${3:id} > ${4:0}\nORDER BY ${3:id}\nLIMIT ${5:50}$0'),
+  s('sample', 'Random sample', C.Q, 'A percentage of the rows, or a fixed number with ROWS.', 'SELECT *\nFROM ${1:alias.table}\nUSING SAMPLE ${2:10} PERCENT$0'),
+  s('dedup', 'Deduplicate by key', C.Q, 'Keep one row per key (the newest).', 'SELECT *\nFROM ${1:alias.table}\nQUALIFY ROW_NUMBER() OVER (PARTITION BY ${2:key_col} ORDER BY ${3:updated_at} DESC) = 1$0'),
+  s('daterng', 'Date range filter (half-open)', C.Q, 'Pruning-friendly [start, end) filter (pushed down to the source).', "WHERE ${1:created_at} >= ${2:DATE '2024-01-01'}\n\tAND ${1:created_at} < ${3:DATE '2024-02-01'}$0"),
+  s('bymonth', 'Per month (date_trunc)', C.Q, 'Group a timestamp by month.', "SELECT date_trunc('${1:month}', ${2:order_date}) AS period, count(*) AS n, sum(${3:total}) AS total\nFROM ${4:alias.orders}\nGROUP BY ALL\nORDER BY period$0"),
+  s('bucket', 'time_bucket', C.Q, 'Fixed-width time buckets.', "SELECT time_bucket(INTERVAL '${1:15 minutes}', ${2:ts}) AS bucket, count(*) AS n\nFROM ${3:alias.events}\nGROUP BY ALL\nORDER BY bucket$0"),
+  s('stragg', 'string_agg', C.Q, 'Concatenate values per group (ORDER BY inside).', "SELECT ${1:group_col}, string_agg(${2:name}, ${3:', '} ORDER BY ${2:name}) AS names\nFROM ${4:alias.table}\nGROUP BY ${1:group_col}$0"),
+  s('listagg', 'list() aggregate and unnest', C.Q, 'Collect values into a list, then expand them again.', 'SELECT ${1:group_col}, list(${2:name} ORDER BY ${2:name}) AS names\nFROM ${3:alias.table}\nGROUP BY ${1:group_col}$0'),
+  s('unnest', 'unnest a list', C.Q, 'One row per list element.', 'SELECT ${1:id}, unnest(${2:tags}) AS ${3:tag}\nFROM ${4:alias.table}$0'),
+  s('json', 'JSON path (-> / ->>)', C.Q, 'Read fields from a JSON column.', "SELECT ${1:payload} ->> '\\$.${2:customer.name}' AS name,\n\tjson_extract(${1:payload}, '\\$.${3:items[0].price}') AS first_price\nFROM ${4:alias.table}$0"),
+  s('regex', 'Regular expressions', C.Q, 'Match and extract with regexp_*.', "SELECT ${1:name}, regexp_extract(${1:name}, '${2:(\\\\d+)}', 1) AS digits\nFROM ${3:alias.table}\nWHERE regexp_matches(${1:name}, '${4:^[A-Z]}')$0"),
+  s('ilike', 'Case-insensitive search', C.Q, 'ILIKE and contains() match without regard to case.', "SELECT *\nFROM ${1:alias.table}\nWHERE ${2:name} ILIKE ${3:'%search%'}$0"),
+  s('param', 'Named parameter ($name)', C.Q, 'A $name placeholder: Rowlit asks for its value when you run.', 'SELECT *\nFROM ${1:alias.orders}\nWHERE ${2:customer_id} = \\$${3:customer_id}\n\tAND ${4:order_date} >= \\$${5:since}$0'),
+  s('summ', 'SUMMARIZE a table', C.Q, 'Min, max, distinct count, null percentage and quantiles of every column.', 'SUMMARIZE ${1:alias.table}$0'),
+  s('desc', 'DESCRIBE a table', C.Q, 'Column names, types and nullability.', 'DESCRIBE ${1:alias.table}$0'),
+  s('nulls', 'NULL profile of a table', C.Q, 'Count the NULLs of every column in one pass.', "SELECT\n\tcount(*) AS total_rows,\n\tcount(COLUMNS(*))\nFROM ${2:alias.table}$0"),
+  s('xdup', 'Duplicate keys across a join', C.Q, 'Find keys that appear more than once in a source.', 'SELECT ${1:email}, count(*) AS n\nFROM ${2:crm.customers}\nGROUP BY ${1:email}\nHAVING count(*) > 1\nORDER BY n DESC$0'),
+
+  // ------------------------------------------------------------------ DML (for scripts run against a writable DuckDB / a materialize target)
+  s('insel', 'INSERT … SELECT', C.D, 'Insert the result of a query (not runnable in a read-only linked console).', 'INSERT INTO ${1:target} (${2:columns})\nSELECT ${3:columns}\nFROM ${4:source}\nWHERE ${5:true};$0'),
+  s('insname', 'INSERT … BY NAME', C.D, 'Columns are matched by name instead of position (not for read-only linked consoles).', 'INSERT INTO ${1:target} BY NAME\nSELECT ${2:*}\nFROM ${3:source};$0'),
+  s('insmulti', 'INSERT multiple rows', C.D, 'Row constructor (not runnable in a read-only linked console).', "INSERT INTO ${1:my_table} (${2:col1, col2})\nVALUES (${3:1, 'a'}),\n\t(${4:2, 'b'}),\n\t(${5:3, 'c'});$0"),
+  s('upsert', 'INSERT … ON CONFLICT (upsert)', C.D, 'Insert, or update on a key conflict (not for read-only linked consoles).', 'INSERT INTO ${1:target} (${2:id}, ${3:col})\nSELECT ${2:id}, ${3:col} FROM ${4:source}\nON CONFLICT (${2:id}) DO UPDATE SET ${3:col} = excluded.${3:col};$0'),
+  s('insrepl', 'INSERT OR REPLACE', C.D, 'Replace the row with the same key (not for read-only linked consoles).', 'INSERT OR REPLACE INTO ${1:target} (${2:id}, ${3:col})\nVALUES (${4:1}, ${5:\'a\'});$0'),
+  s('updj', 'UPDATE … FROM (join)', C.D, 'Update from another table (not runnable in a read-only linked console).', 'UPDATE ${1:target}\nSET ${2:col} = s.${2:col}\nFROM ${3:source} AS s\nWHERE s.${4:id} = ${1:target}.${4:id};$0'),
+  s('delj', 'DELETE … USING (join)', C.D, 'Delete the rows that match another table (not for read-only linked consoles).', 'DELETE FROM ${1:target}\nUSING ${2:source} AS s\nWHERE s.${3:id} = ${1:target}.${3:id};$0'),
+  s('ctas', 'CREATE TABLE AS SELECT', C.D, 'Copy a result into a new table (use Materialize to write it to a connection).', 'CREATE TABLE ${1:copy} AS\nSELECT ${2:*}\nFROM ${3:alias.table}\nWHERE ${4:true};$0'),
+  s('copyout', 'COPY … TO a file', C.D, 'Export a query to CSV or Parquet (needs a writable DuckDB with file access).', "COPY (SELECT ${1:*} FROM ${2:alias.table}) TO '${3:export.parquet}' (FORMAT ${4:PARQUET});$0"),
+
+  // ------------------------------------------------------------------ DDL
+  s('tbl', 'CREATE TABLE', C.L, 'Table with a primary key.', 'CREATE TABLE IF NOT EXISTS ${1:name} (\n\t${2:id} BIGINT PRIMARY KEY,\n\t${3:name} VARCHAR NOT NULL,\n\tcreated_at TIMESTAMP DEFAULT current_timestamp\n);$0'),
+  s('tblfk', 'CREATE TABLE with FK and CHECK', C.L, 'Primary key, foreign key and CHECK constraint.', 'CREATE TABLE ${1:orders} (\n\t${2:id} BIGINT PRIMARY KEY,\n\t${3:customer_id} BIGINT NOT NULL REFERENCES ${4:customers} (id),\n\t${5:total} DECIMAL(12, 2) CHECK (${5:total} >= 0)\n);$0'),
+  s('seq', 'CREATE SEQUENCE', C.L, 'Sequence and a table that uses nextval as a default.', "CREATE SEQUENCE ${1:seq_id} START 1;\nCREATE TABLE ${2:items} (\n\tid BIGINT DEFAULT nextval('${1:seq_id}') PRIMARY KEY,\n\tname VARCHAR\n);$0"),
+  s('enum', 'CREATE TYPE … AS ENUM', C.L, 'An enumeration type, stored compactly.', "CREATE TYPE ${1:status} AS ENUM (${2:'new', 'paid', 'shipped'});$0"),
+  s('view', 'CREATE VIEW', C.L, 'A view over a query.', 'CREATE OR REPLACE VIEW ${1:v_name} AS\nSELECT ${2:*}\nFROM ${3:alias.table};$0'),
+  s('tmp', 'CREATE TEMPORARY TABLE', C.L, 'A table that lives for the session only.', 'CREATE TEMPORARY TABLE ${1:tmp} AS\nSELECT ${2:*}\nFROM ${3:alias.table};$0'),
+  s('addcol', 'ALTER TABLE ADD COLUMN', C.L, 'Add a column to a table.', 'ALTER TABLE ${1:my_table} ADD COLUMN IF NOT EXISTS ${2:new_col} ${3:VARCHAR};$0'),
+  s('struct', 'STRUCT / LIST / MAP column types', C.L, 'Nested column types and how to write their values.', "CREATE TABLE ${1:events} (\n\tid BIGINT,\n\tpayload STRUCT(${2:user VARCHAR, items INTEGER[]}),\n\ttags VARCHAR[],\n\tattrs MAP(VARCHAR, VARCHAR)\n);\nINSERT INTO ${1:events} VALUES (1, {'user': 'ann', 'items': [1, 2]}, ['a', 'b'], MAP {'k': 'v'});$0"),
+
+  // ------------------------------------------------------------------ Programmability
+  s('macro', 'CREATE MACRO (scalar)', C.P, 'A reusable SQL expression (not runnable in a read-only linked console).', 'CREATE OR REPLACE MACRO ${1:add_tax}(${2:price}, ${3:rate} := ${4:0.2}) AS ${2:price} * (1 + ${3:rate});$0'),
+  s('macrot', 'CREATE MACRO (table)', C.P, 'A parameterized query that returns a table.', 'CREATE OR REPLACE MACRO ${1:orders_of}(${2:cid}) AS TABLE\n\tSELECT * FROM ${3:shop.orders} WHERE customer_id = ${2:cid};$0'),
+  s('lambda', 'Lambda: list_transform / list_filter', C.P, 'Apply a lambda to each element of a list.', 'SELECT list_transform(${1:[1, 2, 3]}, x -> x * ${2:2}) AS doubled,\n\tlist_filter(${1:[1, 2, 3]}, x -> x > ${3:1}) AS filtered$0', true),
+  s('reduce', 'list_reduce (fold a list)', C.P, 'Fold a list with a two-argument lambda.', 'SELECT list_reduce(${1:[1, 2, 3, 4]}, (acc, x) -> acc + x) AS total$0', true),
+  s('listcomp', 'List comprehension', C.P, 'Build a list with a comprehension and an optional filter.', 'SELECT [x * ${1:2} FOR x IN ${2:range(1, 6)} IF x % 2 = ${3:1}] AS odds_doubled$0', true),
+  s('structpack', 'Struct literals and access', C.P, 'Build a struct and read its fields.', "SELECT {'name': ${1:'ann'}, 'age': ${2:30}} AS person,\n\t({'name': ${1:'ann'}, 'age': ${2:30}}).name AS name,\n\tstruct_pack(a := 1, b := 'x') AS packed$0", true),
+  s('maplit', 'MAP literals and lookup', C.P, 'Build a map and look a key up.', "SELECT map {'a': 1, 'b': 2} AS m,\n\tmap_extract_value(map {'a': 1, 'b': 2}, 'a') AS a$0", true),
+  s('tryc', 'TRY / TRY_CAST', C.P, 'NULL instead of an error when a value cannot be converted.', "SELECT ${1:value}, TRY_CAST(${1:value} AS ${2:INTEGER}) AS as_int, TRY(${1:value}::${2:INTEGER}) AS as_int2\nFROM ${3:alias.table}$0"),
+  s('casewhen', 'CASE with conversion guard', C.P, 'Classify values with a CASE and a safe cast.', "SELECT ${1:value},\n\tCASE\n\t\tWHEN TRY_CAST(${1:value} AS DOUBLE) IS NULL THEN 'not a number'\n\t\tWHEN TRY_CAST(${1:value} AS DOUBLE) < 0 THEN 'negative'\n\t\tELSE 'ok'\n\tEND AS kind\nFROM ${2:alias.table}$0"),
+  s('coalesce', 'COALESCE across sources', C.P, 'First non-NULL value of the same attribute held by two systems.', 'SELECT coalesce(a.${1:phone}, b.${1:phone}, \'n/a\') AS ${1:phone}\nFROM ${2:crm.customers} AS a\nLEFT JOIN ${3:erp.accounts} AS b ON b.${4:customer_id} = a.${5:id}$0'),
+
+  // ------------------------------------------------------------------ DBA / admin
+  s('tables', 'duckdb_tables()', C.A, 'Every table mounted in this link (alias = schema).', 'SELECT schema_name AS alias, table_name, column_count, estimated_size\nFROM duckdb_tables()\nORDER BY 1, 2$0', true),
+  s('cols', 'duckdb_columns()', C.A, 'Columns of the mounted tables with their DuckDB types.', "SELECT schema_name AS alias, table_name, column_name, data_type, is_nullable\nFROM duckdb_columns()\nWHERE schema_name = '${1:crm}'\nORDER BY table_name, column_index$0", true),
+  s('schemas', 'duckdb_schemas()', C.A, 'The member aliases of this link.', 'SELECT schema_name AS alias\nFROM duckdb_schemas()\nWHERE NOT internal\nORDER BY 1$0', true),
+  s('alltables', 'SHOW ALL TABLES', C.A, 'Database, schema, table, columns and types in one list.', 'SHOW ALL TABLES$0', true),
+  s('funcs', 'duckdb_functions()', C.A, 'Search the built-in functions by name.', "SELECT DISTINCT function_name, function_type, description\nFROM duckdb_functions()\nWHERE function_name ILIKE ${1:'%list%'}\nORDER BY 1$0", true),
+  s('settings', 'duckdb_settings()', C.A, 'Memory limit, threads and the other configuration values of the engine.', "SELECT name, value, description\nFROM duckdb_settings()\nWHERE name IN ('memory_limit', 'threads', 'temp_directory')$0", true),
+  s('memory', 'duckdb_memory()', C.A, 'Memory used by the federation engine, by component.', 'SELECT tag, round(memory_usage_bytes / 1048576.0, 1) AS memory_mb, round(temporary_storage_bytes / 1048576.0, 1) AS spilled_mb\nFROM duckdb_memory()\nORDER BY memory_usage_bytes DESC$0', true),
+  s('dbsize', 'pragma_database_size()', C.A, 'Size of the in-memory database and the memory limit.', 'SELECT * FROM pragma_database_size()$0', true),
+  s('version', 'DuckDB version', C.A, 'The engine version that runs your federated queries.', 'SELECT version() AS duckdb_version$0', true),
+  s('explain', 'EXPLAIN ANALYZE', C.A, 'The plan with timings and cardinalities.', 'EXPLAIN ANALYZE\nSELECT ${1:*}\nFROM ${2:alias.table}\nWHERE ${3:true}$0'),
+];
