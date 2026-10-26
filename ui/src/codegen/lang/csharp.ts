@@ -49,6 +49,8 @@ const PROVIDER: Record<Dialect, { ns: string; conn: string; param: string; prefi
   // WP-CS begin
   cql: { ns: 'Cassandra', conn: 'ISession', param: 'object', prefix: '' },
   // WP-CS end
+  // LINKS-WP0: a linked database runs in DuckDB (DuckDB.NET binds `$name` to parameters named without the prefix)
+  duckdb: { ns: 'DuckDB.NET.Data', conn: 'DuckDBConnection', param: 'DuckDBParameter', prefix: '' },
 };
 
 /** C# method base name of a routine (overloads with the same C# signature get a numeric suffix). */

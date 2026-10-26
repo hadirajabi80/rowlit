@@ -9,8 +9,8 @@ import { fileNameOf } from './files';
 
 export const IMPORT_VIEW_ID = 'import.wizard';
 
-/** Providers the wizard cannot load into (no relational INSERT path). */
-const UNSUPPORTED_PROVIDERS = new Set(['cassandra']);
+/** Providers the wizard cannot load into (no relational INSERT path; linked databases are read-only). */
+const UNSUPPORTED_PROVIDERS = new Set(['cassandra', 'linked']);
 
 export interface ImportContext {
   /** Null when the drop / command could not tell: the wizard asks for the connection in its first step. */

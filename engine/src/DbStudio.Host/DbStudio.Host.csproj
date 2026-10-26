@@ -34,6 +34,8 @@
     <ProjectReference Include="..\DbStudio.Providers.Cassandra\DbStudio.Providers.Cassandra.csproj" />
     <ProjectReference Include="..\DbStudio.Sources.Elasticsearch\DbStudio.Sources.Elasticsearch.csproj" />
     <ProjectReference Include="..\DbStudio.Import\DbStudio.Import.csproj" />
+    <!-- LINKS-WP0: linked databases (federated queries over an embedded DuckDB, plan-links). -->
+    <ProjectReference Include="..\DbStudio.Federation\DbStudio.Federation.csproj" />
   </ItemGroup>
 
   <ItemGroup>

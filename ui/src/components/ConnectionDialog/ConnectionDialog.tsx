@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, FolderOpen, LoaderCircle, Plug } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { errorMessage } from '../../api/client';
 import type { ConnectionInput, ConnectionProfile, FormField, ProviderId, ProviderInfo, TestConnectionResult } from '../../api/types';
 import { getPlatform } from '../../platform';
@@ -7,6 +7,7 @@ import { useConnections } from '../../store/connections';
 import { toast, useUi, type ConnectionDialogState } from '../../store/ui';
 import { connectAndOpen } from '../../app/actions';
 import { isMac } from '../../commands/keys';
+import { runCommand } from '../../commands/registry';
 import { CONNECTION_PALETTE, connColorCss } from '../../theme/connColors';
 import { Dialog } from '../common/Dialog';
 import { Select } from '../common/Select';
@@ -258,7 +259,7 @@ export function ConnectionDialog({ state, onClose }: Props) {
     >
       <div className="conn-dialog-layout">
         <div className="conn-providers" role="listbox" aria-label="Database type">
-          {providers.map((p) => (
+          {providers.filter((p) => p.id !== 'linked').map((p) => (
             <button
               key={p.id}
               role="option"
@@ -271,6 +272,22 @@ export function ConnectionDialog({ state, onClose }: Props) {
               <span>{PROVIDER_LABEL[p.id] ?? p.displayName}</span>
             </button>
           ))}
+          {/* LINKS-WP0: a linked database has its own editor (command links.new, components/Links) */}
+          {!isEdit && (
+            <button
+              key="linked"
+              role="option"
+              aria-selected={false}
+              className="conn-provider"
+              onClick={() => {
+                onClose();
+                runCommand('links.new', { folder: folder || null, connectAfter: state.mode === 'new' && !!state.connectAfter });
+              }}
+            >
+              <ProviderLogo providerId="linked" size={22} />
+              <span>{PROVIDER_LABEL.linked}</span>
+            </button>
+          )}
         </div>
         <div className="conn-form">
           <div className="form-grid">
@@ -555,11 +572,32 @@ function FileInput({ id, aria, className, field, value, onChange }: { id: string
   );
 }
 
+/**
+ * LINKS-WP0: a linked database (provider 'linked') is created and edited in the links editor, not in this dialog: the
+ * command and its arguments the request is routed to, or null.
+ */
+function linkDialogRoute(state: ConnectionDialogState, connections: readonly ConnectionProfile[]): { command: string; args: unknown } | null {
+  if (state.mode === 'new') {
+    return state.providerId === 'linked' ? { command: 'links.new', args: { folder: state.folder ?? null, connectAfter: !!state.connectAfter } } : null;
+  }
+  if (connections.find((c) => c.id === state.id)?.providerId !== 'linked') return null;
+  return { command: state.mode === 'edit' ? 'links.edit' : 'links.duplicate', args: { connectionId: state.id } };
+}
+
 /** Mounted once in the App; reads its state from the ui store. */
 export function ConnectionDialogHost() {
   const state = useUi((s) => s.connectionDialog);
   const close = useUi((s) => s.closeConnectionDialog);
   const loaded = useConnections((s) => s.providers.length > 0);
-  if (!state || !loaded) return null;
+  const connections = useConnections((s) => s.connections);
+  const route = state ? linkDialogRoute(state, connections) : null;
+  const routeKey = route ? JSON.stringify(route) : null;
+  useEffect(() => {
+    if (!routeKey) return;
+    const r = JSON.parse(routeKey) as { command: string; args: unknown };
+    close();
+    runCommand(r.command, r.args);
+  }, [routeKey, close]);
+  if (!state || !loaded || route) return null;
   return <ConnectionDialog key={JSON.stringify(state)} state={state} onClose={close} />;
 }

@@ -30,6 +30,8 @@ const SNOWFLAKE: CSSProperties = { fill: 'var(--provider-snowflake)' };
 const ES_YELLOW: CSSProperties = { fill: 'var(--logo-es-yellow)' };
 const ES_TEAL: CSSProperties = { fill: 'var(--provider-elasticsearch)' };
 const CASSANDRA: CSSProperties = { fill: 'var(--provider-cassandra)' };
+// LINKS-WP0: linked databases have no vendor artwork; Rowlit's own mark (two databases joined by a bar) in --provider-linked.
+const LINKED: CSSProperties = { fill: 'var(--provider-linked)' };
 
 
 export interface BrandLogo {
@@ -181,4 +183,18 @@ export const BRAND_LOGOS: Record<ProviderId, BrandLogo> = {
     ),
     shape: ['--logo-ink', '--provider-cassandra'],
   },
+  // LINKS-WP0 begin
+  linked: {
+    label: 'Linked databases',
+    viewBox: '0 0 24 24',
+    paint: () => (
+      <>
+        <path style={LINKED} d="M1.5 5.5c0-1.1 1.79-2 4-2s4 .9 4 2v9c0 1.1-1.79 2-4 2s-4-.9-4-2z" />
+        <path style={LINKED} d="M14.5 9.5c0-1.1 1.79-2 4-2s4 .9 4 2v9c0 1.1-1.79 2-4 2s-4-.9-4-2z" />
+        <path style={LINKED} d="M9 10.25h6v2.5H9z" />
+      </>
+    ),
+    shape: ['--provider-linked'],
+  },
+  // LINKS-WP0 end
 };

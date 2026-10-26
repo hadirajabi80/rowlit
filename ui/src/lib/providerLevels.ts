@@ -13,15 +13,20 @@ export function schemaIsDatabase(providerId: ProviderId | string | null | undefi
 
 /** Batch 3 (D3): engines without multi-statement transactions; their consoles have no Auto/Tx toggle or Commit/Rollback. */
 export function hasTransactions(providerId: ProviderId | string | null | undefined): boolean {
-  return providerId !== 'cassandra' && providerId !== 'clickhouse';
+  // plan-links: a linked database is read-only and query-only (no transactions either)
+  return providerId !== 'cassandra' && providerId !== 'clickhouse' && providerId !== 'linked';
 }
 
-/** Batch 3: engines with no EXPLAIN plan (Cassandra traces instead); their consoles have no Explain button. */
+/**
+ * Batch 3: engines with no EXPLAIN plan (Cassandra traces instead); their consoles have no Explain button. plan-links: a
+ * linked database has its own push-down plan view (links.plan) instead of EXPLAIN.
+ */
 export function hasExplain(providerId: ProviderId | string | null | undefined): boolean {
-  return providerId !== 'cassandra';
+  return providerId !== 'cassandra' && providerId !== 'linked';
 }
 
 /** Batch 3: what the console switcher calls the level it switches (Oracle schema, Cassandra keyspace, else database). */
 export function schemaLevelLabel(providerId: ProviderId | string | null | undefined): 'schema' | 'keyspace' | 'database' {
-  return providerId === 'oracle' ? 'schema' : providerId === 'cassandra' ? 'keyspace' : 'database';
+  // plan-links: a link's schemas are its member aliases
+  return providerId === 'oracle' || providerId === 'linked' ? 'schema' : providerId === 'cassandra' ? 'keyspace' : 'database';
 }

@@ -31,6 +31,9 @@ export function needsQuoting(name: string, dialect: Dialect): boolean {
     // Unquoted identifiers fold to lower case, so anything else is quoted to keep its spelling.
     return !/^[a-z_][a-z0-9_$]*$/.test(name) || PG_RESERVED.has(name.toUpperCase());
   }
+  // LINKS-WP0: DuckDB keeps the case of unquoted names (and matches them case-insensitively), its grammar is
+  // PostgreSQL's. Engine twin: DbStudio.Federation Contracts/LinkSql.cs NeedsQuoting.
+  if (dialect === 'duckdb') return !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || PG_RESERVED.has(name.toUpperCase());
   if (dialect === 'plsql') {
     if (!/^[A-Z][A-Z0-9_$#]*$/.test(name)) return true;
     // Quoting an upper-case name never changes it in Oracle, so the common list stays too.

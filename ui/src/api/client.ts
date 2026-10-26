@@ -170,6 +170,12 @@ const m2 = createM2Namespaces({ json, send, enc, filenameFrom });
 /** Batch 3 (plan-batch3): api.mysql / clickhouse / snowflake / cassandra / es, owned per work package (./m3/*.ts). */
 const m3 = createM3Namespaces({ json, send, enc, filenameFrom });
 
+/**
+ * LINKS-WP0: the HTTP helpers for namespaces that stay out of the initial bundle: a lazy module builds its client from
+ * them (api/links.ts `linksApi`) instead of being spread into `api` here.
+ */
+export const http: M2Http = { json, send, enc, filenameFrom };
+
 export const api = {
   // 3.1 Meta
   health: (signal?: AbortSignal) => json<Health>('GET', '/health', { signal }),

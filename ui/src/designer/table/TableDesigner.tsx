@@ -79,6 +79,8 @@ const FALLBACK_TYPES: Record<Dialect, string[]> = {
   // WP-CS begin
   cql: ['int', 'bigint', 'smallint', 'tinyint', 'varint', 'decimal', 'double', 'float', 'text', 'ascii', 'boolean', 'date', 'time', 'timestamp', 'duration', 'uuid', 'timeuuid', 'inet', 'blob', 'counter', 'list<text>', 'set<text>', 'map<text, text>'],
   // WP-CS end
+  // LINKS-WP0 (DuckDB engine types; links are read-only, so the designer only ever lists them)
+  duckdb: ['BIGINT', 'INTEGER', 'HUGEINT', 'DOUBLE', 'DECIMAL(18,2)', 'VARCHAR', 'BOOLEAN', 'DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMPTZ', 'UUID', 'BLOB', 'JSON'],
 };
 
 function fallbackTypes(dialect: Dialect): DesignerType[] {

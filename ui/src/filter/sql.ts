@@ -39,6 +39,8 @@ export class ParamBuilder {
 
 /** Named placeholder for a bind (PostgreSQL: `@name`, which the engine binder rewrites to `$n`). */
 export function placeholder(name: string, dialect: Dialect): string {
+  // LINKS-WP0: DuckDB (linked databases) binds `$name` natively
+  if (dialect === 'duckdb') return `$${name}`;
   return dialect === 'plsql' ? `:${name}` : `@${name}`;
 }
 
@@ -55,6 +57,11 @@ export interface PredicateOptions {
   now?: Date;
   /** Bind name prefix (default "fp", so filter binds never collide with user binds). */
   paramPrefix?: string;
+  /**
+   * LINKS-WP0: renders a column reference instead of `alias.quoted(name)` (the query builder filters several tables: its
+   * columns are named "t1.status" and render as `orders.status`).
+   */
+  columnRef?: (column: ColumnInfo) => string;
 }
 
 export interface PredicateResult {
@@ -79,7 +86,10 @@ function likeEscape(d: Dialect): string {
 }
 
 /** Dialects whose LIKE is case-sensitive but which have ILIKE. */
-const hasIlike = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'clickhouse';
+const hasIlike = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'clickhouse' || d === 'duckdb';
+
+/** Dialects with real boolean literals (TRUE / FALSE instead of 1 / 0). LINKS-WP0: + duckdb. */
+const hasBoolLiterals = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'duckdb';
 
 function escapeLike(v: string, dialect: Dialect): string {
   const re = dialect === 'tsql' ? /[\\%_[]/g : /[\\%_]/g;
@@ -96,6 +106,7 @@ interface Ctx {
   columns: readonly ColumnInfo[];
   pb: ParamBuilder;
   alias: string | null;
+  columnRef?: (column: ColumnInfo) => string;
   now?: Date;
   warnings: string[];
   count: number;
@@ -120,6 +131,7 @@ function joinPieces(pieces: Piece[], glue: ' AND ' | ' OR '): Piece {
 }
 
 function colRef(ctx: Ctx, c: ColumnInfo): string {
+  if (ctx.columnRef) return ctx.columnRef(c);
   // Oracle: result column names are exact (case-sensitive), so they are always quoted, whatever their case.
   const id = quoteIdent(c.name, ctx.dialect, ctx.dialect === 'plsql');
   return ctx.alias ? `${ctx.alias}.${id}` : id;
@@ -180,8 +192,8 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
   switch (cond.op) {
     case 'isNull': return `${c} IS NULL`;
     case 'isNotNull': return `${c} IS NOT NULL`;
-    case 'isTrue': return d === 'pgsql' || d === 'snowflake' ? `${c} = TRUE` : `${c} = 1`;
-    case 'isFalse': return d === 'pgsql' || d === 'snowflake' ? `${c} = FALSE` : `${c} = 0`;
+    case 'isTrue': return hasBoolLiterals(d) ? `${c} = TRUE` : `${c} = 1`;
+    case 'isFalse': return hasBoolLiterals(d) ? `${c} = FALSE` : `${c} = 0`;
     case 'isEmpty':
       if (d === 'plsql') {
         ctx.warnings.push('Oracle stores empty strings as NULL: “is empty” matches NULL');
@@ -236,7 +248,8 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
     const t = (i: number) => parseTimeOperand(v[i])!;
     // PostgreSQL: `::time` also strips the zone of a timetz column.
     const left = d === 'sqlite' ? `time(${c})` : d === 'plsql' ? `TO_CHAR(${c}, 'HH24:MI:SS')` : d === 'pgsql' ? `${c}::time` : c;
-    const p = (i: number) => ctx.pb.add(d === 'tsql' || d === 'pgsql' ? 'time' : 'string', t(i).slice(0, 8));
+    // LINKS-WP0: DuckDB does not compare a TIME with a VARCHAR parameter, so it binds a time too
+    const p = (i: number) => ctx.pb.add(d === 'tsql' || d === 'pgsql' || d === 'duckdb' ? 'time' : 'string', t(i).slice(0, 8));
     if (cond.op === 'before') return `${left} < ${p(0)}`;
     if (cond.op === 'after') return `${left} > ${p(0)}`;
     if (cond.op === 'between') return `${left} BETWEEN ${p(0)} AND ${p(1)}`;
@@ -366,7 +379,7 @@ export function buildPredicate(
   opts: PredicateOptions & { quick?: string; builder?: ParamBuilder } = {},
 ): PredicateResult {
   const pb = opts.builder ?? new ParamBuilder(dialect, opts.paramPrefix ?? 'fp');
-  const ctx: Ctx = { dialect, columns, pb, alias: opts.alias ?? null, now: opts.now, warnings: [], count: 0 };
+  const ctx: Ctx = { dialect, columns, pb, alias: opts.alias ?? null, columnRef: opts.columnRef, now: opts.now, warnings: [], count: 0 };
   const { server, client } = splitForServer(filter, columns);
   const parts: Piece[] = [];
   const main = server ? nodeSql(ctx, server, true) : null;
@@ -383,7 +396,10 @@ export function buildPredicate(
 export function inlineParams(sql: string, params: readonly ExecParam[], dialect: Dialect): string {
   const byName = new Map(params.map((p) => [p.name, p]));
   // PostgreSQL: `$1` binds by the numeric name "1", `@name` by name.
-  const re = dialect === 'plsql' ? /:([A-Za-z_][\w$#]*)/g : dialect === 'pgsql' ? /(?<![\w$])\$(\d+)\b|@([A-Za-z_][\w$#]*)/g : /@([A-Za-z_][\w$#]*)/g;
+  const re = dialect === 'plsql' ? /:([A-Za-z_][\w$#]*)/g : dialect === 'pgsql' ? /(?<![\w$])\$(\d+)\b|@([A-Za-z_][\w$#]*)/g
+    // LINKS-WP0: DuckDB `$name`
+    : dialect === 'duckdb' ? /(?<![\w$])\$([A-Za-z_]\w*)/g
+      : /@([A-Za-z_][\w$#]*)/g;
   return sql.replace(re, (m, a: string, b?: string) => {
     const name = typeof b === 'string' ? b : a;
     const p = byName.get(name);
@@ -394,7 +410,7 @@ export function inlineParams(sql: string, params: readonly ExecParam[], dialect:
 
 export function literal(v: FilterValue, kind: ParamKind, dialect: Dialect): string {
   if (v === null || v === undefined) return 'NULL';
-  if (typeof v === 'boolean') return dialect === 'pgsql' ? (v ? 'TRUE' : 'FALSE') : v ? '1' : '0';
+  if (typeof v === 'boolean') return dialect === 'pgsql' || dialect === 'duckdb' ? (v ? 'TRUE' : 'FALSE') : v ? '1' : '0';
   if (typeof v === 'number') return String(v);
   if (kind === 'int' || kind === 'float' || kind === 'decimal') return v;
   if (dialect === 'pgsql' && kind === 'binary') return `'\\x${base64ToHex(v)}'::bytea`;

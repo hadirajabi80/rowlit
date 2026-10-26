@@ -14,9 +14,9 @@ public sealed record SourceProviderDescriptor(string Id, string DisplayName, Dia
 /// </summary>
 public sealed class SourceRegistry
 {
-    /// <summary>Display order of <c>GET /providers</c> (unknown ids follow, by id).</summary>
+    /// <summary>Display order of <c>GET /providers</c> (unknown ids follow, by id). Linked databases (plan-links) come last.</summary>
     public static readonly IReadOnlyList<string> DisplayOrder =
-        ["sqlserver", "oracle", "postgresql", "mysql", "mariadb", "sqlite", "clickhouse", "snowflake", "redis", "mongodb", "kafka", "elasticsearch", "cassandra"];
+        ["sqlserver", "oracle", "postgresql", "mysql", "mariadb", "sqlite", "clickhouse", "snowflake", "redis", "mongodb", "kafka", "elasticsearch", "cassandra", "linked"];
 
     private readonly Dictionary<string, IDataSourceProvider> _byId = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProviderRegistry _relational;

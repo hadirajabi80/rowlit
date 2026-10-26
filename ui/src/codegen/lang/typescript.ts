@@ -140,6 +140,8 @@ const DRIVER: Record<Dialect, { module: string; conn: string; import: string }> 
   // WP-CS begin
   cql: { module: 'cassandra-driver', conn: 'Client', import: "import type { Client } from 'cassandra-driver';" },
   // WP-CS end
+  // LINKS-WP0
+  duckdb: { module: '@duckdb/node-api', conn: 'DuckDBConnection', import: "import type { DuckDBConnection } from '@duckdb/node-api';" },
 };
 
 const MSSQL_TYPE: Record<string, string> = {

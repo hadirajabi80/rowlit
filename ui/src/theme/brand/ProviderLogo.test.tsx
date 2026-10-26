@@ -10,6 +10,7 @@ import { ProviderLogo } from './ProviderLogo';
 const ALL: Record<ProviderId, true> = {
   sqlserver: true, oracle: true, sqlite: true, postgresql: true, redis: true, mongodb: true, kafka: true,
   mysql: true, mariadb: true, clickhouse: true, snowflake: true, elasticsearch: true, cassandra: true,
+  linked: true,
 };
 const IDS = Object.keys(ALL) as ProviderId[];
 

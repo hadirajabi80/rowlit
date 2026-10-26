@@ -28,5 +28,6 @@ public static class ModuleAssemblies
         typeof(Providers.Cassandra.CassandraModule).Assembly,         // WP-CS
         typeof(Sources.Elasticsearch.ElasticsearchModule).Assembly,   // WP-ES
         typeof(Import.ImportModule).Assembly,                         // Import Wizard
+        typeof(Federation.FederationModule).Assembly,                 // LINKS-WP0: linked databases (WP-A / WP-B blocks)
     ];
 }

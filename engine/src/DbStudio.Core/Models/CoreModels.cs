@@ -7,9 +7,11 @@ namespace DbStudio.Core.Models;
 /// <summary>
 /// SQL dialect of a relational provider; wire tokens tsql | plsql | sqlite | pgsql | mysql | clickhouse | snowflake | cql
 /// (<see cref="Services.DialectJsonConverter"/>). Batch 3: <see cref="MySql"/> serves MySQL and MariaDB, <see cref="Cql"/>
-/// Cassandra/ScyllaDB. Per-dialect traits live in <see cref="DialectInfo"/>.
+/// Cassandra/ScyllaDB. Per-dialect traits live in <see cref="DialectInfo"/>. Linked databases (plan-links WP0):
+/// <see cref="DuckDb"/> (wire <c>duckdb</c>) is the dialect of a link (provider <c>linked</c>), whose queries run in an
+/// embedded DuckDB over rows fetched from the member connections.
 /// </summary>
-public enum Dialect { TSql, PlSql, Sqlite, PgSql, MySql, ClickHouse, Snowflake, Cql }
+public enum Dialect { TSql, PlSql, Sqlite, PgSql, MySql, ClickHouse, Snowflake, Cql, DuckDb }
 
 /// <summary>
 /// M2 (docs/PLAN-M2.md D1): provider family. Wire tokens relational | keyvalue | document | stream | search
@@ -36,7 +38,7 @@ public sealed class ConnectionProfile
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
-    /// <summary>"sqlserver" | "oracle" | "sqlite" | "postgresql" | "mysql" | "mariadb" | "clickhouse" | "snowflake" | "cassandra" | "redis" | "mongodb" | "kafka" | "elasticsearch".</summary>
+    /// <summary>"sqlserver" | "oracle" | "sqlite" | "postgresql" | "mysql" | "mariadb" | "clickhouse" | "snowflake" | "cassandra" | "redis" | "mongodb" | "kafka" | "elasticsearch" | "linked" (a linked database, plan-links).</summary>
     public string ProviderId { get; set; } = "";
     public string? Color { get; set; }
     public string? Folder { get; set; }

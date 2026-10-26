@@ -12,6 +12,8 @@ export const PROVIDER_LABEL: Record<string, string> = {
   // Batch 3
   mysql: 'MySQL', mariadb: 'MariaDB', clickhouse: 'ClickHouse', snowflake: 'Snowflake', elasticsearch: 'Elasticsearch',
   cassandra: 'Cassandra',
+  // plan-links
+  linked: 'Linked databases',
 };
 
 const OBJ_ICONS: Record<CatalogObjectType, typeof Table2> = {

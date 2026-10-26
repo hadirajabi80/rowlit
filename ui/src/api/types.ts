@@ -1,15 +1,20 @@
 // Wire contract between the UI and the .NET engine. Mirrors docs/PLAN.md section 3.
 // Frozen: change the plan (and the engine DTOs) before changing this file.
 
-/** Batch 3: 'mysql' serves MySQL and MariaDB, 'cql' Cassandra/ScyllaDB. */
-export type Dialect = 'tsql' | 'plsql' | 'sqlite' | 'pgsql' | 'mysql' | 'clickhouse' | 'snowflake' | 'cql';
+/**
+ * Batch 3: 'mysql' serves MySQL and MariaDB, 'cql' Cassandra/ScyllaDB. Linked databases (plan-links WP0): 'duckdb' is the
+ * dialect of a link (provider 'linked'), whose queries run in the engine's embedded DuckDB.
+ */
+export type Dialect = 'tsql' | 'plsql' | 'sqlite' | 'pgsql' | 'mysql' | 'clickhouse' | 'snowflake' | 'cql' | 'duckdb';
 /**
  * M2: relational providers (sqlserver, oracle, sqlite, postgresql) and non-relational sources (redis, mongodb, kafka).
  * Batch 3: relational mysql, mariadb, clickhouse, snowflake, cassandra; source elasticsearch (kind 'search').
+ * plan-links: 'linked' = a linked database (relational, dialect duckdb, read-only; wire types in ./links.ts).
  */
 export type ProviderId =
   | 'sqlserver' | 'oracle' | 'sqlite' | 'postgresql' | 'redis' | 'mongodb' | 'kafka'
-  | 'mysql' | 'mariadb' | 'clickhouse' | 'snowflake' | 'elasticsearch' | 'cassandra';
+  | 'mysql' | 'mariadb' | 'clickhouse' | 'snowflake' | 'elasticsearch' | 'cassandra'
+  | 'linked';
 /** M2 (docs/PLAN-M2.md D1): provider family. Only `relational` providers have sessions, consoles and a SQL catalog. Batch 3: `search` (Elasticsearch/OpenSearch). */
 export type SourceKind = 'relational' | 'keyvalue' | 'document' | 'stream' | 'search';
 
@@ -81,6 +86,19 @@ export interface Settings {
   logs?: LogsSettings;
   // Resources (docs/resources.md): Settings › Connections › Resources.
   resources?: ResourcesSettings;
+  /** plan-links (engine defaults: memoryLimitMb 0 = auto, maxRowsPerSource 2000000, fetchTimeoutSeconds 300, threads 0, cacheSources true). */
+  links?: LinksSettings;
+}
+
+/** plan-links WP0: budgets of linked-database queries (engine SettingsService "links"). */
+export interface LinksSettings {
+  /** DuckDB memory limit in MB; 0 = auto (25% of RAM, at least 512 MB). */
+  memoryLimitMb: number;
+  maxRowsPerSource: number;
+  fetchTimeoutSeconds: number;
+  /** 0 = auto. */
+  threads: number;
+  cacheSources: boolean;
 }
 
 // ---------- 3.2 Connections ----------

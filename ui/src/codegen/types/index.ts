@@ -9,6 +9,8 @@ import mysql from './mysql.json';
 import clickhouse from './clickhouse.json';
 import snowflake from './snowflake.json';
 import cql from './cql.json';
+// LINKS-WP0: linked databases (DuckDB engine types)
+import duckdb from './duckdb.json';
 
 export type Logical =
   | 'bool' | 'uint8' | 'int16' | 'int32' | 'int64' | 'decimal' | 'float32' | 'float64' | 'string' | 'date' | 'datetime'
@@ -33,7 +35,7 @@ function table(json: Record<string, unknown>): Table {
 
 export const TYPE_TABLES: Record<Dialect, Table> = {
   tsql: table(tsql), plsql: table(plsql), sqlite: table(sqlite), pgsql: table(pgsql),
-  mysql: table(mysql), clickhouse: table(clickhouse), snowflake: table(snowflake), cql: table(cql),
+  mysql: table(mysql), clickhouse: table(clickhouse), snowflake: table(snowflake), cql: table(cql), duckdb: table(duckdb),
 };
 
 export interface ResolvedType extends TypeRow {

@@ -85,6 +85,21 @@ public sealed class SettingsService
             // Poll interval of logs.tail streams over sources without push.
             ["tailIntervalMs"] = 2000,
         },
+        // LINKS-WP0 begin (linked databases, plan-links 2 "Budgets/safety"; read by DbStudio.Federation)
+        ["links"] = new JsonObject
+        {
+            // DuckDB memory_limit in MB; 0 = auto (25% of the physical memory, at least 512 MB). Beyond it DuckDB spills.
+            ["memoryLimitMb"] = 0,
+            // Rows fetched per mounted table and query; more → the source is truncated and the plan warns ("fetch all" raises it).
+            ["maxRowsPerSource"] = 2_000_000,
+            // Per source fetch timeout.
+            ["fetchTimeoutSeconds"] = 300,
+            // DuckDB threads; 0 = auto (the core count).
+            ["threads"] = 0,
+            // Reuse fetched sources within a session until "Refresh sources".
+            ["cacheSources"] = true,
+        },
+        // LINKS-WP0 end
     };
 
     private static readonly Dictionary<string, string[]> Enums = new()
@@ -194,7 +209,7 @@ public sealed class SettingsService
         }
     }
 
-    private static readonly string[] Dialects = ["tsql", "plsql", "sqlite", "pgsql", "mysql", "clickhouse", "snowflake", "cql"];
+    private static readonly string[] Dialects = ["tsql", "plsql", "sqlite", "pgsql", "mysql", "clickhouse", "snowflake", "cql", "duckdb"];
 
     /// <summary>M1.5 keys: format, snippets, grid, connections, editor.blankLineSplitsStatementsByDialect.</summary>
     private static void ValidateM15(JsonObject s, JsonObject editor)
@@ -230,7 +245,7 @@ public sealed class SettingsService
             if (dialects is not null)
             {
                 if (dialects is not JsonArray list || list.Any(d => d?.GetValueKind() != JsonValueKind.String || !Dialects.Contains(d.GetValue<string>())))
-                    throw EngineException.Validation($"{field}.dialects must be null or a list of tsql, plsql, sqlite, pgsql, mysql, clickhouse, snowflake, cql.", new { field = $"{field}.dialects" });
+                    throw EngineException.Validation($"{field}.dialects must be null or a list of tsql, plsql, sqlite, pgsql, mysql, clickhouse, snowflake, cql, duckdb.", new { field = $"{field}.dialects" });
             }
         }
 
@@ -253,6 +268,14 @@ public sealed class SettingsService
         if (s["resources"] is not JsonObject resources) throw Invalid("resources", "object");
         foreach (var (key, min, max) in ResourcePolicy.Ranges) CheckRange(resources, "resources." + key, min, max);
         foreach (var key in ResourcePolicy.Toggles) CheckKind(resources, key, JsonValueKind.True, JsonValueKind.False);
+        // LINKS-WP0 begin
+        if (s["links"] is not JsonObject links) throw Invalid("links", "object");
+        CheckRange(links, "links.memoryLimitMb", 0, 1_048_576);
+        CheckRange(links, "links.maxRowsPerSource", 1, 1_000_000_000);
+        CheckRange(links, "links.fetchTimeoutSeconds", 1, 86_400);
+        CheckRange(links, "links.threads", 0, 256);
+        CheckKind(links, "cacheSources", JsonValueKind.True, JsonValueKind.False);
+        // LINKS-WP0 end
     }
 
     private static void CheckRange(JsonObject o, string path, double min, double max)

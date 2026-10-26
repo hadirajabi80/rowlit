@@ -1,0 +1,4 @@
+{
+  "$comment": "DuckDB built-in functions (plan-links WP-D). WP0 stub; same shape as sqlite-functions.json.",
+  "functions": []
+}

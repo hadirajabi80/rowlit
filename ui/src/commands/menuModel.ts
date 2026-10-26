@@ -322,6 +322,23 @@ export function registerContextMenu(id: string, entries: ContextEntry[]): () => 
 
 const SHELL_MENU_IDS: ReadonlySet<string> = new Set(Object.keys(CONTEXT_MENUS));
 
+/** True when a context menu id is defined (by the shell or a package's registerContextMenu) and has entries. */
+export function hasContextMenu(id: string): boolean {
+  return (CONTEXT_MENUS[id]?.length ?? 0) > 0;
+}
+
+/**
+ * LINKS-WP0: explorer context menu ids reserved for linked databases (plan-links). Registered by the links package with
+ * registerContextMenu (WP-C; WP-D adds its entries with extendContextMenu); the Explorer routes a link's rows to them
+ * once they exist. The query builder's own menu ids (builder.*) are in api/links.ts BUILDER_MENU_IDS.
+ */
+export const LINK_MENU_IDS = {
+  /** A link's connection row: Open query builder, New console, Edit link…, Refresh sources, Create native link…, … */
+  link: 'explorer.link',
+  /** A mounted table or view of a link: Add to builder, Select top, Materialize…, Remove from link, … */
+  linkTable: 'explorer.linkTable',
+} as const;
+
 const MENU_EXTENSIONS = new Map<string, ContextEntry[][]>();
 
 /**

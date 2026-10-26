@@ -135,6 +135,7 @@ function shortVersion(v: string): string {
 const DIALECT_NAME: Record<string, string> = {
   sqlserver: 'T-SQL', oracle: 'PL/SQL', sqlite: 'SQLite', postgresql: 'PostgreSQL',
   mysql: 'MySQL', mariadb: 'MariaDB', clickhouse: 'ClickHouse', snowflake: 'Snowflake', cassandra: 'CQL',
+  linked: 'DuckDB', // plan-links: a linked database's console
 };
 
 function dialectName(p?: string): string {

@@ -275,7 +275,7 @@ public sealed partial class SqlInsertResultWriter : IResultWriter
         switch (v)
         {
             case null or CursorValue: return "NULL";
-            case bool b: return _dialect == Dialect.Cql ? (b ? "true" : "false") : b ? "1" : "0";
+            case bool b: return _dialect is Dialect.Cql or Dialect.DuckDb ? (b ? "true" : "false") : b ? "1" : "0";
             case int or long or short or byte or sbyte or ushort: return Convert.ToString(v, CultureInfo.InvariantCulture)!;
             case double d: return d.ToString("R", CultureInfo.InvariantCulture);
             case float f: return f.ToString("R", CultureInfo.InvariantCulture);
@@ -287,6 +287,7 @@ public sealed partial class SqlInsertResultWriter : IResultWriter
                     Dialect.PlSql => $"HEXTORAW('{hex}')",
                     Dialect.ClickHouse => $"unhex('{hex}')",
                     Dialect.Snowflake => $"TO_BINARY('{hex}', 'HEX')",
+                    Dialect.DuckDb => $"from_hex('{hex}')", // LINKS-WP0
                     _ => $"X'{hex}'",
                 };
         }

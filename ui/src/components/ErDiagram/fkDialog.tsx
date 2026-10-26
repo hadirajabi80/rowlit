@@ -32,6 +32,8 @@ const ACTIONS: Record<Dialect, { del: ReferentialAction[]; upd: ReferentialActio
   // WP-CS begin
   cql: { del: ['NO ACTION'], upd: ['NO ACTION'] },
   // WP-CS end
+  // LINKS-WP0: links are read-only (no DDL); DuckDB itself enforces NO ACTION / RESTRICT only
+  duckdb: { del: ['NO ACTION'], upd: ['NO ACTION'] },
 };
 
 /** First pair guess: the dragged columns, else a column named like the referenced table's key, else the first column. */
