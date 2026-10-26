@@ -64,6 +64,9 @@ engine runs as a local sidecar and the React UI talks to it over authenticated H
 
 ### Exploring data
 
+- **Linked databases**: mount tables from several connections (SQL Server, PostgreSQL, MySQL, Oracle, ClickHouse,
+  MongoDB, files…) and join them in a **visual query builder** (no SQL needed) or in federated SQL; push-down to each
+  source, an embedded DuckDB engine, save as linked view, materialize into a table, native link scripts.
 - **Import Wizard** (CSV/TSV, Excel, JSON/NDJSON → new or existing table, mapping, upsert, bulk load) and **Export**
   with a scope: loaded rows, selection, current filter (all matching rows) or all records.
 - **Types like SSMS** (alias, table, CLR types, XML schema collections, system types; PostgreSQL/Oracle types),

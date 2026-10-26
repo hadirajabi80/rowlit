@@ -32,7 +32,9 @@ beforeEach(async () => {
   useUi.setState({ toasts: [] } as never);
   useConnections.setState({ providers: [], connections: [], loaded: false, error: null });
   await useConnections.getState().load();
-  useConnections.setState({ connections: [...useConnections.getState().connections, ...linkedConnections] });
+  // The linked pack may already be active in the mock engine: add only the links that are not loaded yet.
+  const have = new Set(useConnections.getState().connections.map((c) => c.id));
+  useConnections.setState({ connections: [...useConnections.getState().connections, ...linkedConnections.filter((c) => !have.has(c.id))] });
   mock.server.use(
     http.post(`${P}/links/${LINK}/native-script`, async ({ request }) => {
       scripts.push((await request.json()) as Record<string, unknown>);
@@ -127,7 +129,9 @@ describe('AddToLinkDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(saved).toHaveLength(1));
     const members = (saved[0].props as { members: { alias: string; tables: { name: string }[] }[] }).members;
-    expect(members.find((m) => m.alias === 'crm')?.tables.map((t) => t.name)).toEqual(['customers', 'invoices']);
+    // The member keeps the tables it already had (from the mock pack) and gains the new one at the end.
+    const before = (linkedConnections[0]!.props.members as { alias: string; tables: { name: string }[] }[]).find((m) => m.alias === 'crm')?.tables.map((t) => t.name) ?? [];
+    expect(members.find((m) => m.alias === 'crm')?.tables.map((t) => t.name)).toEqual([...before, 'invoices']);
     expect(saved[0]).toMatchObject({ providerId: 'linked', readOnly: true, password: null });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(useUi.getState().toasts.some((t) => t.text.includes('Added public.invoices to Sales (linked)'))).toBe(true);
