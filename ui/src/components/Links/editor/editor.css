@@ -1,0 +1,496 @@
+/* Link editor dialog and the "Add to linked database" chooser (plan-links 3). Colours only through theme tokens. */
+.lke .dialog-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lke-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.lke-title svg {
+  color: var(--provider-linked);
+}
+.lke-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  outline: 2px dashed transparent;
+  outline-offset: -6px;
+  transition: outline-color var(--dur-fast) var(--ease);
+}
+.lke-body.dropping {
+  outline-color: var(--accent);
+  background: var(--accent-soft);
+}
+.lke-intro {
+  margin: var(--space-3) var(--dialog-pad) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.lke-intro code {
+  font-family: var(--font-mono);
+  color: var(--fg);
+}
+
+/* ---- name / colour / folder */
+.lke-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--dialog-pad);
+}
+.lke-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.lke-field .form-label {
+  text-align: left;
+  padding-top: 0;
+  font-size: var(--fs-xs);
+}
+.lke-name {
+  flex: 1 1 260px;
+}
+.lke-folder {
+  flex: 0 1 200px;
+}
+.lke-field .color-swatches {
+  height: 28px;
+  align-items: center;
+}
+
+.lke-banner {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 var(--dialog-pad) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: var(--fs-sm);
+}
+.lke-banner ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lke-banner li.warning {
+  color: var(--warning);
+}
+
+/* ---- two panes */
+.lke-main {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+  border-top: 1px solid var(--border);
+  min-height: 440px;
+  max-height: calc(100vh - 300px);
+  flex: 1;
+}
+@media (max-width: 720px) {
+  .lke-main {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+}
+
+.lke-members {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+  padding: var(--space-2);
+  gap: var(--space-2);
+}
+.lke-members-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 var(--space-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.lke-member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+.lke-member-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius);
+}
+.lke-member-item:hover {
+  background: var(--bg-hover);
+}
+.lke-member-item.selected {
+  background: var(--bg-selected);
+}
+.lke-member-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 28px 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+.lke-member-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.lke-member-bar {
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+}
+.lke-member-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lke-member-alias {
+  font-size: var(--fs-sm);
+  font-weight: var(--weight-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lke-member-conn {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lke-member-item.selected .lke-member-conn {
+  color: var(--fg-muted-on-selected);
+}
+.lke-member-count {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.lke-member-bad {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+.lke-member-remove {
+  position: absolute;
+  right: 4px;
+  opacity: 0;
+}
+.lke-member-item:hover .lke-member-remove,
+.lke-member-item.selected .lke-member-remove,
+.lke-member-remove:focus-visible {
+  opacity: 1;
+}
+.lke-add {
+  justify-content: center;
+}
+.lke-members-hint {
+  font-size: var(--fs-xs);
+  padding: 0 var(--space-1);
+  margin-top: auto;
+}
+
+/* ---- member editor */
+.lke-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--dialog-pad);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.lke-grid {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  max-width: 620px;
+}
+.lke-alias-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.lke-alias {
+  width: 200px;
+  flex-shrink: 0;
+}
+.lke-alias-example {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lke-alias-example .mono {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--code-fg);
+}
+
+.lke-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ---- table list */
+.lke-tables-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  flex: 1;
+}
+.lke-tables-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.lke-tables-title {
+  font-weight: var(--weight-strong);
+  font-size: var(--fs-sm);
+}
+.lke-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.lke-search .input {
+  padding-left: 24px;
+  width: 220px;
+}
+.lke-search-icon {
+  position: absolute;
+  left: 7px;
+  color: var(--fg-muted);
+  pointer-events: none;
+}
+.lke-count {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.lke-tables-error {
+  margin-top: -4px;
+}
+.lke-tables {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  overflow: auto;
+  min-height: 160px;
+  max-height: 340px;
+}
+.lke-tables-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--fs-sm);
+}
+.lke-tables-state.error {
+  color: var(--danger-text);
+}
+.lke-table {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  min-height: 30px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.lke-table:last-child {
+  border-bottom: 0;
+}
+.lke-table:hover {
+  background: var(--bg-hover);
+}
+.lke-table.on {
+  background: var(--accent-soft);
+}
+.lke-table.missing .lke-table-hint {
+  color: var(--warning);
+}
+.lke-table-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  min-height: 30px;
+}
+.lke-table-main input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.lke-ico-table {
+  color: var(--obj-table);
+  flex-shrink: 0;
+}
+.lke-ico-view {
+  color: var(--obj-view);
+  flex-shrink: 0;
+}
+.lke-ico-missing {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+.lke-table-name {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lke-hit {
+  background: var(--mark-bg);
+  color: inherit;
+  border-radius: 2px;
+}
+.lke-table-hint {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  margin-left: auto;
+}
+.lke-as {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+}
+.lke-as .input {
+  width: 150px;
+}
+.lke-table-error {
+  flex-basis: 100%;
+  padding: 0 0 4px 26px;
+  margin: 0;
+}
+
+/* ---- footer */
+.lke-foot-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.lke-foot-status.error {
+  color: var(--danger-text);
+}
+.lke-discard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  font-size: var(--fs-sm);
+  color: var(--warning);
+}
+.lke-discard span {
+  color: var(--fg);
+}
+
+/* ---- chooser */
+.lke-choose .dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.lke-choose-search .input {
+  width: 100%;
+}
+.lke-choose-search {
+  display: flex;
+}
+.lke-choose-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.lke-choose-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lke-choose-list li:last-child .lke-choose-item {
+  border-bottom: 0;
+}
+.lke-choose-item:hover {
+  background: var(--bg-hover);
+}
+.lke-choose-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.lke-choose-icon {
+  color: var(--provider-linked);
+}
+.lke-choose-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lke-choose-none {
+  padding: var(--space-3);
+}
+.lke-choose-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

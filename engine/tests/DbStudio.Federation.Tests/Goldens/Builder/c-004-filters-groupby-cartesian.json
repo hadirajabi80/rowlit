@@ -1,0 +1,54 @@
+{
+  "name": "WP-C: explicit GROUP BY (autoGroup false), DISTINCT, nested OR filter (IN, BETWEEN, contains with LIKE escaping, is null) and a disabled condition, a table no join reaches (CROSS JOIN), LIMIT without ORDER BY",
+  "catalog": {
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "name", "kind": "string", "type": "VARCHAR" },
+      { "name": "country", "kind": "string", "type": "VARCHAR" },
+      { "name": "score", "kind": "float", "type": "DOUBLE" }
+    ],
+    "erp.regions": [
+      { "name": "code", "kind": "string", "type": "VARCHAR" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "crm", "table": "customers", "as": "customers", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "erp", "table": "regions", "as": "regions", "x": 360, "y": 40, "collapsed": false }
+    ],
+    "joins": [],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "country", "expr": null, "alias": null, "agg": null, "output": true },
+      { "id": "c2", "tableId": "t2", "column": "code", "expr": null, "alias": "region", "agg": null, "output": true }
+    ],
+    "filter": {
+      "kind": "group", "id": "g1", "logic": "and",
+      "items": [
+        { "kind": "condition", "id": "f1", "column": "t1.country", "op": "in", "values": ["DE", "FR"], "enabled": true },
+        { "kind": "group", "id": "g2", "logic": "or", "items": [
+          { "kind": "condition", "id": "f2", "column": "t1.score", "op": "between", "values": [1.5, 9], "enabled": true },
+          { "kind": "condition", "id": "f3", "column": "t1.name", "op": "contains", "values": ["50%"], "enabled": true },
+          { "kind": "condition", "id": "f4", "column": "t1.name", "op": "isNull", "values": [], "enabled": true }
+        ] },
+        { "kind": "condition", "id": "f5", "column": "t1.id", "op": "eq", "values": [7], "enabled": false }
+      ]
+    },
+    "groupBy": [ { "columnId": "c1" }, { "tableId": "t2", "column": "code" } ],
+    "autoGroup": false,
+    "having": null,
+    "sort": [],
+    "limit": 25,
+    "offset": null,
+    "distinct": true
+  },
+  "sql": "SELECT DISTINCT customers.country, regions.code AS region\nFROM crm.customers AS customers\nCROSS JOIN erp.regions AS regions\nWHERE lower(customers.country) IN (lower($fp1), lower($fp2)) AND (customers.score BETWEEN $fp3 AND $fp4 OR customers.name ILIKE '%' || $fp5 || '%' ESCAPE '\\' OR customers.name IS NULL)\nGROUP BY customers.country, regions.code\nLIMIT 25",
+  "params": [
+    { "name": "fp1", "kind": "string", "value": "DE" },
+    { "name": "fp2", "kind": "string", "value": "FR" },
+    { "name": "fp3", "kind": "float", "value": 1.5 },
+    { "name": "fp4", "kind": "float", "value": 9 },
+    { "name": "fp5", "kind": "string", "value": "50\\%" }
+  ],
+  "warnings": ["cartesian", "limitWithoutOrder"]
+}

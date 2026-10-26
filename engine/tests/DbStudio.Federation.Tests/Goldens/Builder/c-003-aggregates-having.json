@@ -1,0 +1,62 @@
+{
+  "name": "WP-C: aggregates (count(*), count DISTINCT, avg, max over an expression, a hidden sum), calculated column, auto GROUP BY, HAVING continuing the bind numbering, ORDER BY an unaliased aggregate, NULLS FIRST, LIMIT + OFFSET",
+  "catalog": {
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "country", "kind": "string", "type": "VARCHAR" }
+    ],
+    "shop.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "customer_id", "kind": "int", "type": "BIGINT" },
+      { "name": "status", "kind": "string", "type": "VARCHAR" },
+      { "name": "total", "kind": "decimal", "type": "DECIMAL(38,2)" },
+      { "name": "created_at", "kind": "datetime", "type": "TIMESTAMP" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "crm", "table": "customers", "as": "customers", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "shop", "table": "orders", "as": "orders", "x": 360, "y": 40, "collapsed": false }
+    ],
+    "joins": [
+      { "id": "j1", "type": "inner", "left": "t1", "right": "t2", "on": [ { "leftColumn": "id", "rightColumn": "customer_id", "op": "=", "ignoreCase": false, "trim": false } ] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "country", "expr": null, "alias": null, "agg": null, "output": true },
+      { "id": "c2", "tableId": null, "column": null, "expr": "year(orders.created_at)", "alias": "year", "agg": null, "output": true },
+      { "id": "c3", "tableId": null, "column": null, "expr": null, "alias": "orders", "agg": "count", "output": true },
+      { "id": "c4", "tableId": "t1", "column": "id", "expr": null, "alias": "buyers", "agg": "countDistinct", "output": true },
+      { "id": "c5", "tableId": "t2", "column": "total", "expr": null, "alias": null, "agg": "avg", "output": true },
+      { "id": "c6", "tableId": null, "column": null, "expr": "orders.total * 1.2", "alias": "max_gross", "agg": "max", "output": true },
+      { "id": "c7", "tableId": "t2", "column": "total", "expr": null, "alias": "revenue", "agg": "sum", "output": false }
+    ],
+    "filter": {
+      "kind": "group", "id": "g1", "logic": "and",
+      "items": [ { "kind": "condition", "id": "f1", "column": "t2.status", "op": "neq", "values": ["cancelled"], "enabled": true } ]
+    },
+    "groupBy": [],
+    "autoGroup": true,
+    "having": {
+      "kind": "group", "id": "h1", "logic": "and",
+      "items": [
+        { "kind": "condition", "id": "h2", "column": "c3", "op": "gte", "values": [2], "enabled": true },
+        { "kind": "condition", "id": "h3", "column": "c7", "op": "gt", "values": ["1000.50"], "enabled": true }
+      ]
+    },
+    "sort": [
+      { "ref": { "columnId": "c5" }, "dir": "desc", "nulls": null },
+      { "ref": { "columnId": "c1" }, "dir": "asc", "nulls": "first" }
+    ],
+    "limit": 50,
+    "offset": 100,
+    "distinct": false
+  },
+  "sql": "SELECT customers.country, year(orders.created_at) AS year, count(*) AS orders, count(DISTINCT customers.id) AS buyers, avg(orders.total), max(orders.total * 1.2) AS max_gross\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.customer_id\nWHERE lower(orders.status) <> lower($fp1)\nGROUP BY customers.country, year(orders.created_at)\nHAVING count(*) >= $fp2 AND sum(orders.total) > $fp3\nORDER BY avg(orders.total) DESC, customers.country ASC NULLS FIRST\nLIMIT 50 OFFSET 100",
+  "params": [
+    { "name": "fp1", "kind": "string", "value": "cancelled" },
+    { "name": "fp2", "kind": "int", "value": 2 },
+    { "name": "fp3", "kind": "decimal", "value": "1000.5" }
+  ],
+  "warnings": []
+}
