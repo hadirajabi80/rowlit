@@ -7,7 +7,8 @@ interface DialogProps {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  width?: number;
+  /** Pixels, or any CSS width (e.g. `min(760px, calc(100vw - 32px))` for a dialog that follows the window). */
+  width?: number | string;
   className?: string;
   /** Enter in a single-line field triggers this. */
   onSubmit?: () => void;

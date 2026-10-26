@@ -1,6 +1,7 @@
 import { Activity, Database, History } from 'lucide-react';
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { displayShortcut } from '../../commands/keys';
+import { shortcutLabelOf } from '../../commands/registry';
+import { useCommandsVersion } from '../../commands/useCommands';
 import { useCatalog } from '../../store/catalog';
 import { activityCounts, useSessions } from '../../store/sessions';
 import { DOCK_MAX, DOCK_MIN, useUi, type DockPanel } from '../../store/ui';
@@ -11,9 +12,9 @@ import { ConnectionsPanel } from '../ConnectionsPanel/ConnectionsPanel';
 import { Explorer } from '../Explorer/Explorer';
 import { HistoryPanel } from '../HistoryPanel/HistoryPanel';
 
-const TABS: { id: DockPanel; label: string; Icon: typeof Database; shortcut?: string }[] = [
-  { id: 'explorer', label: 'Explorer', Icon: Database, shortcut: 'Mod+Shift+E' },
-  { id: 'history', label: 'History', Icon: History, shortcut: 'Mod+Shift+H' },
+const TABS: { id: DockPanel; label: string; Icon: typeof Database; command?: string }[] = [
+  { id: 'explorer', label: 'Explorer', Icon: Database, command: 'view.explorer' },
+  { id: 'history', label: 'History', Icon: History, command: 'view.history' },
   { id: 'connections', label: 'Connections', Icon: Activity },
 ];
 
@@ -22,6 +23,7 @@ const AUTO_WIDTH = `clamp(${DOCK_MIN}px, 22vw, ${DOCK_MAX}px)`;
 
 /** Left dock: Explorer | History | Connections, tabbed, clamp(200px, 22vw, 480px), collapsible (Ctrl+B). */
 export function Dock() {
+  useCommandsVersion();
   const visible = useUi((s) => s.explorerVisible);
   const width = useUi((s) => s.explorerWidth);
   const dock = useUi((s) => s.dock);
@@ -65,7 +67,7 @@ export function Dock() {
               aria-controls={`dock-panel-${t.id}`}
               tabIndex={dock === t.id ? 0 : -1}
               className={`dock-tab${dock === t.id ? ' active' : ''}`}
-              title={t.shortcut ? `${t.label} (${displayShortcut(t.shortcut)})` : t.label}
+              title={t.command && shortcutLabelOf(t.command) ? `${t.label} (${shortcutLabelOf(t.command)})` : t.label}
               onClick={() => useUi.getState().showDock(t.id)}
             >
               <t.Icon size={14} strokeWidth={1.75} />

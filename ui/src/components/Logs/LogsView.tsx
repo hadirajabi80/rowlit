@@ -12,7 +12,7 @@ import { ENGINE_LOG_CID } from '../../api/client.m2';
 import type { JobDoneEvent, LogEntry, LogExportFormat, LogExportResult, LogQuery, StreamEvent } from '../../api/types';
 import { engineSocket } from '../../api/ws';
 import { copyText } from '../../app/actions';
-import { getCommand, runCommand } from '../../commands/registry';
+import { primaryShortcut, runCommand } from '../../commands/registry';
 import { commandView } from '../../commands/useCommands';
 import { getPlatform } from '../../platform';
 import { useConnection } from '../../store/connections';
@@ -711,7 +711,7 @@ export function LogsView({ tab, visible }: TabViewProps) {
                 dir="auto"
                 placeholder="Search (text or regex)…"
                 aria-label="Search log entries"
-                title={withShortcut('Search log entries: text or regular expression, case-insensitive', getCommand('logs.search')?.shortcut)}
+                title={withShortcut('Search log entries: text or regular expression, case-insensitive', primaryShortcut('logs.search'))}
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 onKeyDown={(e) => {

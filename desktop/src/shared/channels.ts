@@ -53,6 +53,9 @@ export const IPC = {
   updatesCancelDownload: 'dbstudio:updates-cancel-download',
   // ---- resources: memory of the Electron processes (app.getAppMetrics)
   getAppMemory: 'dbstudio:get-app-memory',
+  // ---- keyboard shortcuts
+  /** renderer -> main (send): the menu accelerators after the user's keymap */
+  setMenuShortcuts: 'dbstudio:set-menu-shortcuts',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

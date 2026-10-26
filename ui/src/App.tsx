@@ -5,10 +5,12 @@ import { handleMenuCommand } from './app/commands';
 import { useUpdateWiring } from './app/updates';
 import { windowTitle } from './app/windowTitle';
 import { installKeyDispatcher } from './commands/dispatcher';
+import { installKeymap } from './commands/keymapSettings';
 import { CommandPalette } from './components/CommandPalette/CommandPalette';
 import { ConnectionDialogHost } from './components/ConnectionDialog/ConnectionDialog';
 import { ConnectionSwitcher } from './components/ConnectionsPanel/ConnectionSwitcher';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
+import { DropOverlay } from './components/DropOverlay/DropOverlay';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { focusFirst, focusIsLost } from './components/common/focus';
 import { MenuHost, useMenu } from './components/common/Menu';
@@ -27,6 +29,7 @@ import { useExecuteRoutine } from './components/ExecuteRoutine/store';
 import { SearchDialogHost } from './components/Search/SearchDialogHost';
 import { SavedQueryDialogHost } from './components/SavedQueries/SavedQueryDialogHost';
 import { ScopeColorDialogHost } from './components/ScopeColor/ScopeColorDialogHost';
+import { SchemaPickerHost } from './components/Toolbar/SchemaPickerHost';
 import { ShortcutSheet } from './components/Shortcuts/ShortcutSheet';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DesignerHost } from './designer/host';
@@ -93,9 +96,11 @@ function Shell() {
 
   useEffect(() => {
     const off = installKeyDispatcher();
+    const offKeymap = installKeymap();
     const offMenu = getPlatform().onMenuCommand(handleMenuCommand);
     return () => {
       off();
+      offKeymap();
       offMenu();
     };
   }, []);
@@ -150,6 +155,9 @@ function Shell() {
       <ModalBoundary area="the connection switcher" open={(s) => s.switcher} close={() => useUi.getState().openSwitcher(null)}>
         <ConnectionSwitcher />
       </ModalBoundary>
+      <ModalBoundary area="the schema picker" open={(s) => s.switcher?.mode === 'schema'} close={() => useUi.getState().openSwitcher(null)}>
+        <SchemaPickerHost />
+      </ModalBoundary>
       <ModalBoundary area="the multi-run dialog" open={(s) => s.multiRunFor} close={() => useUi.getState().openMultiRun(null)}>
         <MultiRunDialog />
       </ModalBoundary>
@@ -160,6 +168,9 @@ function Shell() {
         <Toasts />
       </ToastsBoundary>
       <LiveRegion />
+      <ErrorBoundary area="the drop overlay" hidden>
+        <DropOverlay />
+      </ErrorBoundary>
     </div>
   );
 }

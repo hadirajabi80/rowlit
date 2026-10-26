@@ -5,8 +5,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { CatalogObjectType, ConnectionProfile } from '../../api/types';
 import { activateObject, connectAndOpen, newConsole, openObjectDefault } from '../../app/actions';
-import { displayShortcut } from '../../commands/keys';
-import { hasCommand, runCommand } from '../../commands/registry';
+import { hasCommand, keyHint, runCommand } from '../../commands/registry';
 import type { CommandTarget } from '../../commands/types';
 import { useCommandContext } from '../../commands/useCommands';
 import { qualifiedName } from '../../lib/sql';
@@ -363,12 +362,12 @@ export function Explorer() {
       <div className="panel-header">
         <span className="panel-title">Explorer</span>
         <div className="panel-actions">
-          <button className="icon-btn" title={`New connection (${displayShortcut('Mod+Shift+N')})`} aria-label="New connection" onClick={() => runCommand('file.newConnection')}>
+          <button className="icon-btn" title={`New connection${keyHint('file.newConnection', ' (', ')')}`} aria-label="New connection" onClick={() => runCommand('file.newConnection')}>
             <Plus size={16} strokeWidth={1.5} />
           </button>
           <button
             className="icon-btn"
-            title={`Refresh selected (${displayShortcut('F5')})`}
+            title={`Refresh selected${keyHint('explorer.refresh', ' (', ')')}`}
             aria-label="Refresh"
             onClick={() => {
               const t = ex().selectedTarget;
@@ -390,7 +389,7 @@ export function Explorer() {
             <input
               ref={filterRef}
               className="input borderless"
-              placeholder={`Filter objects (${displayShortcut('Mod+F')})`}
+              placeholder={`Filter objects${keyHint('explorer.focusFilter', ' (', ')')}`}
               aria-label="Filter objects"
               value={filter}
               dir="auto"

@@ -17,7 +17,7 @@ import { useExplorer } from '../Explorer/explorerStore';
 import { databasesOf, nodeId } from '../Explorer/tree';
 import type { TabViewProps } from '../layout/tabViews';
 import { Welcome } from '../Onboarding/Welcome';
-import { followSelection, groupForScope, homeScopeKey, homeStateOf, setHomeListOptions, type HomeTarget, type ObjectsHomeState } from './home';
+import { followSelection, groupForScope, homeScopeKey, OBJECTS_HOME_ID, homeStateOf, setHomeListOptions, type HomeTarget, type ObjectsHomeState } from './home';
 import { ObjectList } from './ObjectListView';
 import type { ObjectsState } from './open';
 import './objectList.css';
@@ -108,7 +108,7 @@ function Crumbs({ conn, items }: { conn: ConnectionProfile; items: Crumb[] }) {
 function ScopeList({ conn, target, state, visible }: { conn: ConnectionProfile; target: Extract<HomeTarget, { kind: 'scope' }>; state: ObjectsHomeState; visible: boolean }) {
   const { connectionId: cid, database, schema } = target;
   const key = homeScopeKey(target);
-  const listState: ObjectsState = { connectionId: cid, database, schema, group: groupForScope(state, key), layout: state.layout, sort: state.sort };
+  const listState: ObjectsState = { connectionId: cid, database, schema, group: groupForScope(state, key), layout: state.layout, sort: state.sort, details: state.details };
   const shownDb = database ?? (conn.providerId === 'sqlite' ? null : catalogDatabase(cid, null));
   const dbLevel = hasDatabaseLevel(conn.providerId);
   const crumbs: Crumb[] = [];
@@ -123,6 +123,7 @@ function ScopeList({ conn, target, state, visible }: { conn: ConnectionProfile; 
   return (
     <ObjectList
       key={key}
+      tabId={OBJECTS_HOME_ID}
       state={listState}
       patch={(p) => setHomeListOptions(key, p)}
       visible={visible}

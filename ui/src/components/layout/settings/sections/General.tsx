@@ -1,6 +1,5 @@
 import { Keyboard } from 'lucide-react';
-import { displayShortcut } from '../../../../commands/keys';
-import { runCommand } from '../../../../commands/registry';
+import { keyHint, runCommand } from '../../../../commands/registry';
 import { OBJECTS_TAB_SETTING, showObjectsTab, useSettings, type FullSettings } from '../../../../store/settings';
 import { useUi } from '../../../../store/ui';
 import { Card, Row, ToggleRow } from '../controls';
@@ -31,7 +30,11 @@ export function GeneralSection() {
         />
       </Card>
       <Card title="Keyboard">
-        <Row label="Keyboard shortcuts" hint={`Every command and its keys (${displayShortcut('F1')})`} keywords="keys bindings hotkeys">
+        <Row
+          label="Keyboard shortcuts"
+          hint={`See and change the keys of every command, pick a JetBrains, VS Code or SSMS keymap, import or export yours${keyHint('view.shortcuts', ' (', ')')}`}
+          keywords="keys bindings hotkeys keymap customize rebind remap shortcuts jetbrains datagrip vscode ssms import export reset"
+        >
           <button
             type="button"
             className="btn"
@@ -40,7 +43,7 @@ export function GeneralSection() {
               runCommand('view.shortcuts');
             }}
           >
-            <Keyboard size={16} /> Show shortcuts
+            <Keyboard size={16} /> Customize shortcuts…
           </button>
         </Row>
       </Card>

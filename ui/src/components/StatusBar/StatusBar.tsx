@@ -1,7 +1,6 @@
 import { Activity, Keyboard, LoaderCircle, Lock, Wifi, WifiOff } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { runCommand } from '../../commands/registry';
-import { displayShortcut } from '../../commands/keys';
+import { keyHint, runCommand } from '../../commands/registry';
 import { formatDuration } from '../../lib/format';
 import { hasTransactions } from '../../lib/providerLevels';
 import { useConnection } from '../../store/connections';
@@ -75,7 +74,7 @@ export function StatusBar() {
         {orphans > 0 && <span className="sb-warn-dot" aria-label={pluralize(orphans, 'unused session')} />}
       </button>
       {conn ? (
-        <button className="sb-item sb-button" title={`${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''} — change connection (${displayShortcut('Mod+Shift+K')})`} onClick={() => runCommand('connections.change')}>
+        <button className="sb-item sb-button" title={`${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''} — change connection${keyHint('connections.change', ' (', ')')}`} onClick={() => runCommand('connections.change')}>
           <ProviderLogo providerId={conn.providerId} size={14} />
           <ColorDot color={conn.color} size={8} />
           {conn.name}
@@ -119,7 +118,7 @@ export function StatusBar() {
       {tab?.kind === 'console' && <span className="sb-item muted">{dialectName(conn?.providerId)}</span>}
       <ResourcesItem />
       <UpdateChip />
-      <button className="sb-item sb-button" onClick={() => runCommand('view.shortcuts')} title={`Keyboard shortcuts (${displayShortcut('F1')})`} aria-label="Keyboard shortcuts">
+      <button className="sb-item sb-button" onClick={() => runCommand('view.shortcuts')} title={`Keyboard shortcuts${keyHint('view.shortcuts', ' (', ')')}`} aria-label="Keyboard shortcuts">
         <Keyboard size={12} />
       </button>
     </footer>

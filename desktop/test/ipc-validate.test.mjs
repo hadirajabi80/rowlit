@@ -186,6 +186,28 @@ describe('fs-utils', () => {
   });
 });
 
+describe('validateMenuShortcuts (the renderer\'s keymap for the native menu)', () => {
+  it('keeps accelerators, nulls and drops chords to null', () => {
+    assert.deepEqual(
+      v.validateMenuShortcuts({ 'file.save': 'Mod+Alt+S', 'view.settings': null, 'format.selection': 'Mod+K Mod+F', 'view.zoomIn': 'Mod+=', 'run.script': 'F9' }),
+      { 'file.save': 'Mod+Alt+S', 'view.settings': null, 'format.selection': null, 'view.zoomIn': 'Mod+=', 'run.script': 'F9' },
+    );
+    assert.deepEqual(v.validateMenuShortcuts({}), {});
+  });
+  it('drops malformed entries without failing the rest', () => {
+    const out = v.validateMenuShortcuts({
+      'file.save': 'Mod+Alt+S', '__proto__': 'F5', 'bad id': 'F5', '9x': 'F5', 'a.b': 7, 'c.d': 'Mod+<script>', 'e.f': 'x'.repeat(80), 'g.h': 'Mod++', 'i.j': { x: 1 },
+    });
+    assert.deepEqual(out, { 'file.save': 'Mod+Alt+S' });
+    assert.equal(Object.getPrototypeOf(out), Object.prototype);
+  });
+  it('rejects a payload that is not an object and caps the number of entries', () => {
+    for (const bad of [null, undefined, 'F5', 42, [], [['a', 'b']]]) assert.throws(() => v.validateMenuShortcuts(bad), v.ValidationError, String(bad));
+    const many = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`cmd.n${i}`, 'F5']));
+    assert.equal(Object.keys(v.validateMenuShortcuts(many)).length, 300);
+  });
+});
+
 describe('CSP', () => {
   it('production policy allows the loopback engine and Monaco needs, nothing else', () => {
     const csp = buildCsp();

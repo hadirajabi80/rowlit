@@ -284,6 +284,28 @@ public sealed class OracleSession : AdoSessionBase
         CurrentDatabase = await ReadCurrentSchemaAsync(ct).ConfigureAwait(false);
     }
 
+    // ------------------------------------------------------------------ default schema
+    // An Oracle session's "database" already is its current schema (CurrentDatabase, read after ALTER SESSION SET
+    // CURRENT_SCHEMA), so the schema API mirrors it: no extra round trip, one control in the UI.
+
+    public override SchemaMode SchemaMode => SchemaMode.Session;
+
+    public override string? CurrentSchema => CurrentDatabase;
+
+    protected override async Task ReadSchemaCoreAsync(CancellationToken ct) =>
+        CurrentDatabase = await ReadCurrentSchemaAsync(ct).ConfigureAwait(false);
+
+    protected override async Task ChangeSchemaCoreAsync(string? schema, CancellationToken ct)
+    {
+        if (schema is null)
+        {
+            await using var cmd = CreateCommand("SELECT SYS_CONTEXT('USERENV','SESSION_USER') FROM DUAL");
+            schema = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as string
+                ?? throw EngineException.Validation("The session user is unknown.");
+        }
+        await ChangeDatabaseCoreAsync(schema, ct).ConfigureAwait(false);
+    }
+
     protected override ValueTask DisposeCoreAsync()
     {
         _conn.InfoMessage -= OnInfoMessage;

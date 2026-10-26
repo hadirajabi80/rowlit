@@ -2,7 +2,7 @@ import { Code2, Copy, KeyRound, LoaderCircle, PencilRuler, Play, RefreshCw, Squa
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../../api/client';
 import type { DdlResponse, ObjectDetails, TypeDetails } from '../../api/types';
-import { copyText, newConsole, openObject, selectTop } from '../../app/actions';
+import { copyText, newConsole, openObjectDefault, selectTop } from '../../app/actions';
 import { runCommand } from '../../commands/registry';
 import { commandView } from '../../commands/useCommands';
 import type { ObjectTarget } from '../../commands/types';
@@ -262,7 +262,7 @@ function TypeUsedBy({ info, connectionId, database }: { info: TypeDetails; conne
             key={`${u.schema}.${u.name}.${u.type}`}
             className="clickable"
             title={`Open ${u.name}`}
-            onDoubleClick={() => openObject(connectionId, database, { database, schema: u.schema, name: u.name, type: u.type })}
+            onDoubleClick={() => openObjectDefault(connectionId, database, { database, schema: u.schema, name: u.name, type: u.type })}
           >
             <td className="mono">
               <ObjectIcon type={u.type} size={13} /> {u.schema ? `${u.schema}.` : ''}

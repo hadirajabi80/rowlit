@@ -45,6 +45,9 @@ export interface Platform {
   // ---- notifications
   /** Desktop only: an OS notification while the window is in the background (main decides; fire-and-forget). */
   showNotification?(opts: NotificationOptions): void;
+  // ---- keyboard shortcuts
+  /** Desktop only: the native menu's accelerators after the user's keymap ({ commandId: shortcut | null }; {} = shipped). */
+  setMenuShortcuts?(shortcuts: Record<string, string | null>): void;
   // ---- file drops
   /** Desktop only: the file-system path of a dropped File (null in the browser, which has no paths). */
   getFilePath?(file: File): string | null;

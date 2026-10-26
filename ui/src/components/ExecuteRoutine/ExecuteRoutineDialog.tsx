@@ -1,9 +1,11 @@
-// Execute routine dialog (SSMS "Execute Stored Procedure", Navicat's run dialog, done cleaner): a header with the
-// routine, overloads / package members as pills, one row per parameter (typed editors, NULL / Default toggles, inline
-// validation), the live call preview, and two ways to run it: Run (Ctrl+Enter) opens the routine's full-page result
-// tab, "Run in console" keeps the classic path (results under a console holding the call). Opened from the explorer,
-// the object tab, the Objects tab and the palette, without opening the routine for editing first.
-import { History, Play, SquareTerminal, TriangleAlert } from 'lucide-react';
+// Execute routine dialog (SSMS "Execute Stored Procedure", Navicat's run dialog, done cleaner): a compact header (routine,
+// kind, connection), overloads / package members as pills, one ~36px row per input parameter (typed editors, NULL /
+// Default toggles, inline validation) with the OUT parameters on a single "Outputs" line, a one-line call summary that
+// expands into the SQL, and a sticky footer with two ways to run it: Run (Ctrl+Enter) opens the routine's full-page
+// result tab, "Run in console" keeps the classic path (results under a console holding the call). The dialog fits the
+// window (only the parameters scroll) and stacks its rows below 640px. Opened from the explorer, the object tab, the
+// Objects tab and the palette, without opening the routine for editing first.
+import { Eraser, History, Play, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { errorMessage } from '../../api/client';
 import { peekEditSession, isEditDirty } from '../../designer/editSession';
@@ -13,7 +15,7 @@ import { ConnectionBadge } from '../common/ConnectionBadge';
 import { Dialog } from '../common/Dialog';
 import { Select } from '../common/Select';
 import { Kbd } from '../Shortcuts/Kbd';
-import { CallPreview, RoutineHeading, RoutineParamsForm, useParamInputs } from './RoutineForm';
+import { CallPreview, isOutputRow, RoutineHeading, RoutineParamsForm, useParamInputs } from './RoutineForm';
 import { choiceSignature, resolveRoutines, runRoutineCall, type RoutineChoice } from './routines';
 import { bareParamName, initialInput, routineLabel, routineNoun, type ParamInput } from './routineSql';
 import { openRoutineRun } from './runInView';
@@ -31,6 +33,22 @@ function keyOf(req: ExecuteRoutineRequest, c: RoutineChoice): string {
   return routineKey(req.database ?? req.ref.database, routineLabel(c.spec), choiceSignature(c));
 }
 
+/** Below this window width the rows stack (name and toggles on one line, the field below). */
+export const NARROW_QUERY = '(max-width: 639px)';
+
+function useMediaMatch(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false));
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(query);
+    const on = () => setMatches(mq.matches);
+    on();
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, [query]);
+  return matches;
+}
+
 /** Up to this many overloads / members show as pills; more fall back to a searchable list. */
 const MAX_PILLS = 6;
 
@@ -40,6 +58,7 @@ export function ExecuteRoutineDialog({ req }: { req: ExecuteRoutineRequest }) {
   const [choiceId, setChoiceId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const narrow = useMediaMatch(NARROW_QUERY);
   const close = () => useExecuteRoutine.getState().close();
   const conn = getConnection(req.connectionId);
   const choice = choices?.find((c) => c.id === choiceId) ?? null;
@@ -96,6 +115,13 @@ export function ExecuteRoutineDialog({ req }: { req: ExecuteRoutineRequest }) {
     }));
   };
 
+  const clearAll = () => {
+    if (!spec) return;
+    form.setInputs(spec.params.map(initialInput));
+    form.setShowErrors(false);
+    bodyRef.current?.querySelector<HTMLElement>('[data-er-value]:not([disabled])')?.focus();
+  };
+
   /** Validates, remembers the values, closes, and runs in the result page or in a console. */
   const run = async (where: 'page' | 'console') => {
     if (!spec || !call || busy) return;
@@ -111,13 +137,43 @@ export function ExecuteRoutineDialog({ req }: { req: ExecuteRoutineRequest }) {
     else await runRoutineCall(req, spec, call);
   };
 
+  // Ctrl+Enter runs from anywhere in the dialog (fields, toggles, footer buttons).
+  const runRef = useRef(run);
+  useEffect(() => {
+    runRef.current = run;
+  });
+  useEffect(() => {
+    const dlg = bodyRef.current?.closest('.dialog');
+    if (!dlg) return;
+    const onKey = (e: Event) => {
+      const k = e as KeyboardEvent;
+      if (k.key !== 'Enter' || !(k.ctrlKey || k.metaKey) || k.shiftKey || k.altKey) return;
+      k.preventDefault();
+      k.stopPropagation();
+      void runRef.current('page');
+    };
+    dlg.addEventListener('keydown', onKey);
+    return () => dlg.removeEventListener('keydown', onKey);
+  }, []);
+
   const pills = choices && choices.length > 1 && choices.length <= MAX_PILLS;
   const memberLabel = spec?.packageName ? 'Package member' : 'Overload';
+  const database = req.database ?? req.ref.database;
   const title = (
     <RoutineHeading
       spec={spec}
       fallbackName={[req.ref.schema, req.ref.name].filter(Boolean).join('.')}
-      eyebrow={`Execute ${noun}`}
+      trailing={
+        <span className="er-context">
+          <ConnectionBadge conn={conn} />
+          {database && <span className="er-db mono" title="Database">{database}</span>}
+          {spec?.returnType && (
+            <span className="er-returns" title="Return type">
+              returns <span className="mono">{spec.returnType}</span>
+            </span>
+          )}
+        </span>
+      }
     />
   );
 
@@ -126,95 +182,82 @@ export function ExecuteRoutineDialog({ req }: { req: ExecuteRoutineRequest }) {
       title={title}
       ariaLabel={`Execute ${noun} ${req.ref.name}`}
       onClose={close}
-      width={800}
-      className="er-dialog"
+      width="min(760px, calc(100vw - 32px))"
+      className={`er-dialog${narrow ? ' er-narrow' : ''}`}
       footer={
         <>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!memory}
-            onClick={recallLast}
-            title={memory ? 'Fill in the values of the last run on this connection' : 'No earlier run of this routine on this connection'}
-          >
-            <History size={14} strokeWidth={1.5} /> Last values
-          </button>
-          <div className="flex-1" />
-          <button type="button" className="btn" onClick={close}>Cancel</button>
-          <button
-            type="button"
-            className="btn"
-            disabled={!call || !!call.error || busy}
-            onClick={() => void run('console')}
-            title={req.fromTabId ? 'Run in the console this came from; results appear under the editor' : 'Run in the current console (or a new one); results appear under the editor'}
-          >
-            <SquareTerminal size={14} strokeWidth={1.5} /> Run in console
-          </button>
-          <button type="button" className="btn btn-primary" disabled={!call || !!call.error || busy} onClick={() => void run('page')} title={`Run the ${noun} and show its results on a full page`}>
-            <Play size={13} fill="currentColor" /> Run <Kbd shortcut="Mod+Enter" className="on-accent" />
-          </button>
+          <div className="er-footer-start">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={!memory}
+              onClick={recallLast}
+              title={memory ? 'Fill in the values of the last run on this connection' : 'No earlier run of this routine on this connection'}
+            >
+              <History size={14} strokeWidth={1.5} /> Last values
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={!spec || spec.params.length === 0} onClick={clearAll} title="Reset every parameter to empty (or its default)">
+              <Eraser size={14} strokeWidth={1.5} /> Clear
+            </button>
+          </div>
+          <div className="er-footer-end">
+            <button type="button" className="btn" onClick={close}>Cancel</button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!call || !!call.error || busy}
+              onClick={() => void run('console')}
+              title={req.fromTabId ? 'Run in the console this came from; results appear under the editor' : 'Run in the current console (or a new one); results appear under the editor'}
+            >
+              <SquareTerminal size={14} strokeWidth={1.5} /> Run in console
+            </button>
+            <button type="button" className="btn btn-primary" disabled={!call || !!call.error || busy} onClick={() => void run('page')} title={`Run the ${noun} and show its results on a full page`}>
+              <Play size={13} fill="currentColor" /> Run <Kbd shortcut="Mod+Enter" className="on-accent" />
+            </button>
+          </div>
         </>
       }
     >
-      <div
-        className="er-body"
-        ref={bodyRef}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            e.stopPropagation();
-            void run('page');
-          }
-        }}
-      >
-        <div className="er-context">
-          <ConnectionBadge conn={conn} />
-          {(req.database ?? req.ref.database) && <span className="er-db mono">{req.database ?? req.ref.database}</span>}
-          {spec?.returnType && (
-            <span className="er-returns">
-              returns <span className="mono">{spec.returnType}</span>
-            </span>
+      <div className="er-body" ref={bodyRef}>
+        <div className="er-top">
+          {unsavedEdit && (
+            <p className="er-note" role="note">
+              <TriangleAlert size={14} strokeWidth={1.75} aria-hidden="true" />
+              The console has unsaved changes. This runs the {noun} as saved on the server; save first to run your edits.
+            </p>
           )}
-        </div>
-        {unsavedEdit && (
-          <p className="er-note" role="note">
-            <TriangleAlert size={14} strokeWidth={1.75} aria-hidden="true" />
-            The console has unsaved changes. This runs the {noun} as saved on the server; save first to run your edits.
-          </p>
-        )}
-        {pills && (
-          <div className="er-choices" role="radiogroup" aria-label={memberLabel}>
-            {choices!.map((c) => (
-              <button key={c.id} type="button" role="radio" aria-checked={c.id === choiceId} className={`er-choice-pill mono${c.id === choiceId ? ' on' : ''}`} onClick={() => pick(c.id)} title={c.label}>
-                {c.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {choices && choices.length > MAX_PILLS && (
-          <label className="er-choice">
-            <span>{memberLabel}</span>
-            <Select size="sm" mono aria-label={memberLabel} value={choiceId} options={choices.map((c) => ({ value: c.id, label: c.label }))} onChange={pick} />
-          </label>
-        )}
-        {loadError && <p className="er-error" role="alert">Could not read the parameters: {loadError}</p>}
-        {!choices && !loadError && (
-          <div className="er-loading" role="status">
-            {[64, 48, 56].map((w, i) => <span key={i} className="er-skeleton" style={{ width: `${w}%` }} />)}
-          </div>
-        )}
-        {choices && choices.length === 0 && <p className="er-muted">Nothing to execute here.</p>}
-        {spec && (
-          <section className="er-section">
+          {pills && (
+            <div className="er-choices" role="radiogroup" aria-label={memberLabel}>
+              {choices!.map((c) => (
+                <button key={c.id} type="button" role="radio" aria-checked={c.id === choiceId} className={`er-choice-pill mono${c.id === choiceId ? ' on' : ''}`} onClick={() => pick(c.id)} title={c.label}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {choices && choices.length > MAX_PILLS && (
+            <label className="er-choice">
+              <span>{memberLabel}</span>
+              <Select size="sm" mono aria-label={memberLabel} value={choiceId} options={choices.map((c) => ({ value: c.id, label: c.label }))} onChange={pick} />
+            </label>
+          )}
+          {loadError && <p className="er-error" role="alert">Could not read the parameters: {loadError}</p>}
+          {!choices && !loadError && (
+            <div className="er-loading" role="status">
+              {[64, 48, 56].map((w, i) => <span key={i} className="er-skeleton" style={{ width: `${w}%` }} />)}
+            </div>
+          )}
+          {choices && choices.length === 0 && <p className="er-muted">Nothing to execute here.</p>}
+          {spec && spec.params.some((p) => !isOutputRow(p, spec)) && (
             <div className="er-section-head">
               <span className="er-section-label">Parameters</span>
-              {spec.params.length > 0 && <span className="er-count">{spec.params.length}</span>}
+              <span className="er-count">{spec.params.filter((p) => !isOutputRow(p, spec)).length}</span>
             </div>
-            <RoutineParamsForm spec={spec} state={form} memory={memory} onSubmit={() => void run('page')} />
-          </section>
-        )}
+          )}
+        </div>
+        {spec && <RoutineParamsForm spec={spec} state={form} memory={memory} onSubmit={() => void run('page')} stacked={narrow} />}
         {call?.error && <p className="er-error" role="alert">{call.error}</p>}
-        {spec && call && <CallPreview spec={spec} call={call} />}
+        {spec && call && <CallPreview spec={spec} call={call} inputs={form.inputs} />}
       </div>
     </Dialog>
   );

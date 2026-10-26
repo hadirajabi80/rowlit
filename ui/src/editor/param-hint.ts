@@ -66,6 +66,7 @@ export function statementParams(tokens: readonly Token[], a: number, b: number, 
   return out;
 }
 
-export function paramHintText(count: number, shortcut: string): string {
-  return `${count} parameter${count === 1 ? '' : 's'} · ${shortcut} to edit`;
+export function paramHintText(count: number, shortcut: string | undefined): string {
+  const n = `${count} parameter${count === 1 ? '' : 's'}`;
+  return shortcut ? `${n} · ${shortcut} to edit` : n;
 }

@@ -9,6 +9,7 @@ import { getConnection, providerKind } from '../../store/connections';
 import { useTabs } from '../../store/tabs';
 import { registerTabView } from '../layout/tabViews';
 import { requestObjectSection } from '../ObjectTab/sectionRequests';
+import { requestDetailsToggle } from './detailsModel';
 import { OBJECTS_HOME_VIEW, showInObjectsHome } from './home';
 import { OBJECTS_VIEW } from './model';
 import { openObjects, scopeOf } from './open';
@@ -61,7 +62,23 @@ export const OBJECT_LIST_COMMANDS: Command<never>[] = [
       requestObjectSection(id, 'deps');
     },
   },
+  {
+    id: 'objects.toggleDetails', title: 'Show / hide object details panel', category: 'View', icon: 'PanelRight',
+    keywords: 'details side panel dependencies uses used by sidebar inspector objects tab',
+    when: () => !!activeObjectsTabId(),
+    run: () => {
+      const id = activeObjectsTabId();
+      if (id) requestDetailsToggle(id);
+    },
+  },
 ];
+
+/** The active tab when it is an Objects tab (the pinned one or a per-scope one). */
+function activeObjectsTabId(): string | null {
+  const tabs = useTabs.getState();
+  const tab = tabs.tabs.find((x) => x.id === tabs.activeId);
+  return tab?.kind === 'view' && (tab.view === OBJECTS_VIEW || tab.view === OBJECTS_HOME_VIEW) ? tab.id : null;
+}
 
 /** The list's filter box (or the cards' filter, or the welcome content's first button). */
 function focusPrimary(_tab: unknown, el: HTMLElement): boolean {

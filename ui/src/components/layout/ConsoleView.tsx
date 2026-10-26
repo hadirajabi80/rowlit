@@ -2,13 +2,15 @@ import { ExternalLink, Plug } from 'lucide-react';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { ObjectRef, RunLabel, ServerDiagnostic, SqlBatch } from '../../api/types';
-import { cancelTab, catalogDatabase, openObject, runInTab } from '../../app/actions';
+import { cancelTab, catalogDatabase, openObject, openObjectDefault, runInTab } from '../../app/actions';
 import { interceptRoutineRun } from '../ExecuteRoutine/intercept';
 import { registerEditor } from '../../app/editors';
 import { SqlEditor } from '../../editor/SqlEditor';
 import type { SqlEditorHandle } from '../../editor/SqlEditor.types';
 import { peekEditSession } from '../../designer/editSession';
 import { useDesignerUi } from '../../designer/store';
+import { snapshotWithSchema } from '../../lib/schemaScope';
+import { useConsoleSchema } from '../../store/consoleSchema';
 import { requestForeignCatalog, useCatalog, useForeignCatalogs, useSnapshot } from '../../store/catalog';
 import { getConnection, useConnection, useDialect } from '../../store/connections';
 import { useTabExecution } from '../../store/results';
@@ -16,7 +18,7 @@ import { useSettings } from '../../store/settings';
 import { useTabs, type ConsoleTab } from '../../store/tabs';
 import { toast, useUi } from '../../store/ui';
 import { TipStrip } from '../Onboarding/TipStrip';
-import { Kbd } from '../Shortcuts/Kbd';
+import { CommandKbd } from '../Shortcuts/Kbd';
 import { runCommand } from '../../commands/registry';
 import type { EffectiveTheme } from '../../theme/useTheme';
 import { ErrorBoundary } from '../common/ErrorBoundary';
@@ -73,7 +75,14 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
   const conn = useConnection(tab.connectionId);
   const dialect = useDialect(tab.connectionId);
   const catDb = useCatalog(() => catalogDatabase(tab.connectionId, tab.database));
-  const snapshot = useSnapshot(tab.connectionId, catDb);
+  const catalogSnapshot = useSnapshot(tab.connectionId, catDb);
+  // IntelliSense completes and resolves bare names in the console's default schema (schema switcher): the session's own,
+  // or on SQL Server the tab's editor schema.
+  const schemaState = useConsoleSchema(tab);
+  const snapshot = useMemo(
+    () => (schemaState.enabled ? snapshotWithSchema(catalogSnapshot, schemaState.schema, schemaState.searchPath) : catalogSnapshot),
+    [catalogSnapshot, schemaState.enabled, schemaState.schema, schemaState.searchPath],
+  );
   // SQL Server: the server's other databases, as far as they are loaded (`Other.dbo.Orders`, `USE Other`)
   const foreignCatalogs = useForeignCatalogs(tab.connectionId, catDb, dialect);
   const editorSettings = useSettings((s) => s.settings.editor);
@@ -143,9 +152,21 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
     if (!interceptRoutineRun(tabId, label)) void runInTab(tabId, label, batches);
   }, [tabId]);
   const onCancel = useCallback(() => void cancelTab(tabId), [tabId]);
+  // F12 / Ctrl+click: a table, view, materialized view or synonym opens its data; routines, packages and the rest open
+  // their definition (the "Edit:" console or the object tab, per the "open routines in edit mode" setting).
   const onOpenObject = useCallback(
-    (ref: ObjectRef) => connectionId && openObject(connectionId, ref.database ?? catDb, ref),
+    (ref: ObjectRef, column?: string) => connectionId && openObjectDefault(connectionId, ref.database ?? catDb, ref, column),
     [connectionId, catDb],
+  );
+  // "Open definition (DDL)" (Alt+F12): the object tab of any object.
+  const onOpenObjectDdl = useCallback(
+    (ref: ObjectRef, column?: string) => connectionId && openObject(connectionId, ref.database ?? catDb, ref, column),
+    [connectionId, catDb],
+  );
+  const onDefinitionMissing = useCallback(
+    (target: string, timedOut: boolean) =>
+      toast(timedOut ? 'warning' : 'info', `${target} was not found`, timedOut ? 'Its schema did not finish loading. Try again once the explorer has it.' : undefined),
+    [],
   );
   const requestServerDiagnostics = useMemo(() => {
     // Server diagnostics for every dialect but Oracle; PostgreSQL's ("pg-prepare") PREPAREs each statement inside a
@@ -160,7 +181,13 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
       const d = useCatalog.getState().dbs[`${connectionId}\u0001${catDb ?? ''}`];
       const known = d?.schemasResp?.schemas.find((s) => s.name.toLowerCase() === schema.toLowerCase());
       if (known) void useCatalog.getState().loadSchema(connectionId, catDb, known.name);
-      else if (!d?.schemasResp) void useCatalog.getState().loadSchemas(connectionId, catDb);
+      else if (!d?.schemasResp) {
+        // the schema list first, then the schema itself (the list may not be here yet when go-to-definition asks)
+        void useCatalog.getState().loadSchemas(connectionId, catDb).then((resp) => {
+          const s = resp?.schemas.find((x) => x.name.toLowerCase() === schema.toLowerCase());
+          if (s) void useCatalog.getState().loadSchema(connectionId, catDb, s.name);
+        });
+      }
     },
     [connectionId, catDb],
   );
@@ -222,6 +249,8 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
         onRun={onRun}
         onCancel={onCancel}
         onOpenObject={onOpenObject}
+        onOpenObjectDdl={onOpenObjectDdl}
+        onDefinitionMissing={onDefinitionMissing}
         requestServerDiagnostics={requestServerDiagnostics}
         requestSchema={requestSchema}
         foreignCatalogs={foreignCatalogs}
@@ -237,7 +266,7 @@ export function ConsoleView({ tab, theme, visible }: { tab: ConsoleTab; theme: E
         <div className="editor-hint">
           <Plug size={16} strokeWidth={1.5} /> This console has no connection.
           <button className="btn btn-xs btn-primary" onClick={() => runCommand('connections.change')}>
-            Choose connection <Kbd shortcut="Mod+Shift+K" className="on-accent" />
+            Choose connection <CommandKbd command="connections.change" className="on-accent" />
           </button>
         </div>
       )}

@@ -8,6 +8,7 @@ import { MockEngine } from './engine';
 import { createM15Handlers } from './m15/m15Handlers';
 import { createM2Context, createM2FrameworkHandlers } from './m2';
 import { createErHandlers } from './m2/er';
+import { createImportHandlers } from './m2/importWizard';
 import { createKafkaHandlers } from './m2/kafka';
 import { createLogsHandlers } from './m2/logs';
 import { createMongoHandlers } from './m2/mongo';
@@ -132,6 +133,20 @@ export function createHandlers(engine: MockEngine) {
       const s = engine.sessions.get(String(params.sid));
       if (!s) return err(404, 'NOT_FOUND', 'Session not found');
       s.database = ((await request.json()) as { database: string }).database;
+      engine.changed(s);
+      return ok(engine.info(s));
+    }),
+    http.get(`${P}/sessions/:sid/schema`, ({ params }) => {
+      const s = engine.sessions.get(String(params.sid));
+      if (!s) return err(404, 'NOT_FOUND', 'Session not found');
+      if (!s.schemaMode || s.schemaMode === 'none') return err(400, 'NOT_SUPPORTED', 'This provider has no default schema separate from the database.');
+      return ok({ schema: s.schema ?? null, searchPath: s.searchPath ?? null, mode: s.schemaMode });
+    }),
+    http.post(`${P}/sessions/:sid/schema`, async ({ params, request }) => {
+      const s = engine.sessions.get(String(params.sid));
+      if (!s) return err(404, 'NOT_FOUND', 'Session not found');
+      if (s.schemaMode !== 'session') return err(400, 'NOT_SUPPORTED', s.schemaMode === 'readOnly' ? "This server uses the login's default schema for a session; qualify names or change the user's default schema." : 'This provider does not have a separate default schema; change the database instead.');
+      engine.setSchema(s, ((await request.json()) as { schema: string | null }).schema);
       engine.changed(s);
       return ok(engine.info(s));
     }),
@@ -265,5 +280,6 @@ function m2Handlers(engine: MockEngine, ok: Parameters<typeof createM2Context>[1
     ...createLogsHandlers(ctx),
     ...createErHandlers(ctx),
     ...createSearchHandlers(ctx), // Find in database (db.search stream)
+    ...createImportHandlers(ctx), // Import Wizard (preview, capabilities, table info, DDL, start)
   ];
 }

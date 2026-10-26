@@ -5,7 +5,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CellValue, Dialect, ExportFormat } from '../../api/types';
 import { catalogDatabase, exportResultSet, rerun } from '../../app/actions';
-import { displayShortcut } from '../../commands/keys';
+import { CommandKbd } from '../Shortcuts/Kbd';
 import { runCommand } from '../../commands/registry';
 import { commandView, useCommandContext } from '../../commands/useCommands';
 import { appendAnd, columnSignature, EMPTY_VIEW, type GridViewModel } from '../../filter/model';
@@ -104,7 +104,7 @@ export function ResultsPane({ tabId, dialect, theme, onClose, inTab = false }: P
         <div className="results-empty">
           <Table2 size={26} />
           <div>
-            Run a statement with <kbd>{displayShortcut('Mod+Enter')}</kbd>, or the whole script with <kbd>{displayShortcut('F5')}</kbd>.
+            Run a statement with <CommandKbd command="run.statement" />, or the whole script with <CommandKbd command="run.script" />.
           </div>
         </div>
       </div>

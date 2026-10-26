@@ -224,6 +224,52 @@ public sealed class SnowflakeSession : AdoSessionBase
         CurrentDatabase = string.IsNullOrEmpty(_conn.Database) ? name : _conn.Database;
     }
 
+    // ------------------------------------------------------------------ default schema (USE SCHEMA)
+
+    private volatile string? _startupSchema;
+
+    public override SchemaMode SchemaMode => SchemaMode.Session;
+
+    private static readonly System.Text.RegularExpressions.Regex SchemaChangers = new(
+        @"\buse\b|\bcreate\s+(or\s+(replace|alter)\s+)?(transient\s+|local\s+|temp(orary)?\s+|volatile\s+)*(schema|database)\b|\bcall\b|\bexecute\b|\bbegin\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>USE SCHEMA / USE DATABASE, and CREATE SCHEMA / DATABASE (which switch to the new one), also inside scripts.</summary>
+    protected override bool SchemaMayChange(BatchContext context) => MayChangeSchema(context.Batch.Sql);
+
+    internal static bool MayChangeSchema(string sql) => SchemaChangers.IsMatch(sql);
+
+    protected override async Task ReadSchemaCoreAsync(CancellationToken ct)
+    {
+        await using var cmd = CreateCommand("SELECT CURRENT_SCHEMA()");
+        var v = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        CurrentSchema = v is null or DBNull ? null : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture);
+        _startupSchema ??= CurrentSchema;
+    }
+
+    protected override async Task ChangeSchemaCoreAsync(string? schema, CancellationToken ct)
+    {
+        var target = schema ?? _startupSchema ?? throw EngineException.Validation("The session started without a schema to return to.");
+        // A DB.SCHEMA pair is taken as typed; a bare name stays in the current database.
+        var path = target.Contains('.') && !target.TrimStart().StartsWith('"')
+            ? string.Join('.', target.Split('.', 2).Select(p => SnowflakeSql.AlwaysQuote(SnowflakeSql.Normalize(p.Trim()))))
+            : SnowflakeSql.AlwaysQuote(SnowflakeSql.Normalize(target));
+        await using (var cmd = CreateCommand("USE SCHEMA " + path))
+        {
+            try
+            {
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (SnowflakeDbException ex)
+            {
+                throw new EngineException(400, SnowflakeErrors.Code(ex.ErrorCode), SnowflakeErrors.CleanMessage(ex.Message));
+            }
+        }
+        await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
+        var db = _conn.Database;
+        if (!string.IsNullOrEmpty(db)) CurrentDatabase = db;
+    }
+
     // ------------------------------------------------------------------ module endpoints (session chips)
 
     /// <summary>The session's warehouse, role, database and schema.</summary>
@@ -268,6 +314,7 @@ public sealed class SnowflakeSession : AdoSessionBase
             }
             var ctx = await ReadContextAsync(scope, c).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(ctx.Database)) CurrentDatabase = ctx.Database;
+            CurrentSchema = ctx.Schema;
             return ctx;
         }, ct);
     }

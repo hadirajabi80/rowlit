@@ -1,4 +1,5 @@
-// Import Wizard steps against a mocked engine API: gating, preview requests, mapping, new-table DDL, modes, run + summary.
+// Import Wizard steps against a mocked engine API: navigation and gating, preview requests, the target pickers, mapping,
+// new-table DDL, modes, review + run + summary.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerCommand } from '../../commands/registry';
@@ -7,6 +8,7 @@ import { setPlatform } from '../../platform';
 import { useCatalog, dbKey } from '../../store/catalog';
 import { useConnections } from '../../store/connections';
 import { useTabs, type ViewTab } from '../../store/tabs';
+import { useUi } from '../../store/ui';
 import { ImportWizardView } from './ImportWizardView';
 import { openImportWizard } from './open';
 import type {
@@ -53,37 +55,48 @@ const tableInfo: TargetTableInfo = {
   primaryKey: ['id'], uniqueKeys: [['id']],
 };
 
-const ddl: DdlPreview = { ddl: 'CREATE TABLE [dbo].[people] ([id] int NOT NULL)', columns: [{ name: 'id', sqlType: 'int' }, { name: 'Name', sqlType: 'nvarchar(32)' }, { name: 'age', sqlType: 'int' }], warnings: [] };
+const ddl: DdlPreview = { ddl: 'CREATE TABLE [dbo].[people_import] ([id] int NOT NULL)', columns: [{ name: 'id', sqlType: 'int' }, { name: 'Name', sqlType: 'nvarchar(32)' }, { name: 'age', sqlType: 'int' }], warnings: [] };
 
 const summary: ImportSummary = {
   outcome: 'completedWithErrors', rowsRead: 100, rowsWritten: 97, rowsSkipped: 3, errorCount: 3, elapsedMs: 2500, rowsPerSecond: 40, committed: true, rolledBack: false,
-  createdTable: '[dbo].[people]', ddl: 'CREATE TABLE [dbo].[people] ([id] int)', loadMethod: 'SqlBulkCopy', hasErrorReport: true,
+  createdTable: '[dbo].[people_import]', ddl: 'CREATE TABLE [dbo].[people_import] ([id] int)', loadMethod: 'SqlBulkCopy', hasErrorReport: true,
   errorsSample: [{ row: 7, column: 'age', message: 'not a number', values: ['7', 'x', 'abc'] }],
 };
+
+const conn = (id: string, name: string, providerId: string, readOnly = false) =>
+  ({ id, name, providerId, color: null, folder: null, readOnly, props: {}, hasPassword: false, savePassword: false, createdAt: '', lastUsedAt: null }) as never;
 
 function Host({ id }: { id: string }) {
   const tab = useTabs((s) => s.tabs.find((t) => t.id === id)) as ViewTab | undefined;
   return tab ? <ImportWizardView tab={tab} theme="light" visible /> : null;
 }
 
-function open(opts: { table?: string | null; path?: string | null; readOnly?: boolean } = {}) {
+function open(opts: { table?: string | null; path?: string | null; readOnly?: boolean; noConnection?: boolean; extra?: boolean } = {}) {
   useConnections.setState({
     loaded: true, providers: [],
-    connections: [{ id: 'c1', name: 'Shop', providerId: 'sqlserver', color: null, folder: null, readOnly: !!opts.readOnly, props: {}, hasPassword: false, savePassword: false, createdAt: '', lastUsedAt: null }],
+    connections: [
+      conn('c1', 'Shop', 'sqlserver', !!opts.readOnly),
+      ...(opts.extra ? [conn('c2', 'Warehouse', 'postgresql')] : []),
+      ...(opts.noConnection ? [conn('c2', 'Warehouse', 'postgresql')] : []),
+    ],
   });
-  const id = openImportWizard({ connectionId: 'c1', database: 'shop', schema: 'dbo', table: opts.table ?? null }, opts.path ?? null);
+  const id = openImportWizard(
+    { connectionId: opts.noConnection ? null : 'c1', database: opts.noConnection ? null : 'shop', schema: opts.noConnection ? null : 'dbo', table: opts.table ?? null },
+    opts.path ?? null,
+  );
   return render(<Host id={id} />);
 }
 
 const next = () => fireEvent.click(screen.getByRole('button', { name: /^Next/ }));
 const nextBtn = () => screen.getByRole('button', { name: /^Next/ });
+const startBtn = () => screen.getByRole('button', { name: /Start import/ });
 
 async function toFormat() {
   fireEvent.change(await screen.findByLabelText('File path'), { target: { value: CSV } });
   await waitFor(() => expect(h.api.preview).toHaveBeenCalled());
   await waitFor(() => expect(nextBtn()).toBeEnabled());
   next();
-  await screen.findByRole('heading', { name: /Format options/ });
+  await screen.findByRole('heading', { name: 'Check how the file is read' });
   await screen.findByRole('table', { name: 'Preview of the file' });
 }
 
@@ -91,11 +104,51 @@ async function toTarget() {
   await toFormat();
   await waitFor(() => expect(nextBtn()).toBeEnabled());
   next();
-  await screen.findByRole('heading', { name: 'Target table' });
+  await screen.findByRole('heading', { name: 'Choose where to import' });
+}
+
+/** The columns step: of the existing table (`table`) or of a new table named people_import. */
+async function toColumns(table: string | null = null) {
+  if (table) {
+    open({ table, path: CSV });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('heading', { name: 'Check how the file is read' });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('heading', { name: 'Choose where to import' });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('table', { name: 'Column mapping' });
+  } else {
+    open({ path: CSV });
+    await toTarget();
+    fireEvent.change(screen.getByLabelText('New table name'), { target: { value: 'people_import' } });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('heading', { name: 'Define the new table columns' });
+  }
+}
+
+async function toOptions(table: string | null = null) {
+  await toColumns(table);
+  if (table) fireEvent.change(await screen.findByLabelText('Source for note'), { target: { value: 'const' } });
+  await waitFor(() => expect(nextBtn()).toBeEnabled());
+  next();
+  await screen.findByRole('heading', { name: 'Import options' });
+}
+
+async function toReview(table: string | null = null) {
+  await toOptions(table);
+  await waitFor(() => expect(nextBtn()).toBeEnabled());
+  next();
+  await screen.findByRole('heading', { name: 'Review and import' });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
+  useUi.setState({ toasts: [], confirm: null });
   useTabs.setState({ tabs: [], activeId: null, seq: 0, mru: [], closed: [] });
   h.api.preview.mockResolvedValue(preview);
   h.api.capabilities.mockResolvedValue(caps);
@@ -103,7 +156,8 @@ beforeEach(() => {
   h.api.ddl.mockResolvedValue(ddl);
   h.api.cancel.mockResolvedValue(undefined);
   useCatalog.setState({
-    loadSchemas: vi.fn(async () => null), loadSchema: vi.fn(async () => {}), revalidate: vi.fn(async () => {}),
+    loadSchemas: vi.fn(async () => null), loadSchema: vi.fn(async () => {}), revalidate: vi.fn(async () => {}), loadDatabases: vi.fn(async () => null),
+    conns: { c1: { databases: { databases: ['shop', 'archive'], current: 'shop' }, status: 'ready', error: null } },
     dbs: {
       [dbKey('c1', 'shop')]: {
         connectionId: 'c1', database: 'shop', schemasStatus: 'ready', schemasError: null, schemaStatus: {}, schemaError: {}, etags: {}, dialect: 'tsql',
@@ -119,6 +173,78 @@ beforeEach(() => {
 });
 
 afterEach(() => setPlatform(null));
+
+describe('stepper and navigation', () => {
+  it('shows the six steps, marks done / current / upcoming and lets done steps be revisited', async () => {
+    open({ path: CSV });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    const li = (n: string) => screen.getByRole('button', { name: new RegExp(`^Step \\d: ${n}$`) }).closest('li')!;
+    expect(within(screen.getByRole('list', { name: 'Import steps' })).getAllByRole('listitem')).toHaveLength(6);
+    expect(li('Source')).toHaveClass('current');
+    expect(li('Source')).toHaveAttribute('aria-current', 'step');
+    expect(li('Format')).toHaveClass('todo');
+
+    next();
+    await screen.findByRole('heading', { name: 'Check how the file is read' });
+    expect(li('Source')).toHaveClass('done');
+    expect(li('Format')).toHaveClass('current');
+    expect(screen.getByRole('button', { name: 'Step 1: Source' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Step 2: Format' })).toBeDisabled(); // the current step
+    expect(screen.getByRole('button', { name: 'Step 3: Target' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Step 1: Source' }));
+    expect(await screen.findByRole('heading', { name: 'Choose the file to import' })).toBeInTheDocument();
+    expect(li('Source')).toHaveClass('current');
+  });
+
+  it('moves the focus to the heading of the new step', async () => {
+    open({ path: CSV });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    expect(await screen.findByRole('heading', { name: 'Check how the file is read' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    expect(await screen.findByRole('heading', { name: 'Choose the file to import' })).toHaveFocus();
+  });
+
+  it('says why Next is disabled and enables it when the step is valid', async () => {
+    open();
+    expect(await screen.findByText('Choose a file to continue.')).toBeInTheDocument();
+    expect(nextBtn()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('File path'), { target: { value: CSV } });
+    expect(nextBtn()).toBeEnabled();
+    expect(screen.queryByText('Choose a file to continue.')).toBeNull();
+  });
+
+  it('Enter goes to the next step when it is valid, and does nothing when it is not', async () => {
+    open();
+    const input = await screen.findByLabelText('File path');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('heading', { name: 'Choose the file to import' })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: CSV } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByRole('heading', { name: 'Check how the file is read' })).toBeInTheDocument();
+    // Enter on a button belongs to the button
+    fireEvent.keyDown(screen.getByRole('button', { name: /Back/ }), { key: 'Enter' });
+    expect(screen.getByRole('heading', { name: 'Check how the file is read' })).toBeInTheDocument();
+  });
+
+  it('Escape closes an empty wizard at once and asks before discarding a chosen file', async () => {
+    const close = vi.fn();
+    registerCommand({ id: 'tab.close', title: 'Close tab', category: 'Tabs', run: close });
+    open();
+    fireEvent.keyDown(await screen.findByLabelText('File path'), { key: 'Escape' });
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(close.mock.calls[0][0]).toMatchObject({ kind: 'tab' });
+    expect(useUi.getState().confirm).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('File path'), { target: { value: CSV } });
+    fireEvent.keyDown(screen.getByLabelText('File path'), { key: 'Escape' });
+    await waitFor(() => expect(useUi.getState().confirm?.title).toBe('Close the import?'));
+    expect(close).toHaveBeenCalledTimes(1);
+    act(() => useUi.getState().resolveConfirm(true));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+  });
+});
 
 describe('step 1 and 2: source and format', () => {
   it('gates Next on a file, previews it after a debounce and shows inferred types', async () => {
@@ -143,12 +269,75 @@ describe('step 1 and 2: source and format', () => {
     expect(within(grid).getByText('text(20)')).toBeInTheDocument();
   });
 
+  it('shows the file as a card with its format, size, encoding and columns, and Change picks another file', async () => {
+    const showOpenDialog = vi.fn(async () => 'C:\\data\\other.csv');
+    setPlatform({ ...createBrowserPlatform(), hasFileSystem: true, showOpenDialog });
+    open({ path: CSV });
+    const card = await screen.findByTestId('iw-filecard');
+    await waitFor(() => expect(within(card).getByText('2.0 KB')).toBeInTheDocument());
+    expect(within(card).getByText('people.csv')).toBeInTheDocument();
+    expect(within(card).getByText('CSV')).toBeInTheDocument();
+    expect(within(card).getByText('utf-8')).toBeInTheDocument();
+    expect(within(card).getByText('3 columns')).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: /Change/ }));
+    await waitFor(() => expect(showOpenDialog).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText('File path')).toHaveValue('C:\\data\\other.csv'));
+  });
+
+  it('offers Browse in the drop zone and remembers the files it read', async () => {
+    const showOpenDialog = vi.fn(async () => CSV);
+    setPlatform({ ...createBrowserPlatform(), hasFileSystem: true, showOpenDialog });
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: /Browse/ }));
+    await waitFor(() => expect(screen.getByLabelText('File path')).toHaveValue(CSV));
+    await waitFor(() => expect(window.localStorage.getItem('rowlit.import.recentFiles')).toContain('people.csv'));
+  });
+
+  it('lists recent files and opens one with a click', async () => {
+    window.localStorage.setItem('rowlit.import.recentFiles', JSON.stringify([{ path: CSV, at: 1 }, { path: 'D:\\x\\b.xlsx', at: 0 }]));
+    open();
+    const recent = await screen.findByRole('region', { name: 'Recent files' });
+    expect(within(recent).getAllByRole('listitem')).toHaveLength(2);
+    fireEvent.click(within(recent).getByRole('button', { name: /^people\.csv/ }));
+    expect(screen.getByLabelText('File path')).toHaveValue(CSV);
+    expect(nextBtn()).toBeEnabled();
+    expect(screen.queryByRole('region', { name: 'Recent files' })).toBeNull(); // the file card replaced the drop zone
+  });
+
+  it('forgets a recent file', async () => {
+    window.localStorage.setItem('rowlit.import.recentFiles', JSON.stringify([{ path: CSV, at: 1 }]));
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: /Remove people\.csv/ }));
+    expect(screen.queryByRole('region', { name: 'Recent files' })).toBeNull();
+    expect(window.localStorage.getItem('rowlit.import.recentFiles')).toBe('[]');
+  });
+
+  it('refuses a dropped file of another type with a toast', async () => {
+    open();
+    const zone = await screen.findByTestId('iw-dropzone');
+    fireEvent.drop(zone, { dataTransfer: { files: [new File(['x'], 'photo.png')], types: ['Files'] } });
+    expect(useUi.getState().toasts[0].text).toContain('photo.png');
+    expect(screen.getByLabelText('File path')).toHaveValue('');
+  });
+
+  it('asks for the connection when the wizard was opened without one', async () => {
+    open({ noConnection: true, path: CSV });
+    const where = await screen.findByRole('region', { name: 'Where to import' });
+    expect(nextBtn()).toBeDisabled();
+    expect(screen.getByText('Choose a connection to continue.')).toBeInTheDocument();
+    fireEvent.change(within(where).getByLabelText('Connection'), { target: { value: 'c2' } });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    expect(useTabs.getState().tabs[0]).toMatchObject({ connectionId: 'c2' });
+    expect(screen.getByRole('region', { name: 'Where to import' })).toBeInTheDocument(); // stays, so the choice can be changed
+    await waitFor(() => expect(h.api.capabilities).toHaveBeenCalledWith('c2', null));
+  });
+
   it('sends changed options to the engine and ignores untouched ones', async () => {
     open({ path: CSV });
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(nextBtn()).toBeEnabled());
     next();
-    await screen.findByRole('heading', { name: /Format options/ });
+    await screen.findByRole('heading', { name: 'Check how the file is read' });
 
     fireEvent.change(screen.getByLabelText('Encoding'), { target: { value: 'windows-1256' } });
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(2));
@@ -166,6 +355,29 @@ describe('step 1 and 2: source and format', () => {
     fireEvent.change(screen.getByLabelText('Encoding'), { target: { value: 'auto' } });
     await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(4));
     expect(h.api.preview.mock.calls[3][0].options.encoding).toBeUndefined();
+  });
+
+  it('keeps the advanced options (NULL texts, separators, dates, digits) behind a disclosure', async () => {
+    open({ path: CSV });
+    await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('heading', { name: 'Check how the file is read' });
+    const advanced = screen.getByText(/Advanced/).closest('details')!;
+    expect(advanced).not.toHaveAttribute('open');
+    expect(within(advanced).getByLabelText('Decimal separator')).toBeInTheDocument();
+    fireEvent.change(within(advanced).getByLabelText('Decimal separator'), { target: { value: ',' } });
+    await waitFor(() => expect(h.api.preview).toHaveBeenCalledTimes(2));
+    expect(h.api.preview.mock.calls[1][0].options).toEqual({ format: 'csv', decimalSeparator: ',' });
+  });
+
+  it('marks the columns whose values do not fit their type', async () => {
+    h.api.preview.mockResolvedValue({ ...preview, rows: [['1', 'Ann', 'thirty'], ['2', 'Bob', '31']] });
+    open({ path: CSV });
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    expect(await screen.findByRole('img', { name: /age: "thirty" is not a number/ })).toBeInTheDocument();
+    expect(screen.getByText(/One column has values that do not fit/)).toBeInTheDocument();
   });
 
   it('offers sheets for xlsx and a JSON path for json', async () => {
@@ -187,30 +399,90 @@ describe('step 1 and 2: source and format', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The file is locked');
     expect(nextBtn()).toBeEnabled(); // step 1 only needs a path; the error shows there
     next();
-    expect(await screen.findByRole('heading', { name: /Format options/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Check how the file is read' })).toBeInTheDocument();
     expect(nextBtn()).toBeDisabled();
-  });
-
-  it('steps back through the stepper', async () => {
-    open({ path: CSV });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: /Format options/ });
-    fireEvent.click(screen.getByRole('button', { name: 'Step 1: Source' }));
-    expect(await screen.findByRole('heading', { name: 'Choose the file to import' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Step 3: Target' })).toBeDisabled();
+    expect(screen.getByText('The file cannot be read yet.')).toBeInTheDocument();
   });
 });
 
-describe('step 3: existing table', () => {
+describe('step 3: target', () => {
+  it('offers New table first and fills connection, database and schema pickers', async () => {
+    open({ path: CSV });
+    await toTarget();
+    expect(screen.getByRole('radio', { name: 'New table' })).toBeChecked();
+    expect(screen.getByLabelText('Connection')).toHaveValue('c1');
+    expect(within(screen.getByLabelText('Database')).getAllByRole('option').map((o) => o.textContent)).toEqual(['shop', 'archive']);
+    expect(screen.getByLabelText('Database')).toHaveValue('shop');
+    expect(screen.getByLabelText('Schema')).toHaveValue('dbo');
+    expect(screen.getByLabelText('New table name')).toHaveValue('people');
+  });
+
+  it('blocks a new table name that is taken and offers the existing table instead', async () => {
+    open({ path: CSV });
+    await toTarget();
+    expect(nextBtn()).toBeDisabled(); // dbo.people exists
+    expect(screen.getByText('That table name is taken.')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('already exists in dbo');
+    fireEvent.click(screen.getByRole('button', { name: /load the rows into people/ }));
+    expect(screen.getByRole('radio', { name: 'Existing table' })).toBeChecked();
+    expect(screen.getByLabelText('Target table')).toHaveValue('people');
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+  });
+
+  it('warns about a reserved word but allows it, and confirms a free name', async () => {
+    open({ path: CSV });
+    await toTarget();
+    fireEvent.change(screen.getByLabelText('New table name'), { target: { value: 'order' } });
+    expect(screen.getByText(/is an SQL keyword/)).toBeInTheDocument();
+    expect(nextBtn()).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('New table name'), { target: { value: 'people_import' } });
+    expect(screen.getByText('Will create dbo.people_import')).toBeInTheDocument();
+    expect(screen.queryByText(/is an SQL keyword/)).toBeNull();
+  });
+
+  it('switches the connection: the tab follows and the capabilities are read again', async () => {
+    open({ path: CSV, extra: true });
+    await toTarget();
+    const sel = screen.getByLabelText('Connection');
+    expect(within(sel).getAllByRole('option').map((o) => o.textContent)).toEqual(['Shop', 'Warehouse']);
+    fireEvent.change(sel, { target: { value: 'c2' } });
+    await waitFor(() => expect(h.api.capabilities).toHaveBeenCalledWith('c2', null));
+    expect(useTabs.getState().tabs[0]).toMatchObject({ connectionId: 'c2' });
+  });
+
+  it('lists the tables of the chosen schema and reloads the table info', async () => {
+    open({ table: null, path: CSV });
+    await toTarget();
+    fireEvent.click(screen.getByRole('radio', { name: 'Existing table' }));
+    const table = screen.getByRole('combobox', { name: 'Target table' });
+    expect(within(table).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a table…', 'orders', 'people']);
+    expect(nextBtn()).toBeDisabled();
+    expect(screen.getByText('Choose a table to continue.')).toBeInTheDocument();
+    fireEvent.change(table, { target: { value: 'orders' } });
+    await waitFor(() => expect(h.api.tableInfo).toHaveBeenCalledWith('c1', { database: 'shop', schema: 'dbo', table: 'orders' }));
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    expect(screen.getByText(/4 columns · primary key id/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Schema'), { target: { value: 'sales' } });
+    expect(within(screen.getByRole('combobox', { name: 'Target table' })).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a table…', 'leads']);
+    expect(nextBtn()).toBeDisabled();
+  });
+
+  it('blocks the import with the engine reason (read-only / unsupported)', async () => {
+    h.api.capabilities.mockResolvedValue({ ...caps, canImport: false, reason: 'This provider cannot import.' });
+    open({ path: CSV });
+    await waitFor(() => expect(h.api.capabilities).toHaveBeenCalled());
+    await toFormat();
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
+    next();
+    await screen.findByRole('heading', { name: 'Choose where to import' });
+    await waitFor(() => expect(nextBtn()).toBeDisabled());
+    expect(await screen.findByText('This provider cannot import.')).toBeInTheDocument();
+  });
+});
+
+describe('step 4: existing table columns', () => {
   it('auto-matches columns, flags a required column without a source and unblocks once it has one', async () => {
-    open({ table: 'people', path: CSV });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: /Format options/ });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('table', { name: 'Column mapping' });
+    await toColumns('people');
     expect(h.api.tableInfo).toHaveBeenCalledWith('c1', { database: 'shop', schema: 'dbo', table: 'people' });
 
     const src = (n: string) => screen.getByLabelText(`Source for ${n}`) as HTMLSelectElement;
@@ -220,6 +492,8 @@ describe('step 3: existing table', () => {
     expect(src('note').value).toBe('skip');
     expect(screen.getByText(/"note" is required/)).toBeInTheDocument();
     expect(nextBtn()).toBeDisabled();
+    expect(screen.getByText('1 problem to fix.')).toBeInTheDocument();
+    expect(screen.getByText('3 of 4 table columns get a value')).toBeInTheDocument();
     // text -> int is a risky pairing only for the mismatched kinds; int -> int is fine
     expect(screen.queryByRole('img', { name: /age: The values may not fit/ })).toBeNull();
 
@@ -235,36 +509,42 @@ describe('step 3: existing table', () => {
     expect(nextBtn()).toBeEnabled();
   });
 
-  it('lists the tables of the chosen schema and reloads the table info', async () => {
-    open({ table: null, path: CSV });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: /Format options/ });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: 'Target table' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Existing table' }));
-    const table = screen.getByRole('combobox', { name: 'Target table' });
-    expect(within(table).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a table…', 'orders', 'people']);
-    expect(nextBtn()).toBeDisabled();
-    fireEvent.change(table, { target: { value: 'orders' } });
-    await waitFor(() => expect(h.api.tableInfo).toHaveBeenCalledWith('c1', { database: 'shop', schema: 'dbo', table: 'orders' }));
-    fireEvent.change(screen.getByLabelText('Schema'), { target: { value: 'sales' } });
-    expect(within(screen.getByRole('combobox', { name: 'Target table' })).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a table…', 'leads']);
+  it('marks matched-by-name columns, skips with a toggle and brings the match back', async () => {
+    await toColumns('people');
+    await waitFor(() => expect((screen.getByLabelText('Source for name') as HTMLSelectElement).value).toBe('src:1'));
+    const row = (n: string) => screen.getByLabelText(`Source for ${n}`).closest('tr')!;
+    expect(within(row('name')).getByText('auto')).toBeInTheDocument();
+    const skip = screen.getByRole('button', { name: 'Skip age' });
+    expect(skip).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(skip);
+    expect((screen.getByLabelText('Source for age') as HTMLSelectElement).value).toBe('skip');
+    expect(screen.getByRole('button', { name: 'Skip age' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Skip age' }));
+    expect((screen.getByLabelText('Source for age') as HTMLSelectElement).value).toBe('src:2');
+  });
+
+  it('clears every mapping and auto-matches again by name', async () => {
+    await toColumns('people');
+    await waitFor(() => expect((screen.getByLabelText('Source for id') as HTMLSelectElement).value).toBe('src:0'));
+    fireEvent.click(screen.getByRole('button', { name: /^Clear/ }));
+    for (const n of ['id', 'name', 'age', 'note']) expect((screen.getByLabelText(`Source for ${n}`) as HTMLSelectElement).value).toBe('skip');
+    expect(screen.getByText('Map at least one column.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Auto-match by name/ }));
+    expect((screen.getByLabelText('Source for id') as HTMLSelectElement).value).toBe('src:0');
+    expect((screen.getByLabelText('Source for name') as HTMLSelectElement).value).toBe('src:1');
   });
 });
 
-describe('step 3: new table', () => {
+describe('step 4: new table columns', () => {
   it('previews the CREATE TABLE statement and sends edited names, types and the key', async () => {
-    open({ path: CSV });
-    await toTarget();
-    expect(screen.getByLabelText('New table name')).toHaveValue('people');
+    await toColumns();
     const code = await screen.findByLabelText('CREATE TABLE preview');
-    await waitFor(() => expect(code).toHaveTextContent('CREATE TABLE [dbo].[people]'));
+    await waitFor(() => expect(code).toHaveTextContent('CREATE TABLE [dbo].[people_import]'));
+    expect(screen.getByText('CREATE TABLE preview', { selector: 'summary' }).closest('details')).not.toHaveAttribute('open'); // collapsed
     expect(h.api.ddl).toHaveBeenCalled();
     const first = h.api.ddl.mock.calls[0];
     expect(first[0]).toBe('c1');
-    expect(first[1]).toMatchObject({ database: 'shop', schema: 'dbo', table: 'people', primaryKey: [] });
+    expect(first[1]).toMatchObject({ database: 'shop', schema: 'dbo', table: 'people_import', primaryKey: [] });
     expect(first[1].columns.map((c: { name: string }) => c.name)).toEqual(['id', 'Name', 'age']);
     expect(first[1].columns[0].sqlType).toBeUndefined(); // default type: the engine decides
 
@@ -281,41 +561,31 @@ describe('step 3: new table', () => {
       expect(last.columns[0].nullable).toBe(false);
     });
     expect(screen.getByLabelText('id can be NULL')).toBeDisabled();
+    expect(screen.getByText('2 of 3 columns will be created in dbo.people_import')).toBeInTheDocument();
   });
 
   it('blocks Next for duplicate column names', async () => {
-    open({ path: CSV });
-    await toTarget();
+    await toColumns();
     fireEvent.change(screen.getByLabelText('Name of age'), { target: { value: 'id' } });
     expect(await screen.findByText(/used twice/)).toBeInTheDocument();
     expect(nextBtn()).toBeDisabled();
+    expect(screen.getByText('1 problem to fix.')).toBeInTheDocument();
+  });
+
+  it('includes and excludes every column at once', async () => {
+    await toColumns();
+    fireEvent.click(screen.getByRole('button', { name: 'Include none' }));
+    expect(screen.getByText('Include at least one column.')).toBeInTheDocument();
+    expect(nextBtn()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Include all' }));
+    await waitFor(() => expect(nextBtn()).toBeEnabled());
   });
 });
 
-async function toMode(table: string | null = null) {
-  if (table) {
-    open({ table, path: CSV });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: /Format options/ });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('table', { name: 'Column mapping' });
-    fireEvent.change(await screen.findByLabelText('Source for note'), { target: { value: 'const' } });
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-  } else {
-    open({ path: CSV });
-    await toTarget();
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-  }
-  next();
-  await screen.findByRole('heading', { name: 'Import mode and options' });
-}
-
-describe('step 4: mode', () => {
+describe('step 5: options', () => {
   it('offers only the modes the engine supports', async () => {
     h.api.capabilities.mockResolvedValue({ ...caps, modes: ['append', 'truncateInsert'], transactional: false, bulkMethod: 'Batched INSERT' });
-    await toMode('people');
+    await toOptions('people');
     const modes = within(screen.getByRole('radiogroup', { name: 'Import mode' })).getAllByRole('radio');
     expect(modes).toHaveLength(2);
     expect(screen.getByText('Append')).toBeInTheDocument();
@@ -325,47 +595,37 @@ describe('step 4: mode', () => {
   });
 
   it('only appends into a new table', async () => {
-    await toMode();
+    await toOptions();
     expect(within(screen.getByRole('radiogroup', { name: 'Import mode' })).getAllByRole('radio')).toHaveLength(1);
     expect(screen.getByText(/starts empty/)).toBeInTheDocument();
   });
 
   it('asks for confirmation before replacing all rows', async () => {
-    await toMode('people');
+    await toOptions('people');
     fireEvent.click(screen.getByRole('radio', { name: /Replace all rows/ }));
-    const start = screen.getByRole('button', { name: /Start import/ });
-    expect(start).toBeDisabled();
+    expect(nextBtn()).toBeDisabled();
+    expect(screen.getByText('Confirm the replacement to continue.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: /all existing rows of people will be deleted/ }));
-    expect(start).toBeEnabled();
+    expect(nextBtn()).toBeEnabled();
   });
 
   it('preselects the primary key for upsert, warns about a non-unique key and requires one', async () => {
-    await toMode('people');
+    await toOptions('people');
     fireEvent.click(screen.getByRole('radio', { name: /Insert or update by key/ }));
     const keys = screen.getByRole('group', { name: 'Key columns' });
     expect(within(keys).getByRole('checkbox', { name: /id/ })).toBeChecked();
-    expect(screen.getByRole('button', { name: /Start import/ })).toBeEnabled();
+    expect(nextBtn()).toBeEnabled();
 
     fireEvent.click(within(keys).getByRole('checkbox', { name: /id/ }));
-    expect(screen.getByRole('button', { name: /Start import/ })).toBeDisabled();
+    expect(nextBtn()).toBeDisabled();
     expect(screen.getByText(/Choose the key column/)).toBeInTheDocument();
+    expect(screen.getByText('Choose a key to continue.')).toBeInTheDocument();
     fireEvent.click(within(keys).getByRole('checkbox', { name: /^age/ }));
     expect(await screen.findByText(/not a primary or unique key/)).toBeInTheDocument();
   });
-
-  it('blocks the import with the engine reason (read-only / unsupported)', async () => {
-    h.api.capabilities.mockResolvedValue({ ...caps, canImport: false, reason: 'This provider cannot import.' });
-    open({ path: CSV });
-    await waitFor(() => expect(h.api.capabilities).toHaveBeenCalled());
-    await toFormat();
-    await waitFor(() => expect(nextBtn()).toBeEnabled());
-    next();
-    await screen.findByRole('heading', { name: 'Target table' });
-    await waitFor(() => expect(nextBtn()).toBeDisabled());
-  });
 });
 
-describe('step 5: run', () => {
+describe('step 6: review and run', () => {
   let finish: (end: JobEnd) => void;
   let progress: (p: ImportProgress | null, ev: { done: number }) => void;
 
@@ -379,19 +639,36 @@ describe('step 5: run', () => {
     });
   });
 
-  it('starts the job with the built request, shows progress, cancel and the summary', async () => {
-    await toMode();
+  it('reviews the import before anything starts', async () => {
+    await toReview();
+    expect(h.api.start).not.toHaveBeenCalled();
+    const flow = screen.getByRole('group', { name: 'Import summary' });
+    expect(within(flow).getByText('people.csv')).toBeInTheDocument();
+    expect(within(flow).getByText('dbo.people_import')).toBeInTheDocument();
+    expect(within(flow).getByText(/2 rows/)).toBeInTheDocument();
+    expect(within(flow).getByText(/new table/)).toBeInTheDocument();
+    expect(within(screen.getByRole('note', { name: 'What will happen' })).getByText(/Create the table dbo.people_import with 3 columns/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Next/ })).toBeNull();
+    expect(startBtn()).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    expect(await screen.findByRole('heading', { name: 'Import options' })).toBeInTheDocument();
+  });
+
+  it('starts the job with the built request, shows progress, the log, cancel and the summary', async () => {
+    await toOptions();
     fireEvent.click(screen.getByRole('radio', { name: /Skip bad rows/ }));
     fireEvent.change(screen.getByLabelText('Maximum errors'), { target: { value: '25' } });
     fireEvent.change(screen.getByLabelText('Batch size'), { target: { value: '250' } });
-    fireEvent.click(screen.getByRole('button', { name: /Start import/ }));
+    next();
+    await screen.findByRole('heading', { name: 'Review and import' });
+    fireEvent.click(startBtn());
 
     await waitFor(() => expect(h.api.start).toHaveBeenCalledTimes(1));
     const [cid, req] = h.api.start.mock.calls[0];
     expect(cid).toBe('c1');
     expect(req).toMatchObject({
       path: CSV, mode: 'append', onError: 'skip', maxErrors: 25, batchSize: 250, transaction: true, useBulk: true,
-      target: { database: 'shop', schema: 'dbo', table: 'people', create: true },
+      target: { database: 'shop', schema: 'dbo', table: 'people_import', create: true },
       source: { format: 'csv', encoding: 'utf-8', delimiter: ',' },
     });
     expect(req.columns).toHaveLength(3);
@@ -405,7 +682,12 @@ describe('step 5: run', () => {
     const stats = screen.getByLabelText('Progress');
     expect(within(stats).getByText('1,500')).toBeInTheDocument();
     expect(within(stats).getByText('5,000')).toBeInTheDocument();
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    const log = screen.getByRole('region', { name: 'Import log' });
+    expect(within(log).getByText(/Importing rows/)).toBeInTheDocument();
+    expect(within(log).getByText(/10 rows have failed so far \(10 skipped\)/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Back/ })).toBeNull(); // no navigation while it runs
+    expect(screen.getByRole('button', { name: 'Step 1: Source' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel import' }));
     await waitFor(() => expect(h.api.cancel).toHaveBeenCalledWith('j1'));
@@ -430,8 +712,8 @@ describe('step 5: run', () => {
     const blob = new Blob(['\uFEFFrow,error\n7,bad'], { type: 'text/csv' });
     h.api.errorReport.mockResolvedValue(blob);
 
-    await toMode();
-    fireEvent.click(screen.getByRole('button', { name: /Start import/ }));
+    await toReview();
+    fireEvent.click(startBtn());
     await waitFor(() => expect(h.wait).toHaveBeenCalled());
     act(() => finish({ status: 'ok', error: null, summary }));
     fireEvent.click(await screen.findByRole('button', { name: /Download error report/ }));
@@ -441,34 +723,49 @@ describe('step 5: run', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Open table data/ }));
     expect(dataOpen).toHaveBeenCalledWith({
-      kind: 'object', connectionId: 'c1', database: 'shop', ref: { database: 'shop', schema: 'dbo', name: 'people', type: 'table' },
+      kind: 'object', connectionId: 'c1', database: 'shop', ref: { database: 'shop', schema: 'dbo', name: 'people_import', type: 'table' },
     });
   });
 
-  it('shows a failed job and lets the user go back', async () => {
-    await toMode();
-    fireEvent.click(screen.getByRole('button', { name: /Start import/ }));
+  it('shows a failed job and lets the user go back to the options, then review again', async () => {
+    await toReview();
+    fireEvent.click(startBtn());
     await waitFor(() => expect(h.wait).toHaveBeenCalled());
     act(() => finish({ status: 'error', error: 'Login failed for user', summary: null }));
     expect(await screen.findByText('Login failed for user')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to options' }));
-    expect(await screen.findByRole('heading', { name: 'Import mode and options' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Import options' })).toBeInTheDocument();
+    next();
+    expect(await screen.findByRole('heading', { name: 'Review and import' })).toBeInTheDocument();
+    expect(startBtn()).toBeEnabled(); // a fresh review, not the old failure
   });
 
   it('shows a start error (e.g. read-only connection refused by the engine)', async () => {
     h.api.start.mockRejectedValue(new Error('The connection is read-only'));
-    await toMode();
-    fireEvent.click(screen.getByRole('button', { name: /Start import/ }));
+    await toReview();
+    fireEvent.click(startBtn());
     expect(await screen.findByText('The connection is read-only')).toBeInTheDocument();
   });
 
   it('can import another file', async () => {
-    await toMode();
-    fireEvent.click(screen.getByRole('button', { name: /Start import/ }));
+    await toReview();
+    fireEvent.click(startBtn());
     await waitFor(() => expect(h.wait).toHaveBeenCalled());
     act(() => finish({ status: 'ok', error: null, summary: { ...summary, outcome: 'completed', errorCount: 0, errorsSample: [], hasErrorReport: false } }));
     fireEvent.click(await screen.findByRole('button', { name: 'Import another file' }));
     expect(await screen.findByRole('heading', { name: 'Choose the file to import' })).toBeInTheDocument();
     expect(screen.getByLabelText('File path')).toHaveValue('');
+  });
+
+  it('Escape while importing asks before cancelling', async () => {
+    await toReview();
+    fireEvent.click(startBtn());
+    await waitFor(() => expect(h.wait).toHaveBeenCalled());
+    await screen.findByRole('progressbar');
+    fireEvent.keyDown(screen.getByRole('progressbar'), { key: 'Escape' });
+    await waitFor(() => expect(useUi.getState().confirm?.title).toBe('Cancel the import?'));
+    expect(h.api.cancel).not.toHaveBeenCalled();
+    act(() => useUi.getState().resolveConfirm(true));
+    await waitFor(() => expect(h.api.cancel).toHaveBeenCalledWith('j1'));
   });
 });

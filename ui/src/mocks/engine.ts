@@ -27,6 +27,10 @@ const DIALECT: Record<string, Dialect> = {
   // Batch 3 packs: the dialect of their providers
   ...Object.fromEntries(MOCK_PACKS.flatMap((p) => p.providers).filter((p) => p.dialect).map((p) => [p.id, p.dialect as Dialect])),
 };
+/** The default schema a session starts in, and what it may do with it (the real engine reads it from the server). */
+const SCHEMA_DEFAULTS: Partial<Record<Dialect, { schema: string; mode: 'readOnly' | 'session' }>> = {
+  tsql: { schema: 'dbo', mode: 'readOnly' }, pgsql: { schema: 'public', mode: 'session' }, snowflake: { schema: 'PUBLIC', mode: 'session' },
+};
 const packShop = (pid: string | undefined) => (pid ? MOCK_PACKS.map((p) => p.shop?.[pid]).find((x) => x) : undefined);
 
 /** The PostgreSQL shop tables (built once: their rows are cached per table object). */
@@ -273,8 +277,20 @@ export class MockEngine {
       sessionId: nextId('s'), connectionId, serverInfo: this.serverInfo(c.providerId, c.props), database: database ?? this.databases(connectionId).current,
       txMode, txOpen: false, state: 'idle', dialect: DIALECT[c.providerId], cancel: false, lastResults: null,
     };
+    const def = SCHEMA_DEFAULTS[s.dialect];
+    if (def) {
+      s.schema = def.schema;
+      s.schemaMode = def.mode;
+      if (s.dialect === 'pgsql') s.searchPath = [def.schema];
+    }
     this.sessions.set(s.sessionId, s);
     return this.info(s);
+  }
+  /** POST /sessions/{sid}/schema: PostgreSQL search_path / Snowflake USE SCHEMA; null returns to the starting schema. */
+  setSchema(s: MockSession, schema: string | null): void {
+    const def = SCHEMA_DEFAULTS[s.dialect];
+    s.schema = schema || def?.schema || null;
+    if (s.dialect === 'pgsql' && s.schema) s.searchPath = [...new Set([s.schema, 'public'])];
   }
   info(s: MockSession): SessionInfo {
     const { cancel: _c, lastResults: _l, ...rest } = s;
@@ -283,7 +299,10 @@ export class MockEngine {
     return { ...rest };
   }
   changed(s: MockSession) {
-    this.emit({ type: 'session.changed', sessionId: s.sessionId, state: s.state, txOpen: s.txOpen, database: s.database, txMode: s.txMode, released: !!s.released, releasedReason: s.releasedReason ?? null } as WsEvent);
+    this.emit({
+      type: 'session.changed', sessionId: s.sessionId, state: s.state, txOpen: s.txOpen, database: s.database, txMode: s.txMode,
+      schema: s.schema ?? null, searchPath: s.searchPath ?? null, released: !!s.released, releasedReason: s.releasedReason ?? null,
+    } as WsEvent);
   }
 
   // ---------- execution ----------

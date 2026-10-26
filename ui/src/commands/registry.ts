@@ -12,6 +12,7 @@
 // Context menus pass a target as `args` (see ObjectTarget in ./types); the palette and shortcuts call `run()`
 // without args, so commands fall back to the current selection / active tab.
 import { displayShortcut, normalizeShortcut } from './keys';
+import { defaultKeys, type KeybindingOverrides } from './keymap';
 
 /**
  * Where a shortcut is active. `global` works everywhere (except keys the editor owns); the others only while focus
@@ -29,7 +30,10 @@ export interface Command<A = unknown> {
   title: string;
   /** Palette group ("File", "Query", "View", "Database", "Edit", "Data", "Help", ...). */
   category: string;
-  /** Primary shortcut in display form ("Ctrl+Alt+T", chord "Ctrl+K Ctrl+S"). */
+  /**
+   * Default primary shortcut in display form ("Ctrl+Alt+T", chord "Ctrl+K Ctrl+S"). What a command actually answers to
+   * is `shortcutsOf(command)`: the user's override (Keyboard shortcuts dialog, commands/keymap.ts) or this default.
+   */
   shortcut?: string;
   /** Extra bindings that trigger the same command (not shown in menus unless `showAltShortcuts`; always in the sheet). */
   altShortcuts?: string[];
@@ -82,6 +86,10 @@ const commands = new Map<string, AnyCommand>();
 const aliases = new Map<string, string>();
 const listeners = new Set<() => void>();
 let version = 0;
+// The user's shortcut overrides (settings.ui.keybindings). A Map: command ids are data, never object keys.
+let overrides = new Map<string, string[] | null>();
+const keymapListeners = new Set<() => void>();
+let keymapRev = 0;
 let reportedConflicts = new Set<string>();
 
 const isDev = (() => {
@@ -97,18 +105,84 @@ function notify() {
   for (const l of listeners) l();
 }
 
+/**
+ * The shortcuts a command answers to: its override (null = unbound) or its defaults; the first is the primary one.
+ * Everything that shows or matches a command's keys goes through this.
+ */
+export function shortcutsOf(c: Pick<Command<never>, 'shortcut' | 'altShortcuts'> & { id?: string }): string[] {
+  const o = c.id !== undefined ? overrides.get(c.id) : undefined;
+  if (o !== undefined) return o ?? [];
+  return defaultKeys(c);
+}
+
+/** The shortcuts the command ships with, ignoring the user's keymap. */
+export function defaultShortcutsOf(c: Pick<Command<never>, 'shortcut' | 'altShortcuts'>): string[] {
+  return defaultKeys(c);
+}
+
+/** The primary shortcut of a command (or of the command with this id): the override's first, else the default. */
+export function primaryShortcut(c: (Pick<Command<never>, 'shortcut' | 'altShortcuts'> & { id?: string }) | string | undefined): string | undefined {
+  const cmd = typeof c === 'string' ? getCommand(c) : c;
+  return cmd ? shortcutsOf(cmd)[0] : undefined;
+}
+
+/** The platform label of a command's primary shortcut ("Ctrl+Shift+K", "⇧⌘K"), undefined when it has none. */
+export function shortcutLabelOf(id: string): string | undefined {
+  const s = primaryShortcut(id);
+  return s ? displayShortcut(s) : undefined;
+}
+
+/** " — change with Ctrl+Shift+K": `before` + the shortcut label + `after`, or '' when the command has no shortcut. */
+export function keyHint(id: string, before: string, after = ''): string {
+  const k = shortcutLabelOf(id);
+  return k ? `${before}${k}${after}` : '';
+}
+
+/** True when the user changed this command's shortcuts (rebound or unbound it). */
+export function isOverridden(id: string): boolean {
+  return overrides.has(resolveId(id));
+}
+
 function bindingsOf(c: AnyCommand): ShortcutBinding[] {
-  const out: ShortcutBinding[] = [];
   const scope = c.scope ?? 'global';
-  if (c.shortcut) out.push({ key: normalizeShortcut(c.shortcut), display: displayShortcut(c.shortcut), commandId: c.id, scope, primary: true });
-  for (const s of c.altShortcuts ?? []) out.push({ key: normalizeShortcut(s), display: displayShortcut(s), commandId: c.id, scope, primary: false });
+  return shortcutsOf(c).map((s, i) => ({ key: normalizeShortcut(s), display: displayShortcut(s), commandId: c.id, scope, primary: i === 0 }));
+}
+
+/**
+ * Shortcuts a command shows in tooltips, menus and the palette: the primary one (+ alternatives when advertised). A
+ * rebound command shows everything the user gave it.
+ */
+export function advertisedShortcuts(c: Pick<Command<never>, 'shortcut' | 'altShortcuts' | 'showAltShortcuts'> & { id?: string }): string[] {
+  const list = shortcutsOf(c);
+  if (!list.length) return [];
+  if (c.id !== undefined && overrides.has(c.id)) return list;
+  return c.showAltShortcuts ? list : [list[0]];
+}
+
+/** Replaces the user's overrides (already sanitised, commands/keymap.ts). Re-renders menus, tooltips and the editor. */
+export function setKeybindingOverrides(next: KeybindingOverrides): void {
+  overrides = new Map(Object.entries(next));
+  keymapRev++;
+  for (const l of keymapListeners) l();
+  notify();
+}
+
+/** A copy of the user's overrides. */
+export function getKeybindingOverrides(): KeybindingOverrides {
+  const out: KeybindingOverrides = {};
+  for (const [k, v] of overrides) out[k] = v;
   return out;
 }
 
-/** Shortcuts a command shows in tooltips, menus and the palette: the primary one (+ alternatives when advertised). */
-export function advertisedShortcuts(c: Pick<Command<never>, 'shortcut' | 'altShortcuts' | 'showAltShortcuts'>): string[] {
-  if (!c.shortcut) return [];
-  return c.showAltShortcuts ? [c.shortcut, ...(c.altShortcuts ?? [])] : [c.shortcut];
+/** Changes whenever the overrides do (editors rebind their actions when it does). */
+export function keymapVersion(): number {
+  return keymapRev;
+}
+
+/** Called after the overrides changed (not on command registration). Returns the unsubscriber. */
+export function subscribeKeymap(fn: () => void): () => void {
+  keymapListeners.add(fn);
+  return () => keymapListeners.delete(fn);
 }
 
 /** Register (or replace, same id) a command. Returns a disposer. */
@@ -252,6 +326,7 @@ export function commandsVersion(): number {
 export function resetCommandsForTests(): void {
   commands.clear();
   aliases.clear();
+  overrides = new Map();
   reportedConflicts = new Set();
   notify();
 }
@@ -268,5 +343,7 @@ export const commandRegistry = {
   enabled: isEnabled,
   bindings: listBindings,
   conflicts: findConflicts,
+  setOverrides: setKeybindingOverrides,
+  overrides: getKeybindingOverrides,
   subscribe: subscribeCommands,
 };

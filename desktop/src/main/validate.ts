@@ -177,6 +177,39 @@ export function validateMenuPosition(v: unknown): { x: number; y: number } {
   return { x: coord(v.x, 'x'), y: coord(v.y, 'y') };
 }
 
+// ---- keyboard shortcuts
+/** setMenuShortcuts: at most this many commands (the menu model has about a hundred items). */
+const MAX_MENU_SHORTCUTS = 300;
+const COMMAND_ID = /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/;
+/** "Mod+Shift+K", "Alt+ArrowUp", "F5", "Mod+=": modifier and key names, no whitespace (chords have no accelerator). */
+const SHORTCUT_TEXT = /^[A-Za-z0-9]+(\+([A-Za-z0-9]+|[=\-,./\\[\];'`]))*$|^[=\-,./\\[\];'`]$/;
+
+/**
+ * setMenuShortcuts({ commandId: "Mod+Shift+K" | null }): the accelerators the user's keymap gives menu items. Anything
+ * malformed is dropped (a bad entry never fails the rest); chords ("Mod+K Mod+S") are kept as null, since a native menu
+ * item cannot show one.
+ */
+export function validateMenuShortcuts(v: unknown): Record<string, string | null> {
+  if (!isPlainObject(v)) throw new ValidationError('shortcuts must be an object');
+  const out: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
+  let n = 0;
+  for (const [id, value] of Object.entries(v)) {
+    if (n >= MAX_MENU_SHORTCUTS) break;
+    if (!COMMAND_ID.test(id)) continue;
+    if (value === null) {
+      out[id] = null;
+      n++;
+    } else if (typeof value === 'string' && value.length <= 60) {
+      const t = value.trim();
+      if (/\s/.test(t)) out[id] = null;
+      else if (SHORTCUT_TEXT.test(t)) out[id] = t;
+      else continue;
+      n++;
+    }
+  }
+  return { ...out };
+}
+
 // ---- exported files
 /** What "Open file after export" may hand to the shell: only the file types an export writes, never programs or scripts. */
 export const EXPORT_FILE_EXTENSIONS = ['.csv', '.tsv', '.json', '.sql', '.md', '.xlsx', '.txt'];

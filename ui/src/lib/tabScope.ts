@@ -4,6 +4,8 @@
 import { catalogDatabase } from '../app/actions';
 import { dbKey, useCatalog } from '../store/catalog';
 import { getConnection, schemaIsDatabase } from '../store/connections';
+import { useSessions } from '../store/sessions';
+import { activeSchema, hasSchemaSwitcher, schemaModeOf } from './schemaScope';
 import { useTabs, type Tab } from '../store/tabs';
 import { resolveScopeColor, useScopeColors, type ScopeRef } from './scopeColors';
 
@@ -21,7 +23,14 @@ export function tabScopeRef(tab: Tab): ScopeRef | null {
     const cid = tab.connectionId;
     if (!cid) return null;
     const database = catalogDatabase(cid, tab.database);
-    const schema = schemaIsDatabase(getConnection(cid)?.providerId) ? tab.database ?? defaultSchemaOf(cid, database) : defaultSchemaOf(cid, database);
+    const providerId = getConnection(cid)?.providerId;
+    let schema = schemaIsDatabase(providerId) ? tab.database ?? defaultSchemaOf(cid, database) : defaultSchemaOf(cid, database);
+    if (hasSchemaSwitcher(providerId)) {
+      // the schema unqualified names resolve to (switcher), not just the catalog's default
+      const sid = useSessions.getState().byTab[tab.id];
+      const session = sid ? useSessions.getState().sessions[sid] : undefined;
+      schema = activeSchema(schemaModeOf(providerId, session), session, tab.schema) ?? schema;
+    }
     return { connectionId: cid, database, schema };
   }
   if (tab.kind === 'object') {
@@ -43,6 +52,8 @@ export function tabScopeRef(tab: Tab): ScopeRef | null {
 /** The colour tag of the tab's schema (else its database), null when none is set. */
 export function useTabScopeColor(tab: Tab): string | null {
   const map = useScopeColors();
+  // re-evaluate when the console's session moves to another schema
+  useSessions((s) => (tab.kind === 'console' ? s.sessions[s.byTab[tab.id]]?.schema : null));
   const key = useCatalog(() => {
     const r = tabScopeRef(tab);
     return r ? `${r.connectionId}\u0002${r.database ?? ''}\u0002${r.schema ?? ''}` : '';

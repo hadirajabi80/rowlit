@@ -230,6 +230,12 @@ export interface ObjectError { line: number; col: number; message: string; sever
 // ---------- 3.4 Sessions and execution ----------
 export type TxMode = 'auto' | 'manual';
 export type SessionState = 'idle' | 'executing' | 'broken' | 'closed';
+/**
+ * What a session offers for its default schema (the schema unqualified names resolve to): `none` (single-level providers:
+ * the database switcher is the schema), `readOnly` (SQL Server: the login's default schema), `session` (PostgreSQL
+ * search_path, Oracle CURRENT_SCHEMA, Snowflake USE SCHEMA).
+ */
+export type SchemaMode = 'none' | 'readOnly' | 'session';
 export interface CreateSessionRequest {
   connectionId: string;
   database: string | null;
@@ -256,15 +262,27 @@ export interface SessionInfo {
    * window uses the session.
    */
   orphan?: boolean;
+  /** The session's default schema as last read from the server (SQL Server, PostgreSQL, Oracle, Snowflake); null/absent when unknown or not tracked. */
+  schema?: string | null;
+  /** PostgreSQL: the effective search_path, first entry first. */
+  searchPath?: string[] | null;
+  schemaMode?: SchemaMode;
   /**
    * Resources (docs/resources.md): the engine closed the session's connection to free resources (idle, closed from the
    * explorer, memory pressure, the open connections limit). The id stays valid: the next run reconnects on the same
-   * database. `releasedReason`: 'idle' | 'closed' | 'pressure' | 'limit'.
+   * database and schema. `releasedReason`: 'idle' | 'closed' | 'pressure' | 'limit'.
    */
   released?: boolean;
   releasedReason?: string | null;
   /** The session created temporary objects (#temp, CREATE TEMP TABLE): it is never released automatically. */
   hasTempObjects?: boolean;
+}
+
+/** GET /sessions/{sid}/schema */
+export interface SessionSchema {
+  schema: string | null;
+  searchPath: string[] | null;
+  mode: SchemaMode;
 }
 
 /** line/col are 1-based positions of the batch's first character in the editor document. */
@@ -387,6 +405,7 @@ export type WsEvent =
   | (Ev<'exec.plan'> & ExecPlanPayload)
   | (Ev<'session.changed'> & {
     sessionId: string; state: SessionState; txOpen: boolean; database: string | null; txMode: TxMode;
+    schema?: string | null; searchPath?: string[] | null;
     released?: boolean; releasedReason?: string | null; hasTempObjects?: boolean;
   })
   | (Ev<'catalog.changed'> & { connectionId: string; database: string | null; schemas: string[]; version: number })

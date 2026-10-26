@@ -10,7 +10,8 @@ import { createIntel, type Intel } from '../intel';
 import { ensureDialect, isDialectReady } from '../intel/dialect/registry';
 import { intelOptionsFromSettings } from './settings';
 import type { RunTargetOptions, SqlEditorHandle, SqlEditorProps } from './SqlEditor.types';
-import { ensureMonacoSetup, LANGUAGE_IDS, THEME_IDS } from './monaco-setup';
+import { ensureMonacoSetup, LANGUAGE_IDS, openDefinitionDdl, THEME_IDS } from './monaco-setup';
+import { notifyCatalogChanged } from './definition-nav';
 import { baseMonacoOptions, remeasureAfterFonts, suggestMetrics } from './monacoOptions';
 import { bindEditorFontSize, editorFontSize } from './fontZoom';
 import { refreshSuggest, triggerSuggest } from './suggestKey';
@@ -21,7 +22,9 @@ import { guardEditorSuggest } from './suggest-guard';
 import { paramHintText, statementParams } from './param-hint';
 import { snippetSource } from '../snippets';
 import { postfixSource } from '../intel/complete/postfix';
-import { displayShortcut, isAltGraphCharacter, isMac } from '../commands/keys';
+import { FORMAT_ALT_SHORTCUT, isAltGraphCharacter, isMac } from '../commands/keys';
+import { shortcutLabelOf } from '../commands/registry';
+import { bindCommandActions, commandHasKey, type ActionHost, type KeyActionDef, type MonacoKeys } from './keyActions';
 import { resolveRunTarget } from './run-target';
 import { LatestRequest, MARKER_OWNERS, serverMarkers, softMarkers, type MarkerSeverities } from './markers-core';
 
@@ -147,7 +150,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     const line = st.line;
     hintIds.current.set([{
       range: new monaco.Range(line, model.getLineMaxColumn(line), line, model.getLineMaxColumn(line)),
-      options: { after: { content: '  ' + paramHintText(params.length, displayShortcut('Ctrl+Alt+P')), inlineClassName: 'dbstudio-param-hint' }, showIfCollapsed: true },
+      options: { after: { content: '  ' + paramHintText(params.length, shortcutLabelOf('params.edit')), inlineClassName: 'dbstudio-param-hint' }, showIfCollapsed: true },
     }]);
   };
   const scheduleParamHint = () => {
@@ -270,7 +273,10 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       editor: ed,
       connectionId: () => propsRef.current.catalog?.connectionId ?? '',
       database: () => propsRef.current.catalog?.database ?? null,
-      openObject: (r) => propsRef.current.onOpenObject?.(r),
+      openObject: (r, column) => propsRef.current.onOpenObject?.(r, column),
+      openObjectDdl: (r, column) => (propsRef.current.onOpenObjectDdl ?? propsRef.current.onOpenObject)?.(r, column),
+      definitionMissing: (target, timedOut) => propsRef.current.onDefinitionMissing?.(target, timedOut),
+      catalogWaiters: new Set(),
       accepted: (usageKey) => {
         intel.recordAccepted({ usageKey });
         const u = intel.getUsage();
@@ -302,12 +308,45 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
 
     // per-editor actions (never addCommand: that binds to the last created editor)
     const K = monaco.KeyMod, C = monaco.KeyCode;
-    subs.push(ed.addAction({
-      id: 'dbstudio.runStatement', label: 'Run Statement at Cursor (or Selection)', keybindings: [K.CtrlCmd | C.Enter],
-      contextMenuGroupId: 'navigation', contextMenuOrder: 0,
-      run: () => run('statement'),
-    }));
-    subs.push(ed.addAction({ id: 'dbstudio.runScript', label: 'Run Script (or Selection)', keybindings: [C.F5, K.CtrlCmd | K.Shift | C.Enter], contextMenuGroupId: 'navigation', contextMenuOrder: 1, run: () => run('script') }));
+    // Actions that mirror a registry command take their keys from the command's effective shortcuts (the user's keymap):
+    // bindCommandActions adds them and re-adds one whenever its keys change (editor/keyActions.ts).
+    const keyed: KeyActionDef<monaco.editor.IActionDescriptor>[] = [
+      {
+        commandId: 'run.statement', fallback: ['Mod+Enter'],
+        action: { id: 'dbstudio.runStatement', label: 'Run Statement at Cursor (or Selection)', contextMenuGroupId: 'navigation', contextMenuOrder: 0, run: () => run('statement') },
+      },
+      {
+        commandId: 'run.script', fallback: ['F5', 'Mod+Shift+Enter'],
+        action: { id: 'dbstudio.runScript', label: 'Run Script (or Selection)', contextMenuGroupId: 'navigation', contextMenuOrder: 1, run: () => run('script') },
+      },
+      {
+        commandId: 'format.selection', fallback: ['Mod+K Mod+F'],
+        action: { id: 'dbstudio.formatSelection', label: 'Format SQL (Selection or Statement)', contextMenuGroupId: '1_modification', contextMenuOrder: 2, precondition: '!editorReadonly', run: () => { doFormat(true); } },
+      },
+      {
+        commandId: 'snippet.insert', fallback: ['Mod+J'],
+        action: {
+          id: 'dbstudio.insertSnippet', label: 'Insert Snippet…', contextMenuGroupId: '1_modification', contextMenuOrder: 3, precondition: '!editorReadonly',
+          run: (x) => openSnippetPicker(x as monaco.editor.IStandaloneCodeEditor, bindingRef.current ?? undefined),
+        },
+      },
+      {
+        commandId: 'explain.estimated', fallback: ['Mod+L'],
+        action: { id: 'dbstudio.explainEstimated', label: 'Explain Plan (Estimated)', contextMenuGroupId: 'navigation', contextMenuOrder: 2, run: () => { doExplain('estimated'); } },
+      },
+      {
+        commandId: 'explain.actual', fallback: ['Mod+Shift+L'],
+        action: { id: 'dbstudio.explainActual', label: 'Explain Plan (Actual, runs the statement)', contextMenuGroupId: 'navigation', contextMenuOrder: 3, run: () => { doExplain('actual'); } },
+      },
+      // Ctrl+Space / Ctrl+I (⌃Space / ⌘I): replaces Monaco's binding, which does nothing while the widget shows its
+      // 'No suggestions.' / 'Loading…' message (editor/suggestKey.ts). Registered after Monaco's, so it wins.
+      {
+        commandId: 'editor.triggerSuggest', fallback: ['MacCtrl+Space', 'Mod+I'],
+        action: { id: 'dbstudio.triggerSuggest', label: 'Trigger Suggest', contextMenuGroupId: '1_modification', contextMenuOrder: 1, precondition: '!editorReadonly', run: (x) => { triggerSuggest(x); } },
+      },
+    ];
+    const keyedActions = bindCommandActions(ed as unknown as ActionHost<monaco.editor.IActionDescriptor>, monaco as unknown as MonacoKeys, keyed);
+    subs.push({ dispose: () => keyedActions.dispose() });
     subs.push(ed.addAction({ id: 'dbstudio.cancel', label: 'Cancel Running Query', keybindings: [C.Escape], precondition: ESC_PRECONDITION, run: () => propsRef.current.onCancel?.() }));
     subs.push(ed.addAction({ id: 'dbstudio.duplicateLine', label: 'Duplicate Line', keybindings: [K.CtrlCmd | C.KeyD], run: (x) => x.trigger('dbstudio', 'editor.action.copyLinesDownAction', {}) }));
     subs.push(ed.addAction({ id: 'dbstudio.upperCase', label: 'Transform to Upper Case', keybindings: [K.CtrlCmd | K.Shift | C.KeyU], run: (x) => x.trigger('dbstudio', 'editor.action.transformToUppercase', {}) }));
@@ -323,32 +362,17 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       const be = e.browserEvent;
       if (e.keyCode !== C.KeyL || !(isMac() ? be.metaKey : be.ctrlKey) || !be.altKey || be.shiftKey || isAltGraphCharacter(be)) return;
       if (ed.getRawOptions().readOnly) return;
+      // the user took this key off Format SQL (Keyboard shortcuts): it is just a key again
+      if (!commandHasKey('format.document', FORMAT_ALT_SHORTCUT)) return;
       e.preventDefault();
       e.stopPropagation();
       void ed.getAction('editor.action.formatDocument')?.run();
     }));
+    // F12 / Ctrl+click open a table's DATA; this is the explicit way to its DDL (any object). Alt+F12 replaces Monaco's
+    // Peek Definition, which would only preview the object's one-line summary.
     subs.push(ed.addAction({
-      id: 'dbstudio.formatSelection', label: 'Format SQL (Selection or Statement)', keybindings: [K.chord(K.CtrlCmd | C.KeyK, K.CtrlCmd | C.KeyF)],
-      contextMenuGroupId: '1_modification', contextMenuOrder: 2, precondition: '!editorReadonly', run: () => { doFormat(true); },
-    }));
-    subs.push(ed.addAction({
-      id: 'dbstudio.insertSnippet', label: 'Insert Snippet…', keybindings: [K.CtrlCmd | C.KeyJ],
-      contextMenuGroupId: '1_modification', contextMenuOrder: 3, precondition: '!editorReadonly',
-      run: (x) => openSnippetPicker(x as monaco.editor.IStandaloneCodeEditor, bindingRef.current ?? undefined),
-    }));
-    subs.push(ed.addAction({
-      id: 'dbstudio.explainEstimated', label: 'Explain Plan (Estimated)', keybindings: [K.CtrlCmd | C.KeyL],
-      contextMenuGroupId: 'navigation', contextMenuOrder: 2, run: () => { doExplain('estimated'); },
-    }));
-    subs.push(ed.addAction({
-      id: 'dbstudio.explainActual', label: 'Explain Plan (Actual, runs the statement)', keybindings: [K.CtrlCmd | K.Shift | C.KeyL],
-      contextMenuGroupId: 'navigation', contextMenuOrder: 3, run: () => { doExplain('actual'); },
-    }));
-    // Ctrl+Space / Ctrl+I (⌃Space / ⌘I): replaces Monaco's binding, which does nothing while the widget shows its
-    // 'No suggestions.' / 'Loading…' message (editor/suggestKey.ts). Registered after Monaco's, so it wins.
-    subs.push(ed.addAction({
-      id: 'dbstudio.triggerSuggest', label: 'Trigger Suggest', keybindings: [(isMac() ? K.WinCtrl : K.CtrlCmd) | C.Space, K.CtrlCmd | C.KeyI],
-      contextMenuGroupId: '1_modification', contextMenuOrder: 1, precondition: '!editorReadonly', run: (x) => { triggerSuggest(x); },
+      id: 'dbstudio.openDefinitionDdl', label: 'Open definition (DDL)', keybindings: [K.Alt | C.F12],
+      contextMenuGroupId: 'navigation', contextMenuOrder: 1.6, run: () => { void openDefinitionDdl(binding); },
     }));
     subs.push(ed.addAction({ id: 'dbstudio.signatureHelp', label: 'Parameter Info', keybindings: [K.CtrlCmd | K.Shift | C.Space], run: (x) => x.trigger('dbstudio', 'editor.action.triggerParameterHints', {}) }));
 
@@ -389,6 +413,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
   useEffect(() => {
     intelRef.current?.setCatalog(props.catalog);
     refreshSoft();
+    notifyCatalogChanged(bindingRef.current);
     // a "Loading <schema>…" row is on screen: show the schema's objects now that the catalog has them
     const b = bindingRef.current, ed = edRef.current;
     if (b?.suggestLoading && ed) {
@@ -404,6 +429,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     if (!intel || props.dialect !== 'tsql') return;
     intel.setForeignCatalogs(props.foreignCatalogs ?? []);
     refreshSoft();
+    notifyCatalogChanged(bindingRef.current);
     // "Loading Other…" is on screen: show what arrived
     const b = bindingRef.current, ed = edRef.current;
     if (b?.suggestLoading && ed) {

@@ -21,6 +21,7 @@ import { isTabular, qualifiedName } from '../lib/sql';
 import { getPlatform } from '../platform';
 import { dbKey, useCatalog } from '../store/catalog';
 import { hasTransactions } from '../lib/providerLevels';
+import { hasSchemaSwitcher } from '../lib/schemaScope';
 import { dialectOf, getConnection, kindOf, providerKind, useConnections } from '../store/connections';
 import { sourceClientOpen, useSourceClients } from '../store/sourceClients';
 import { useHistory } from '../store/history';
@@ -257,6 +258,15 @@ export const CORE_COMMANDS: Command<never>[] = [
       return !!p && p !== 'sqlite' && providerKind(p) === 'relational';
     },
     run: () => useUi.getState().openSwitcher({ tabId: getActiveConsole()!.id, mode: 'database', anchor: anchorOf('.console:not([style*="none"]) .db-pill') }),
+  },
+  {
+    id: 'connections.changeSchema', title: 'Change schema…', category: 'Connections', icon: 'FolderTree', keywords: 'default schema search_path editor schema',
+    when: () => {
+      const t = consoleWithConnection();
+      // SQL Server (editor schema), PostgreSQL (search_path), Snowflake (USE SCHEMA); the other providers switch schema with the database switcher.
+      return !!t && hasSchemaSwitcher(getConnection(t.connectionId)?.providerId);
+    },
+    run: () => useUi.getState().openSwitcher({ tabId: getActiveConsole()!.id, mode: 'schema', anchor: anchorOf('.console:not([style*="none"]) .schema-pill') }),
   },
   {
     // M2: Redis/MongoDB/Kafka connections open their module's default workspace (browser, documents, overview).

@@ -12,7 +12,7 @@ import {
 import { engineErrorPageUrl } from './error-page';
 import { RotatingLog } from './fs-utils';
 import { registerIpc } from './ipc';
-import { buildMenu } from './menu';
+import { buildMenu, setMenuShortcuts } from './menu';
 import { electronProfileDir, engineLogFile, iconPath, initDataDir, repoRoot, uiDir } from './paths';
 import { desktopOs, quitWhenAllWindowsClosed } from './platform';
 import { registerSchemePrivileges, registerUiProtocol } from './protocol';
@@ -207,6 +207,7 @@ function main(): void {
       onTitle: () => { titleLocked = true; },
       updates: () => updates!,
       onTitleBarTheme: applyTitleBarTheme,
+      onMenuShortcuts: setMenuShortcuts,
     });
     // ---- windows: tabs opened in windows of their own
     detachedWindows = registerWindowIpc({

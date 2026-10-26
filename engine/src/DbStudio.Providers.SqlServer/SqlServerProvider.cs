@@ -62,7 +62,9 @@ public sealed class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDa
         {
             await conn.OpenAsync(ct).ConfigureAwait(false);
             var info = await ReadServerInfoAsync(conn, ct).ConfigureAwait(false);
-            return new SqlServerSession(conn, profile, options, info);
+            var session = new SqlServerSession(conn, profile, options, info);
+            await session.InitializeSchemaAsync(ct).ConfigureAwait(false);
+            return session;
         }
         catch
         {

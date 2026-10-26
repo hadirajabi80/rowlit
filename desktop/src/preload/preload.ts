@@ -67,6 +67,8 @@ const bridge: DbStudioBridge = {
   showAppMenu: (pos: { x: number; y: number }) => { ipcRenderer.send(IPC.showAppMenu, pos); },
   // ---- notifications
   showNotification: (opts: NotificationOptions) => { ipcRenderer.send(IPC.notify, opts); },
+  // ---- keyboard shortcuts: the user's keymap reaches the native menu (main validates the map)
+  setMenuShortcuts: (shortcuts: Record<string, string | null>) => { ipcRenderer.send(IPC.setMenuShortcuts, shortcuts); },
   // ---- file drops (Import wizard): the path of a dropped File, resolved in the preload (File.path is gone since Electron 32).
   getPathForFile: (file: File) => {
     try { return webUtils.getPathForFile(file); } catch { return ''; }

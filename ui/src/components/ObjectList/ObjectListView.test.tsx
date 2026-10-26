@@ -48,9 +48,9 @@ describe('Objects tab', () => {
     await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(5), SLOW);
     expect(mock.hits('/catalog/objects')).toHaveLength(1);
     const groups = screen.getByRole('tablist', { name: 'Object types' });
-    expect(within(groups).getByRole('tab', { name: /^All\s*12$/ })).toHaveAttribute('aria-selected', 'true');
+    expect(within(groups).getByRole('tab', { name: /^All\s*13$/ })).toHaveAttribute('aria-selected', 'true');
     expect(within(groups).getByRole('tab', { name: /^Tables\s*6$/ })).toBeInTheDocument();
-    expect(within(groups).getByRole('tab', { name: /^Procedures\s*2$/ })).toBeInTheDocument();
+    expect(within(groups).getByRole('tab', { name: /^Procedures\s*3$/ })).toBeInTheDocument();
     // statistics columns
     const orders = screen.getAllByRole('option').find((o) => o.textContent?.includes('orders') && !o.textContent.includes('customer'))!;
     expect(orders.textContent).toContain('5,000');
@@ -58,7 +58,7 @@ describe('Objects tab', () => {
 
     // group pill → only procedures, rows/size columns disappear
     fireEvent.click(within(groups).getByRole('tab', { name: /^Procedures/ }));
-    await waitFor(() => expect(names()).toEqual(['GetCustomer', 'MonthlyReport']), SLOW);
+    await waitFor(() => expect(names()).toEqual(['GetActiveSessionByUniqueId', 'GetCustomer', 'MonthlyReport']), SLOW);
     expect(screen.queryByRole('columnheader', { name: /Rows/ })).toBeNull();
     expect(((useTabs.getState().tabs[0] as ViewTab).state as ObjectsState).group).toBe('proc');
   });

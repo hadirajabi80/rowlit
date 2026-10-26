@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { ariaKeyShortcuts } from '../../commands/keys';
-import { getCommand } from '../../commands/registry';
+import { getCommand, primaryShortcut } from '../../commands/registry';
 import { commandView } from '../../commands/useCommands';
 import { commandIcon } from './commandMenu';
 
@@ -40,7 +40,7 @@ export function CommandButton({ command, args, label, icon, className, optional,
       /* the tooltip is also the accessible description: it says why the button does nothing right now */
       title={unavailable ? `${v.title}: ${disabledReason}` : v.tooltip}
       aria-label={text ? undefined : v.title}
-      aria-keyshortcuts={ariaKeyShortcuts(c?.shortcut)}
+      aria-keyshortcuts={ariaKeyShortcuts(c ? primaryShortcut(c) : undefined)}
       aria-disabled={unavailable || undefined}
       disabled={!v.enabled && !unavailable}
       onClick={() => {

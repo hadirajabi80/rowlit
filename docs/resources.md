@@ -17,7 +17,12 @@ A session can **release** its physical connection while its id stays valid (`Ses
 `releasedReason`: `idle` | `closed` | `pressure` | `limit`). The tab keeps its editor, results and transaction mode;
 its tab tooltip and the status bar say "Disconnected (idle)". The next run (or a database / transaction-mode switch)
 reopens the connection on the database it was on (`USE` / reconnect) with the same transaction mode and prints an info
-message ("Reconnected: the session had been closed after being idle.").
+message ("Reconnected: the session had been closed after being idle."). Where the session has its own default schema
+(`SchemaMode.Session`: PostgreSQL, Oracle, Snowflake) the schema it had when released (the console's schema switcher,
+`SET search_path`, `USE SCHEMA`) is set again through `ChangeSchemaAsync` when the new connection starts on another one;
+while released, `SessionInfo.schema` and `GET /sessions/{id}/schema` report that remembered schema, and
+`POST /sessions/{id}/schema` reconnects first. (PostgreSQL re-applies it as "schema first, then the startup
+search_path", like the switcher.)
 
 What a reconnect cannot restore — session `SET` options, PostgreSQL `search_path` changes made with `SET`, variables —
 is lost, which is why the automatic policies never release a session that:

@@ -67,6 +67,33 @@ public interface IDbSession : IAsyncDisposable
     /// <summary>SQL Server: USE; Oracle: ALTER SESSION SET CURRENT_SCHEMA; SQLite: throws NotSupportedException.</summary>
     Task ChangeDatabaseAsync(string database, CancellationToken ct);
 
+    /// <summary>What the session offers for its default schema (see <see cref="Models.SchemaMode"/>). Default: none.</summary>
+    SchemaMode SchemaMode => SchemaMode.None;
+
+    /// <summary>
+    /// The session's default schema (unqualified names resolve to it), as last read from the server: SQL Server
+    /// <c>SCHEMA_NAME()</c>, PostgreSQL <c>current_schema()</c>, Oracle <c>CURRENT_SCHEMA</c>, Snowflake <c>CURRENT_SCHEMA()</c>.
+    /// Null when unknown or not tracked (<see cref="SchemaMode"/> None).
+    /// </summary>
+    string? CurrentSchema => null;
+
+    /// <summary>PostgreSQL: the effective search_path (<c>current_schemas(false)</c>), first entry first. Null elsewhere.</summary>
+    IReadOnlyList<string>? SearchPath => null;
+
+    /// <summary>
+    /// Reads <see cref="CurrentSchema"/>/<see cref="SearchPath"/> from the server (a round trip; the session must be idle).
+    /// Default: returns the last known value.
+    /// </summary>
+    Task<string?> RefreshSchemaAsync(CancellationToken ct) => Task.FromResult(CurrentSchema);
+
+    /// <summary>
+    /// Sets the default schema (PostgreSQL <c>SET search_path</c>, Oracle <c>ALTER SESSION SET CURRENT_SCHEMA</c>, Snowflake
+    /// <c>USE SCHEMA</c>); null/empty returns to the schema the session started with. Throws <see cref="NotSupportedException"/>
+    /// where the session has none to change (SQL Server: the login's default schema applies; single-level providers).
+    /// </summary>
+    Task ChangeSchemaAsync(string? schema, CancellationToken ct) =>
+        throw new NotSupportedException("This provider does not support changing the default schema of a session.");
+
     /// <summary>
     /// Runs every batch in order on this session's connection, reporting through <paramref name="sink"/>.
     /// Throws <see cref="SessionBusyException"/> if State != Idle. Provider errors inside a batch are reported

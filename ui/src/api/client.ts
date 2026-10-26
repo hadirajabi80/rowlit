@@ -3,7 +3,7 @@ import type {
   ApiErrorBody, ApiErrorCode, CatalogSnapshot, CellResponse, ConnectionInput, ConnectionProfile,
   CreateSessionRequest, DatabasesResponse, DdlResponse, DiagnosticsRequest, DiagnosticsResponse, ExecuteRequest,
   ExecuteResponse, Health, HistoryEntry, ObjectDetails, ObjectError, ObjectRef, ProviderInfo, QueryExportRequest,
-  ResultSetExportRequest, RowsPage, SchemasResponse, SessionInfo, Settings, SystemTypeInfo, TestConnectionRequest,
+  ResultSetExportRequest, RowsPage, SchemasResponse, SessionInfo, SessionSchema, Settings, SystemTypeInfo, TestConnectionRequest,
   TestConnectionResult, TxMode,
 } from './types';
 // M1.5
@@ -220,6 +220,11 @@ export const api = {
     json<void>('DELETE', `/sessions/${enc(sid)}`, { query: { force: force ? 'true' : undefined } }),
   changeDatabase: (sid: string, database: string) =>
     json<SessionInfo>('POST', `/sessions/${enc(sid)}/database`, { body: { database } }),
+  /** The session's default schema, read from the server. NOT_SUPPORTED where the provider has none separate from the database. */
+  getSessionSchema: (sid: string) => json<SessionSchema>('GET', `/sessions/${enc(sid)}/schema`),
+  /** Sets the default schema (PostgreSQL search_path, Oracle CURRENT_SCHEMA, Snowflake USE SCHEMA); null returns to the one the session started with. */
+  changeSchema: (sid: string, schema: string | null) =>
+    json<SessionInfo>('POST', `/sessions/${enc(sid)}/schema`, { body: { schema } }),
   setTxMode: (sid: string, txMode: TxMode) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/tx-mode`, { body: { txMode } }),
   commit: (sid: string) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/commit`),
   rollback: (sid: string) => json<SessionInfo>('POST', `/sessions/${enc(sid)}/rollback`),

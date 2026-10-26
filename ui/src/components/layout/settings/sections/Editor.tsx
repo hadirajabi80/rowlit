@@ -1,4 +1,4 @@
-import { displayShortcut } from '../../../../commands/keys';
+import { shortcutLabelOf } from '../../../../commands/registry';
 import { openRoutinesInEditMode, OPEN_ROUTINES_IN_EDIT_KEY, useSettings, type FullSettings } from '../../../../store/settings';
 import { Card, Num, Row, Select, ToggleRow } from '../controls';
 
@@ -24,7 +24,7 @@ export function EditorSection() {
         <ToggleRow
           id="set-blank"
           label="A blank line ends a statement"
-          hint={`${displayShortcut('Mod+Enter')} runs the paragraph under the cursor`}
+          hint={`${shortcutLabelOf('run.statement') ?? 'Run statement'} runs the paragraph under the cursor`}
           keywords="run execute statement split paragraph"
           checked={s.editor.blankLineSplitsStatements}
           onChange={(v) => up({ editor: { blankLineSplitsStatements: v } })}
@@ -34,7 +34,7 @@ export function EditorSection() {
         <ToggleRow
           id="set-routine-edit"
           label="Open procedures and functions in edit mode"
-          hint={`Double-click, Enter and ${displayShortcut('Mod+P')} open them editable; ${displayShortcut('Mod+S')} saves to the database`}
+          hint={`Double-click, Enter and ${shortcutLabelOf('view.goToObject') ?? 'Go to object'} open them editable; ${shortcutLabelOf('file.save') ?? 'Save'} saves to the database`}
           keywords="routine procedure function alter edit"
           checked={openRoutinesInEditMode(s)}
           onChange={(v) => up({ ui: { [OPEN_ROUTINES_IN_EDIT_KEY]: v } })}

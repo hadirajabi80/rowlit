@@ -1,7 +1,7 @@
 // Pure logic of the Import Wizard: file formats, column auto-matching, type compatibility, validation and the
 // request builder. No React, no stores: everything here is unit-tested in model.test.ts.
 import type {
-  ColumnMapping, ImportMode, ImportProgress, ImportRequest, InferredKind, InferredType, PreviewColumn, SourceOptions,
+  ColumnMapping, ImportMode, ImportProgress, ImportRequest, InferredKind, InferredType, PreviewColumn, PreviewResult, SourceOptions,
   TargetColumn, TargetKind, TargetTableInfo, ValueSource,
 } from './types';
 import { fileNameOf } from './files';
@@ -402,3 +402,68 @@ export const DELIMITERS: readonly { value: string; label: string }[] = [
 export const DATE_FORMAT_PRESETS: readonly string[] = [
   'yyyy-MM-dd', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy/MM/dd', 'yyyy-MM-dd HH:mm:ss', 'dd/MM/yyyy HH:mm', 'MM/dd/yyyy HH:mm',
 ];
+
+// ---------------------------------------------------------------- names and file problems (step hints)
+
+/** Words that are keywords in most SQL dialects: a table with such a name works (the engine quotes it) but is awkward to query. */
+const RESERVED_WORDS = new Set([
+  'add', 'all', 'alter', 'and', 'any', 'as', 'asc', 'between', 'by', 'case', 'check', 'column', 'constraint', 'create', 'cross', 'current',
+  'database', 'default', 'delete', 'desc', 'distinct', 'drop', 'else', 'end', 'exists', 'false', 'for', 'foreign', 'from', 'full', 'grant',
+  'group', 'having', 'in', 'index', 'inner', 'insert', 'into', 'is', 'join', 'key', 'left', 'like', 'limit', 'not', 'null', 'offset', 'on',
+  'or', 'order', 'outer', 'primary', 'references', 'right', 'select', 'set', 'table', 'then', 'to', 'top', 'true', 'union', 'unique', 'update',
+  'user', 'values', 'view', 'when', 'where', 'with',
+]);
+
+/**
+ * Rows in the file: exact when the engine read the whole file for its sample, else an estimate from the average size of
+ * the previewed rows (text formats only; a zipped workbook says nothing about its row count). Null when unknown.
+ */
+export function estimateRows(p: PreviewResult | null): { rows: number; exact: boolean } | null {
+  if (!p) return null;
+  if (!p.moreRows) return { rows: p.sampledRows, exact: true };
+  const format = p.options?.format;
+  if (format === 'xlsx' || p.rows.length === 0 || p.fileSize <= 0) return null;
+  let bytes = 0;
+  for (const row of p.rows) {
+    bytes += row.length; // separators
+    for (const cell of row) bytes += cell?.length ?? 0;
+  }
+  const avg = Math.max(1, bytes / p.rows.length);
+  return { rows: Math.max(p.sampledRows, Math.round(p.fileSize / avg)), exact: false };
+}
+
+export function isReservedWord(name: string): boolean {
+  return RESERVED_WORDS.has(name.trim().toLowerCase());
+}
+
+function asciiDigits(v: string): string {
+  return v.replace(/[٠-٩۰-۹]/g, (d) => String(d.charCodeAt(0) >= 0x06f0 ? d.charCodeAt(0) - 0x06f0 : d.charCodeAt(0) - 0x0660));
+}
+
+/**
+ * Columns of the previewed page that do not look like what the engine inferred, with a short reason: a number column with
+ * a cell that is not a number (a later page can differ from the sample the types come from), or a column named in a
+ * warning of the engine. Separators are ignored on purpose (the user may have set a decimal / thousands separator).
+ */
+export function columnProblems(preview: PreviewResult | null): Map<number, string> {
+  const out = new Map<number, string>();
+  if (!preview) return out;
+  const numeric = new Set<string>(['int', 'bigint', 'decimal', 'float']);
+  for (const c of preview.columns) {
+    if (!numeric.has(c.inferred.kind)) continue;
+    for (const row of preview.rows) {
+      const v = row[c.index];
+      if (v === null || v === undefined || v.trim() === '') continue;
+      if (!/^[+-]?[\d.,\s'٫٬]+(?:e[+-]?\d+)?$/i.test(asciiDigits(v.trim()))) {
+        out.set(c.index, `"${v.length > 24 ? `${v.slice(0, 24)}…` : v}" is not a number`);
+        break;
+      }
+    }
+  }
+  for (const w of preview.warnings) {
+    for (const c of preview.columns) {
+      if (c.name && !out.has(c.index) && (w.includes(`"${c.name}"`) || w.includes(`'${c.name}'`))) out.set(c.index, w);
+    }
+  }
+  return out;
+}

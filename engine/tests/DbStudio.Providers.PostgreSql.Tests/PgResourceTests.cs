@@ -110,6 +110,26 @@ public sealed class PgResourceTests(PgFixture fixture) : IClassFixture<PgFixture
     }
 
     [SkippableFact]
+    public async Task Reconnect_ReappliesTheSchemaChosenWithTheSchemaSwitcher()
+    {
+        Skip.IfNot(fixture.IsAvailable, fixture.SkipReason ?? "PostgreSQL not available.");
+        var env = Create();
+        var h = await env.Sessions.CreateAsync(env.Profile.Id, null, TransactionMode.Auto, false, CancellationToken.None);
+        await h.Session.ChangeSchemaAsync("sales", CancellationToken.None);
+        Assert.Equal("sales", h.Session.CurrentSchema);
+
+        env.Clock.Now += TimeSpan.FromMinutes(16);
+        await env.Resources.RunPolicyAsync();
+        Assert.True(h.Released);
+        Assert.Equal("sales", h.ToInfo().Schema); // what it reopens on
+
+        var row = await ScalarRowAsync(env, h.Id, "SELECT current_schema()");
+        Assert.Equal("sales", row[0]);
+        Assert.False(h.Released);
+        Assert.Equal("sales", h.Session.CurrentSchema);
+    }
+
+    [SkippableFact]
     public async Task SessionWithATempTable_IsKept()
     {
         Skip.IfNot(fixture.IsAvailable, fixture.SkipReason ?? "PostgreSQL not available.");

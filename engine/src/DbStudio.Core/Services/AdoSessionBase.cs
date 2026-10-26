@@ -154,6 +154,17 @@ public abstract class AdoSessionBase : IDbSession
     public string? CurrentDatabase { get; protected set; }
     public ServerInfo Server { get; protected set; }
 
+    // ------------------------------------------------------------------ default schema
+
+    /// <summary>What the session offers for its default schema. Providers that track it override this and the schema hooks.</summary>
+    public virtual SchemaMode SchemaMode => SchemaMode.None;
+
+    /// <summary>The default schema as last read from the server (see <see cref="IDbSession.CurrentSchema"/>).</summary>
+    public virtual string? CurrentSchema { get; protected set; }
+
+    /// <summary>PostgreSQL: the effective search_path as last read; null elsewhere.</summary>
+    public virtual IReadOnlyList<string>? SearchPath { get; protected set; }
+
     // ------------------------------------------------------------------ provider-facing state
 
     protected DbConnection Connection { get; }
@@ -582,6 +593,25 @@ public abstract class AdoSessionBase : IDbSession
     /// Called from an arbitrary thread; must not throw.</summary>
     protected virtual void CancelCommand(DbCommand command) => command.Cancel();
 
+    /// <summary>
+    /// Reads the default schema from the server into <see cref="CurrentSchema"/>/<see cref="SearchPath"/> (connection free,
+    /// session exclusive). Only called when <see cref="SchemaMode"/> is not None. Default: nothing to read.
+    /// </summary>
+    protected virtual Task ReadSchemaCoreAsync(CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
+    /// True when the batch text can have changed the default schema (USE, SET search_path, ...): the schema is then read
+    /// again after the batch. Default false, so most batches cost no extra round trip.
+    /// </summary>
+    protected virtual bool SchemaMayChange(BatchContext context) => false;
+
+    /// <summary>The default schema is part of the transaction (PostgreSQL SET is rolled back with it): read it again after commit / rollback.</summary>
+    protected virtual bool SchemaIsTransactional => false;
+
+    /// <summary><see cref="IDbSession.ChangeSchemaAsync"/> for the provider. Must update <see cref="CurrentSchema"/>. Default: not supported.</summary>
+    protected virtual Task ChangeSchemaCoreAsync(string? schema, CancellationToken ct) =>
+        throw new NotSupportedException("This provider does not support changing the default schema of a session.");
+
     /// <summary>SQL Server USE / Oracle ALTER SESSION SET CURRENT_SCHEMA. Must update <see cref="CurrentDatabase"/>. Default: not supported.</summary>
     protected virtual Task ChangeDatabaseCoreAsync(string database, CancellationToken ct) =>
         throw new NotSupportedException("This provider does not support changing the database of a session.");
@@ -727,6 +757,7 @@ public abstract class AdoSessionBase : IDbSession
         try
         {
             await CommitCoreAsync(ct).ConfigureAwait(false);
+            if (SchemaIsTransactional) await TryReadSchemaAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && IsConnectionBroken(ex))
         {
@@ -746,6 +777,7 @@ public abstract class AdoSessionBase : IDbSession
         try
         {
             await RollbackCoreAsync(ct).ConfigureAwait(false);
+            if (SchemaIsTransactional) await TryReadSchemaAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && IsConnectionBroken(ex))
         {
@@ -765,11 +797,70 @@ public abstract class AdoSessionBase : IDbSession
         try
         {
             await ChangeDatabaseCoreAsync(database, ct).ConfigureAwait(false);
+            // The new database has its own default schema (SQL Server: the user's default schema there).
+            await TryReadSchemaAsync().ConfigureAwait(false);
         }
         finally
         {
             ExitExclusive();
         }
+    }
+
+    public async Task<string?> RefreshSchemaAsync(CancellationToken ct)
+    {
+        if (SchemaMode == SchemaMode.None) return CurrentSchema;
+        EnterExclusive();
+        try
+        {
+            await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
+            return CurrentSchema;
+        }
+        finally
+        {
+            ExitExclusive();
+        }
+    }
+
+    public async Task ChangeSchemaAsync(string? schema, CancellationToken ct)
+    {
+        if (SchemaMode != SchemaMode.Session)
+            throw new NotSupportedException(SchemaMode == SchemaMode.ReadOnly
+                ? "This server uses the login's default schema for a session; qualify names or change the user's default schema."
+                : "This provider does not have a separate default schema; change the database instead.");
+        EnterExclusive();
+        try
+        {
+            await ChangeSchemaCoreAsync(string.IsNullOrWhiteSpace(schema) ? null : schema.Trim(), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitExclusive();
+        }
+    }
+
+    /// <summary>
+    /// Providers call this once after opening the session: reads the initial default schema. A failure leaves it unknown
+    /// (the schema indicator is informational and must never prevent a connection).
+    /// </summary>
+    public async Task InitializeSchemaAsync(CancellationToken ct)
+    {
+        if (SchemaMode == SchemaMode.None) return;
+        try
+        {
+            await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException) { /* unknown */ }
+    }
+
+    /// <summary>Best-effort schema read inside an exclusive section (after a batch, a commit, a database change).</summary>
+    private async Task TryReadSchemaAsync()
+    {
+        if (SchemaMode == SchemaMode.None) return;
+        try
+        {
+            await ReadSchemaCoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { /* keep the last known (e.g. a failed PostgreSQL transaction) */ }
     }
 
     public async Task<bool> PingAsync(CancellationToken ct)
@@ -971,6 +1062,9 @@ public abstract class AdoSessionBase : IDbSession
             {
                 await sink.Message(ctx.Index, MessageSeverity.Warning, $"Could not determine the transaction state: {ex.Message}", null, null, MessageSource.Engine).ConfigureAwait(false);
             }
+
+            // The default schema, like CurrentDatabase: read again after batches that can have changed it.
+            if (SchemaMode != SchemaMode.None && ctx.Status != BatchStatus.Cancelled && SchemaMayChange(ctx)) await TryReadSchemaAsync().ConfigureAwait(false);
         }
         else if (TxOpen)
         {

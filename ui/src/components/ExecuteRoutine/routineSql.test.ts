@@ -37,6 +37,18 @@ describe('SQL Server', () => {
     expect(buildRoutineCall(proc, [v('x'), DEF, v('')]).errors[0]).toBe('Whole number');
   });
 
+  it('integers outside the declared type are errors (bigint / int / smallint / tinyint), in-range edges pass', () => {
+    const p = spec('tsql', 'proc', 'dbo', 'Ranges', [['@a', 'bigint', 'in', 0], ['@b', 'int', 'in', 0], ['@c', 'smallint', 'in', 0], ['@d', 'tinyint', 'in', 0]]);
+    const ok = buildRoutineCall(p, [v('9223372036854775807'), v('-2147483648'), v('32767'), v('255')]);
+    expect(ok.errors).toEqual([null, null, null, null]);
+    const bad = buildRoutineCall(p, [v('9223372036854775808'), v('2147483648'), v('-32769'), v('-1')]);
+    expect(bad.errors.every((e) => e && /^Out of range for /.test(e))).toBe(true);
+    expect(bad.errors[0]).toBe('Out of range for bigint (-2^63 to 2^63-1)');
+    // a non-fixed-size type (number(10,0)) is not range checked
+    const n = spec('plsql', 'proc', 'S', 'P', [['X', 'NUMBER(38,0)', 'in', 0]]);
+    expect(buildRoutineCall(n, [v('99999999999999999999')]).errors).toEqual([null]);
+  });
+
   it('scalar functions SELECT with DEFAULT for omitted arguments; table-valued functions SELECT * FROM', () => {
     const fn = spec('tsql', 'func', 'dbo', 'fnTax', [['@amount', 'decimal(12,2)', 'in', 0], ['@rate', 'decimal(5,2)', 'in', 1], ['', 'decimal(12,2)', 'return', 0]]);
     const c = buildRoutineCall(fn, [v('19.90'), DEF]);

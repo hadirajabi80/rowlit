@@ -2,7 +2,7 @@ import { Command as CommandIcon, Database, FileCode2, LoaderCircle, Search, Squa
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { insertIntoActiveEditor, openObject, openObjectDefault, preloadCatalog, selectTop } from '../../app/actions';
 import { isMac } from '../../commands/keys';
-import { advertisedShortcuts, getCommand, hasCommand, isEnabled, listCommands, runCommand } from '../../commands/registry';
+import { advertisedShortcuts, getCommand, primaryShortcut, hasCommand, isEnabled, listCommands, runCommand } from '../../commands/registry';
 import type { ObjectTarget, SavedQueryTarget } from '../../commands/types';
 import { useCommandsVersion } from '../../commands/useCommands';
 import type { CatalogObjectType } from '../../api/types';
@@ -221,7 +221,7 @@ export function CommandPalette() {
       const score = m.score + (recent >= 0 ? (p ? 30 : 1000 - recent) : 0);
       hits.push({
         item: {
-          kind: 'command', key: c.id, id: c.id, title: c.title, category: c.category, shortcut: c.shortcut, altShortcuts: advertisedShortcuts(c).slice(1), icon: c.icon,
+          kind: 'command', key: c.id, id: c.id, title: c.title, category: c.category, shortcut: advertisedShortcuts(c)[0], altShortcuts: advertisedShortcuts(c).slice(1), icon: c.icon,
           recent: recent >= 0, match: { score, positions: m.positions },
         },
         match: { ...m, score },
@@ -385,7 +385,7 @@ export function CommandPalette() {
               <span><Kbd shortcut="Enter" /> run</span>
               <span><Kbd shortcut="ArrowUp" /><Kbd shortcut="ArrowDown" /> select</span>
               <span className="flex-1" />
-              <span>{getCommand('view.shortcuts') ? <>All shortcuts <Kbd shortcut={getCommand('view.shortcuts')!.shortcut} /></> : null}</span>
+              <span>{getCommand('view.shortcuts') ? <>All shortcuts <Kbd shortcut={primaryShortcut('view.shortcuts')} /></> : null}</span>
             </>
           )}
         </div>

@@ -20,6 +20,9 @@ public sealed record SessionInfo(
     string? TabId = null,
     string? Label = null,
     bool Orphan = false,
+    string? Schema = null,
+    IReadOnlyList<string>? SearchPath = null,
+    SchemaMode SchemaMode = SchemaMode.None,
     bool Released = false,
     string? ReleasedReason = null,
     bool HasTempObjects = false);
@@ -67,6 +70,12 @@ public sealed class SessionHandle
     /// keeps the session because reopening it would lose the object. Sticky until the session is closed or released.
     /// </summary>
     public bool HasTempObjects { get; internal set; }
+
+    /// <summary>
+    /// The default schema the session had when it was released (sessions with <see cref="SchemaMode.Session"/>): the
+    /// reopen sets it again when the new connection starts on another one (the console's schema switcher choice).
+    /// </summary>
+    public string? RememberedSchema { get; internal set; }
 
     /// <summary>Id of the execution or export currently using the session, else null.</summary>
     public string? ActiveOperation { get; private set; }
@@ -124,7 +133,10 @@ public sealed class SessionHandle
         var executing = IsRunning;
         return new SessionInfo(
             Id, Profile.Id, Session.Server, Session.CurrentDatabase, Session.TxMode, Session.TxOpen && !Released, WireState(), Dialect,
-            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan, Released, Released ? ReleasedReason : null, HasTempObjects);
+            executing ? ExecutingSince?.ToString("O") : null, TabId, Label, Orphan,
+            // a released session reports the schema it will be reopened on (the closed session keeps its last values)
+            Released ? RememberedSchema ?? Session.CurrentSchema : Session.CurrentSchema, Session.SearchPath, Session.SchemaMode,
+            Released, Released ? ReleasedReason : null, HasTempObjects);
     }
 
     /// <summary>A released session reads idle (its id stays usable); a reserved idle one reads executing.</summary>
@@ -378,7 +390,7 @@ public sealed class SessionManager : IAsyncDisposable
     public void PublishChanged(SessionHandle h)
     {
         var info = h.ToInfo();
-        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode)
+        _events.Publish(new SessionChangedEvent(info.SessionId, info.State, info.TxOpen, info.Database, info.TxMode, info.Schema, info.SearchPath)
         {
             Released = info.Released,
             ReleasedReason = info.ReleasedReason,
@@ -410,6 +422,8 @@ public sealed class SessionManager : IAsyncDisposable
             rolledBack = h.Session.TxOpen;
             // Remember where the session was: the reopen re-applies the database (USE / reconnect) and transaction mode.
             h.Options = h.Options with { Database = h.Session.CurrentDatabase ?? h.Options.Database, TxMode = h.Session.TxMode };
+            // ... and the default schema where the session can set its own (schema switcher, SET search_path, USE SCHEMA).
+            h.RememberedSchema = h.Session.SchemaMode == SchemaMode.Session ? h.Session.CurrentSchema : null;
             try
             {
                 await h.Session.DisposeAsync().ConfigureAwait(false); // rolls back an open transaction
@@ -493,9 +507,17 @@ public sealed class SessionManager : IAsyncDisposable
             try { await fresh.SetTransactionModeAsync(h.Options.TxMode, ct).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogDebug(ex, "Restoring the transaction mode of {SessionId} failed", h.Id); }
         }
+        // Back to the default schema it had (only when the new connection starts on another one: no extra round trip otherwise).
+        if (h.RememberedSchema is { Length: > 0 } schema && fresh.SchemaMode == SchemaMode.Session
+            && !string.Equals(fresh.CurrentSchema, schema, StringComparison.Ordinal))
+        {
+            try { await fresh.ChangeSchemaAsync(schema, ct).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogInformation("Restoring schema {Schema} of {SessionId} failed: {Message}", schema, h.Id, ex.Message); }
+        }
         h.Session = fresh;
         h.Released = false;
         h.ReleasedReason = null;
+        h.RememberedSchema = null;
         _connections.Touch(h.Profile.Id);
         _log.LogInformation("Session {SessionId} reopened its connection", h.Id);
         PublishChanged(h);
@@ -518,7 +540,7 @@ public sealed class SessionManager : IAsyncDisposable
             _log.LogWarning(ex, "Error closing session {SessionId}", sessionId);
         }
         _results.ReleaseSession(sessionId);
-        _events.Publish(new SessionChangedEvent(sessionId, SessionState.Closed, false, h.Session.CurrentDatabase, h.Session.TxMode));
+        _events.Publish(new SessionChangedEvent(sessionId, SessionState.Closed, false, h.Session.CurrentDatabase, h.Session.TxMode, h.Session.CurrentSchema, h.Session.SearchPath));
     }
 
     /// <summary>Closes every session of a connection (profile deleted).</summary>

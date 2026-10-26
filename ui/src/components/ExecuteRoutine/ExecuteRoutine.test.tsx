@@ -52,7 +52,12 @@ beforeEach(async () => {
   await useConnections.getState().load();
 });
 
-const preview = () => screen.getByLabelText('Generated SQL').textContent ?? '';
+/** The SQL that runs; the preview is a one-line summary until "Show SQL" opens it. */
+const preview = () => {
+  if (!screen.queryByLabelText('Generated SQL')) fireEvent.click(screen.getByRole('button', { name: 'Show SQL' }));
+  return screen.getByLabelText('Generated SQL').textContent ?? '';
+};
+const summary = () => screen.getByLabelText('Call summary').textContent ?? '';
 
 describe('Execute routine dialog', () => {
   it('starts with empty inputs (defaults on their default), toggles NULL / Default, previews the call live', async () => {
@@ -65,7 +70,7 @@ describe('Execute routine dialog', () => {
     expect(month.placeholder).toBe('default');
     expect(screen.getByRole('button', { name: 'Default', pressed: true })).toBeInTheDocument();
     expect(preview()).toBe('DECLARE @return_value int;\nEXEC @return_value = [dbo].[MonthlyReport] @Year = @Year;\nSELECT @return_value AS [Return value];');
-    expect(screen.getByLabelText('Bind values').textContent).toBe('@Year= ?'); // still to be filled in
+    expect(summary()).toBe('EXEC [dbo].[MonthlyReport] @Year = ?'); // still to be filled in
 
     // NULL for Year; Month back to a value
     fireEvent.click(screen.getAllByRole('button', { name: 'NULL' })[0]);
@@ -73,10 +78,10 @@ describe('Execute routine dialog', () => {
     fireEvent.change(month, { target: { value: '3' } });
     expect(screen.queryByRole('button', { name: 'Default', pressed: true })).toBeNull();
     expect(preview()).toContain('@Year = NULL, @Month = @Month;');
-    // typing into a NULL field passes the value again; the bind values are listed under the SQL
+    // typing into a NULL field passes the value again; the summary line shows the values
     fireEvent.change(year, { target: { value: '2024' } });
     expect(preview()).toContain('@Year = @Year, @Month = @Month;');
-    expect(screen.getByLabelText('Bind values').textContent).toBe('@Year= 2024@Month= 3');
+    expect(summary()).toBe('EXEC [dbo].[MonthlyReport] @Year = 2024, @Month = 3');
     act(() => useExecuteRoutine.getState().close());
   });
 
