@@ -1,0 +1,26 @@
+{
+  "name": "WP-C: one table, no output column (SELECT *), no limit",
+  "catalog": {
+    "shop.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "status", "kind": "string", "type": "VARCHAR" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [ { "id": "t1", "alias": "shop", "table": "orders", "as": "orders", "x": 40, "y": 40, "collapsed": false } ],
+    "joins": [],
+    "columns": [],
+    "filter": null,
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [],
+    "limit": null,
+    "offset": null,
+    "distinct": false
+  },
+  "sql": "SELECT *\nFROM shop.orders AS orders",
+  "params": [],
+  "warnings": []
+}

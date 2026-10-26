@@ -1,0 +1,54 @@
+{
+  "name": "WP-C: three tables, LEFT + FULL joins, multi-condition ON with ignoreCase/trim, quoted names, self join alias, a hidden sort helper column",
+  "catalog": {
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "First Name", "kind": "string", "type": "VARCHAR" },
+      { "name": "email", "kind": "string", "type": "VARCHAR" },
+      { "name": "referred_by", "kind": "int", "type": "BIGINT" }
+    ],
+    "shop.order": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "customer_id", "kind": "int", "type": "BIGINT" },
+      { "name": "email", "kind": "string", "type": "VARCHAR" },
+      { "name": "total", "kind": "decimal", "type": "DECIMAL(38,2)" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "crm", "table": "customers", "as": "customers", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "shop", "table": "order", "as": "order", "x": 360, "y": 40, "collapsed": false },
+      { "id": "t3", "alias": "crm", "table": "customers", "as": "customers2", "x": 360, "y": 300, "collapsed": false }
+    ],
+    "joins": [
+      { "id": "j1", "type": "left", "left": "t1", "right": "t2", "on": [
+        { "leftColumn": "id", "rightColumn": "customer_id", "op": "=", "ignoreCase": false, "trim": false },
+        { "leftColumn": "email", "rightColumn": "email", "op": "=", "ignoreCase": true, "trim": true }
+      ] },
+      { "id": "j2", "type": "full", "left": "t1", "right": "t3", "on": [
+        { "leftColumn": "referred_by", "rightColumn": "id", "op": "=", "ignoreCase": false, "trim": false }
+      ] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "First Name", "expr": null, "alias": null, "agg": null, "output": true },
+      { "id": "c2", "tableId": "t2", "column": "total", "expr": null, "alias": "order total", "agg": null, "output": true },
+      { "id": "c3", "tableId": "t3", "column": "First Name", "expr": null, "alias": "referrer", "agg": null, "output": true },
+      { "id": "c4", "tableId": "t2", "column": "id", "expr": null, "alias": "order_id", "agg": null, "output": false }
+    ],
+    "filter": null,
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [
+      { "ref": { "columnId": "c2" }, "dir": "desc", "nulls": "last" },
+      { "ref": { "columnId": "c4" }, "dir": "asc", "nulls": null }
+    ],
+    "limit": null,
+    "offset": null,
+    "distinct": false
+  },
+  "sql": "SELECT customers.\"First Name\", \"order\".total AS \"order total\", customers2.\"First Name\" AS referrer\nFROM crm.customers AS customers\nLEFT JOIN shop.\"order\" AS \"order\" ON customers.id = \"order\".customer_id AND lower(trim(customers.email)) = lower(trim(\"order\".email))\nFULL JOIN crm.customers AS customers2 ON customers.referred_by = customers2.id\nORDER BY \"order total\" DESC NULLS LAST, \"order\".id ASC",
+  "params": [],
+  "warnings": []
+}

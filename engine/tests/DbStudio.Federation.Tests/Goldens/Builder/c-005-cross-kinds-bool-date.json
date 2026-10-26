@@ -1,0 +1,59 @@
+{
+  "name": "WP-C: explicit CROSS JOIN, a RIGHT JOIN on columns of different kinds (warning joinKinds), boolean and date-only filters, case-sensitive inequality, sort by a table column and by an output column",
+  "catalog": {
+    "shop.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "customer_ref", "kind": "string", "type": "VARCHAR" },
+      { "name": "paid", "kind": "bool", "type": "BOOLEAN" },
+      { "name": "ordered_on", "kind": "date", "type": "DATE" },
+      { "name": "status", "kind": "string", "type": "VARCHAR" }
+    ],
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" }
+    ],
+    "erp.calendar": [
+      { "name": "day", "kind": "date", "type": "DATE" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "shop", "table": "orders", "as": "orders", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "crm", "table": "customers", "as": "customers", "x": 360, "y": 40, "collapsed": false },
+      { "id": "t3", "alias": "erp", "table": "calendar", "as": "calendar", "x": 360, "y": 300, "collapsed": true }
+    ],
+    "joins": [
+      { "id": "j1", "type": "right", "left": "t1", "right": "t2", "on": [ { "leftColumn": "customer_ref", "rightColumn": "id", "op": "=", "ignoreCase": false, "trim": false } ] },
+      { "id": "j2", "type": "cross", "left": "t1", "right": "t3", "on": [] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "id", "expr": null, "alias": null, "agg": null, "output": true },
+      { "id": "c2", "tableId": "t3", "column": "day", "expr": null, "alias": null, "agg": null, "output": true }
+    ],
+    "filter": {
+      "kind": "group", "id": "g1", "logic": "and",
+      "items": [
+        { "kind": "condition", "id": "f1", "column": "t1.paid", "op": "isTrue", "values": [], "enabled": true },
+        { "kind": "condition", "id": "f2", "column": "t1.ordered_on", "op": "onDate", "values": ["2026-03-01"], "enabled": true },
+        { "kind": "condition", "id": "f3", "column": "t1.status", "op": "neq", "values": ["Cancelled"], "caseSensitive": true, "enabled": true }
+      ]
+    },
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [
+      { "ref": { "tableId": "t3", "column": "day" }, "dir": "desc", "nulls": null },
+      { "ref": { "columnId": "c1" }, "dir": "asc", "nulls": null }
+    ],
+    "limit": null,
+    "offset": null,
+    "distinct": false
+  },
+  "sql": "SELECT orders.id, calendar.day\nFROM shop.orders AS orders\nRIGHT JOIN crm.customers AS customers ON orders.customer_ref = customers.id\nCROSS JOIN erp.calendar AS calendar\nWHERE orders.paid = TRUE AND (orders.ordered_on >= $fp1 AND orders.ordered_on < $fp2) AND orders.status <> $fp3\nORDER BY calendar.day DESC, orders.id ASC",
+  "params": [
+    { "name": "fp1", "kind": "datetime", "value": "2026-03-01T00:00:00" },
+    { "name": "fp2", "kind": "datetime", "value": "2026-03-02T00:00:00" },
+    { "name": "fp3", "kind": "string", "value": "Cancelled" }
+  ],
+  "warnings": ["joinKinds"]
+}

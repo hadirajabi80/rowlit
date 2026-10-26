@@ -1,0 +1,37 @@
+{
+  "name": "WP-C: an inner join without conditions (ON TRUE, warning cartesian), count over a column, a calculated column with surrounding blanks (trimmed) grouped by its expression, sort by an aggregate through its alias, OFFSET without LIMIT",
+  "catalog": {
+    "shop.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "status", "kind": "string", "type": "VARCHAR" }
+    ],
+    "crm.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" }
+    ]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "shop", "table": "orders", "as": "orders", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "crm", "table": "customers", "as": "customers", "x": 360, "y": 40, "collapsed": false }
+    ],
+    "joins": [
+      { "id": "j1", "type": "inner", "left": "t1", "right": "t2", "on": [] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t2", "column": "id", "expr": null, "alias": "n", "agg": "count", "output": true },
+      { "id": "c2", "tableId": null, "column": null, "expr": "  upper(orders.status)  ", "alias": "status_uc", "agg": null, "output": true }
+    ],
+    "filter": null,
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [ { "ref": { "columnId": "c1" }, "dir": "desc", "nulls": null } ],
+    "limit": null,
+    "offset": 10,
+    "distinct": false
+  },
+  "sql": "SELECT count(customers.id) AS n, upper(orders.status) AS status_uc\nFROM shop.orders AS orders\nINNER JOIN crm.customers AS customers ON TRUE\nGROUP BY upper(orders.status)\nORDER BY n DESC\nOFFSET 10",
+  "params": [],
+  "warnings": ["cartesian"]
+}
