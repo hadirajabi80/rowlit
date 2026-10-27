@@ -9,6 +9,17 @@ const DOLLAR_TAG = /\$([\p{L}_][\p{L}\p{N}_]*)?\$/uy;
 const BRACE_PARAM = /\{\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*[^{}\n]+\}/y;
 const isDigit = (c: number) => c >= 48 && c <= 57;
 
+/**
+ * `//` inside a URL (`PUT file:///tmp/a.csv @~`: the word before it ends with a colon) or a stage path (`@stage//x`) is part of
+ * that word, not a comment.
+ */
+function urlOrStagePath(t: string, at: number): boolean {
+  let w = at;
+  while (w > 0 && !/\s/.test(t[w - 1])) w--;
+  const word = t.slice(w, at);
+  return word.startsWith('@') || /:\/*$/.test(word);
+}
+
 /** The hook for a set of traits (DialectSpec.lexHook). */
 export function traitLexer(lex: LexTraits): LexHook {
   const prefixes = lex.paramPrefixes ?? '';
@@ -18,6 +29,14 @@ export function traitLexer(lex: LexTraits): LexHook {
     const n = t.length;
     // # line comment
     if (c === 35 && lex.hashComment) {
+      let e = t.indexOf('\n', start);
+      if (e < 0) e = n;
+      if (e > start && t.charCodeAt(e - 1) === 13) e--;
+      lx.pos = e;
+      return lx.make('comment', start, e);
+    }
+    // // line comment (Snowflake)
+    if (c === 47 && c1 === 47 && lex.slashComment && !urlOrStagePath(t, start)) {
       let e = t.indexOf('\n', start);
       if (e < 0) e = n;
       if (e > start && t.charCodeAt(e - 1) === 13) e--;

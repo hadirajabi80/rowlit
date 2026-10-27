@@ -43,7 +43,7 @@ public static class SnowflakeConnectionStrings
                 new FormOption(SnowflakeAuth.OAuth, "OAuth access token"),
             ]),
         new FormField("password", "Password", "password", VisibleWhen: When(SnowflakeAuth.Password)),
-        new FormField("privateKeyFile", "Private key file", "file", VisibleWhen: When(SnowflakeAuth.KeyPair), FileFilter: "*.p8;*.pem;*.key",
+        new FormField("privateKeyFile", "Private key file", "file", VisibleWhen: When(SnowflakeAuth.KeyPair), FileFilter: "*.p8;*.pem;*.key", Placeholder: "/path/to/rsa_key.p8",
             Help: "PKCS#8 private key (rsa_key.p8) whose public key is set on the user (ALTER USER … SET RSA_PUBLIC_KEY)."),
         new FormField("privateKeyPassphrase", "Key passphrase", "password", VisibleWhen: When(SnowflakeAuth.KeyPair),
             Help: "Only for an encrypted key (ENCRYPTED PRIVATE KEY)."),
@@ -63,7 +63,7 @@ public static class SnowflakeConnectionStrings
     ]);
 
     /// <summary>The connection string plus the secrets that travel as <see cref="SecureString"/> properties.</summary>
-    public sealed record Built(string ConnectionString, SecureString? Password, SecureString? Token, string Authenticator, string Account);
+    public sealed record Built(string ConnectionString, SecureString? Password, SecureString? Token, string Authenticator, string Account, string? MaskedConnectionString = null);
 
     /// <summary>
     /// <c>xy12345.eu-central-1.snowflakecomputing.com</c>, <c>https://org-acct.snowflakecomputing.com/</c> → the account
@@ -176,16 +176,41 @@ public static class SnowflakeConnectionStrings
         parts.Add(("CLIENT_TELEMETRY_ENABLED", "false"));
 
         var sb = new StringBuilder();
+        var masked = new StringBuilder();
         foreach (var (key, value) in parts)
         {
-            if (sb.Length > 0) sb.Append(';');
-            sb.Append(key).Append('=').Append(Escape(value));
+            if (sb.Length > 0) { sb.Append(';'); masked.Append(';'); }
+            sb.Append(key).Append('=').Append(Value(key, value));
+            masked.Append(key).Append('=').Append(key == "private_key_pwd" ? "***" : Value(key, value));
         }
-        return new Built(sb.ToString(), securePassword, secureToken, auth, account);
+        return new Built(sb.ToString(), securePassword, secureToken, auth, account, masked.ToString());
     }
 
-    /// <summary>Snowflake.Data splits the connection string on <c>;</c>; a literal semicolon is written doubled.</summary>
-    public static string Escape(string value) => value.Replace(";", ";;", StringComparison.Ordinal);
+    /// <summary>
+    /// Object names the driver reads itself: it keeps a surrounding <c>"…"</c> as the identifier's own quoting
+    /// (<c>db="MyDb"</c> is the case-sensitive database MyDb) and splits on <c>;</c> before any builder quoting applies,
+    /// so these are written as typed.
+    /// </summary>
+    private static readonly HashSet<string> IdentifierKeys = new(StringComparer.OrdinalIgnoreCase) { "db", "schema", "warehouse", "role" };
+
+    private static string Value(string key, string value)
+    {
+        if (!IdentifierKeys.Contains(key)) return Escape(value);
+        if (value.Contains(';')) throw new ArgumentException($"The {key} name cannot contain ';' in a connection profile: leave it empty and use USE {key.ToUpperInvariant()} after connecting.");
+        return value;
+    }
+
+    /// <summary>
+    /// Snowflake.Data parses the connection string with <c>DbConnectionStringBuilder</c> rules: a value holding <c>;</c>, a
+    /// quote or leading / trailing blanks is written in double quotes with inner quotes doubled (a doubled <c>;;</c> is
+    /// not an escape: it cuts the value and drops the properties after it; a bare <c>"</c> is a format error).
+    /// </summary>
+    public static string Escape(string value)
+    {
+        if (value.Length == 0) return value;
+        var quote = value.Contains(';') || value.Contains('"') || value.Contains('\'') || char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1]);
+        return quote ? "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : value;
+    }
 
     private static SecureString Secure(string value)
     {
@@ -196,9 +221,7 @@ public static class SnowflakeConnectionStrings
     }
 
     /// <summary>The connection string with secrets masked (logs, BuildConnectionString).</summary>
-    public static string Masked(Built built) =>
-        string.Join(';', built.ConnectionString.Split(';').Select(p =>
-            p.StartsWith("private_key_pwd=", StringComparison.OrdinalIgnoreCase) ? "private_key_pwd=***" : p));
+    public static string Masked(Built built) => built.MaskedConnectionString ?? built.ConnectionString;
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.Select(v => v?.Trim()).FirstOrDefault(v => !string.IsNullOrEmpty(v));

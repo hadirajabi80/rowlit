@@ -46,7 +46,7 @@ function schemaLoaded(index: CatalogIndex, ref: TableRef): boolean {
   if (ref.parts.length === 3 && index.spec.id === 'pgsql') {
     return !!index.database && index.keyOf(ref.parts[0].text, ref.parts[0].quoted) === index.keyOfCatalog(index.database) && !!index.schema(ref.parts[1].text, ref.parts[1].quoted);
   }
-  if (ref.parts.length === 3 && index.spec.id === 'tsql') {
+  if (ref.parts.length === 3 && (index.spec.id === 'tsql' || index.spec.id === 'snowflake')) {
     // `Db.schema.object`: this database or another one of the server, once its catalog (and that schema) has loaded
     const ix = index.indexOfDatabase(ref.parts[0].text, ref.parts[0].quoted);
     return !!ix && (ref.parts[1].text === '' ? !!ix.defaultSchemaEntry() : !!ix.schema(ref.parts[1].text, ref.parts[1].quoted));

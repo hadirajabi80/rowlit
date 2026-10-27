@@ -9,8 +9,8 @@ import type {
 } from './statement-model';
 
 const SELECT_CLAUSES = wordSet('FROM INTO WHERE GROUP ORDER HAVING UNION EXCEPT INTERSECT MINUS LIMIT OFFSET FETCH FOR OPTION WINDOW CONNECT START RETURNING BULK');
-const WHERE_STOPS = wordSet('GROUP ORDER HAVING UNION EXCEPT INTERSECT MINUS LIMIT OFFSET FETCH FOR OPTION WINDOW CONNECT START RETURNING OUTPUT');
-const AFTER_FROM_STOPS = wordSet('WHERE GROUP ORDER HAVING UNION EXCEPT INTERSECT MINUS LIMIT OFFSET FETCH FOR OPTION WINDOW CONNECT START RETURNING OUTPUT SET ON USING JOIN WHEN');
+const WHERE_STOPS = wordSet('GROUP ORDER HAVING QUALIFY UNION EXCEPT INTERSECT MINUS LIMIT OFFSET FETCH FOR OPTION WINDOW CONNECT START RETURNING OUTPUT');
+const AFTER_FROM_STOPS = wordSet('WHERE GROUP ORDER HAVING QUALIFY UNION EXCEPT INTERSECT MINUS LIMIT OFFSET FETCH FOR OPTION WINDOW CONNECT START RETURNING OUTPUT SET ON USING JOIN WHEN');
 const ORACLE_ATTR_ROWTYPE = '%ROWTYPE';
 const ORACLE_ATTR_TYPE = '%TYPE';
 const CREATE_MODIFIERS = wordSet(`
@@ -162,6 +162,7 @@ class Parser {
         return nx && (nx.kind === 'number' || nx.kind === 'param' || nx.text === '(' || isWord(nx)) && !(nx.kind === 'punct' && nx.text !== '(') ? u : null;
       }
       case 'FETCH': return nu === 'FIRST' || nu === 'NEXT' ? u : null;
+      case 'QUALIFY': return t.kind === 'keyword' ? u : null; // Snowflake / DuckDB: a row filter on window results
       case 'RETURNING': return u;
       case 'OUTPUT': return this.tsql ? u : null;
       case 'BULK': return this.ora && nu === 'COLLECT' ? u : null;
@@ -719,7 +720,7 @@ class Parser {
           this.scanExpr(s, (j) => { const cc = this.clauseAt(j); return !!cc && WHERE_STOPS.has(cc); });
           continue;
         }
-        case 'HAVING': {
+        case 'HAVING': case 'QUALIFY': {
           this.mark(s, 'having', tok.end);
           this.i++;
           this.scanExpr(s, (j) => { const cc = this.clauseAt(j); return !!cc && WHERE_STOPS.has(cc); });
@@ -873,7 +874,7 @@ class Parser {
         if (this.atP(')')) this.i++;
         return null;
       }
-    } else if (isWord(tok) && (tok.upper === 'LATERAL') && (this.atP('(', 1) || (this.pg && isNameTok(this.peek(1))))) {
+    } else if (isWord(tok) && (tok.upper === 'LATERAL') && (this.atP('(', 1) || ((this.pg || this.spec.id === 'snowflake') && isNameTok(this.peek(1))))) {
       this.i++;
       return this.parseTableSource(s, true, target);
     } else if (this.pg && isWord(tok) && tok.upper === 'ONLY' && isNameTok(this.peek(1))) {
@@ -882,7 +883,14 @@ class Parser {
     } else if (isNameTok(tok) || (tok.kind === 'param' && this.tsql)) {
       if (isWord(tok) && (this.clauseAt(this.i) !== null || this.joinAt() !== null)) return null;
       if (isWord(tok) && tok.kind === 'keyword' && !['LEFT', 'RIGHT', 'TABLE'].includes(tok.upper) && this.spec.statementStarts.has(tok.upper)) return null;
-      const parts = this.parseName(true);
+      let parts = this.parseName(true);
+      // Snowflake `TABLE(FLATTEN(…)) f` / `TABLE(my_func(…))`: the inner call is the source
+      let tableWrap = false;
+      if (this.spec.id === 'snowflake' && parts.length === 1 && !parts[0].quoted && parts[0].text.toUpperCase() === 'TABLE' && this.atP('(') && isNameTok(this.peek(1)) && this.atP('(', 2)) {
+        this.i++;
+        parts = this.parseName(true);
+        tableWrap = true;
+      }
       if (this.atP('.')) { this.i++; return null; } // incomplete qualified name being typed
       const last = parts[parts.length - 1];
       let kind: TableRef['kind'] = 'table';
@@ -903,6 +911,7 @@ class Parser {
         this.scanExpr(s, () => false);
         ref.argsRange = [a, this.curStart()];
         if (this.atP(')')) this.i++;
+        if (tableWrap && this.atP(')')) this.i++;
         if (this.pg && this.at('WITH') && this.at('ORDINALITY', 1)) { this.i += 2; ref.withOrdinality = true; }
       }
     } else {
@@ -965,6 +974,17 @@ class Parser {
           if (this.atP('(')) this.skipParens(); else this.i++;
         }
         continue;
+      }
+      if (this.spec.id === 'snowflake') {
+        // SAMPLE | TABLESAMPLE [BERNOULLI | ROW | SYSTEM | BLOCK] (n [ROWS]) [REPEATABLE | SEED (n)]; AT | BEFORE | CHANGES (…)
+        if ((this.at('SAMPLE') || this.at('TABLESAMPLE')) && (this.atP('(', 1) || (isWord(this.peek(1)) && this.atP('(', 2)))) {
+          this.i++;
+          if (!this.atP('(')) this.i++;
+          this.skipParens();
+          if ((this.at('REPEATABLE') || this.at('SEED')) && this.atP('(', 1)) { this.i++; this.skipParens(); }
+          continue;
+        }
+        if ((this.at('AT') || this.at('BEFORE') || this.at('CHANGES')) && this.atP('(', 1)) { this.i++; this.skipParens(); continue; }
       }
       if ((this.at('TABLESAMPLE') || (this.ora && (this.at('SAMPLE') || this.at('PARTITION') || this.at('SUBPARTITION')))) && !this.eof()) {
         this.i++;

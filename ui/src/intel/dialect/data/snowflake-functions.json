@@ -3729,7 +3729,15 @@
     }
    ],
    "returns": "TABLE",
-   "doc": "Explodes an ARRAY/OBJECT into rows: SELECT f.value FROM t, LATERAL FLATTEN(input => t.v) f."
+   "doc": "Explodes an ARRAY/OBJECT into rows: SELECT f.value FROM t, LATERAL FLATTEN(input => t.v) f.",
+   "columns": [
+    "SEQ",
+    "KEY",
+    "PATH",
+    "INDEX",
+    "VALUE",
+    "THIS"
+   ]
   },
   {
    "name": "SPLIT_TO_TABLE",
@@ -3745,7 +3753,12 @@
     }
    ],
    "returns": "TABLE",
-   "doc": "One row per piece of the string (SEQ, INDEX, VALUE)."
+   "doc": "One row per piece of the string (SEQ, INDEX, VALUE).",
+   "columns": [
+    "SEQ",
+    "INDEX",
+    "VALUE"
+   ]
   },
   {
    "name": "GENERATOR",

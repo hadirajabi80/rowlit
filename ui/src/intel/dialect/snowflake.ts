@@ -17,7 +17,7 @@ import { splitSnowflake } from '../split/snowflake';
 import { snowflakeRules } from '../../format/rules/snowflake';
 
 // `$1` is a staged-file column (SELECT $1, $2 FROM @stage), not a bind: no dollarParams (docs/wp-notes/WP-SF.md R3-3).
-const LEX: LexTraits = { backslashEscapes: true, dollarQuotes: true, paramPrefixes: ':?', stringPrefixes: 'X' };
+const LEX: LexTraits = { slashComment: true, backslashEscapes: true, dollarQuotes: true, paramPrefixes: ':?', stringPrefixes: 'X' };
 
 const base = traitLexer(LEX);
 const COLON = 58, QUOTE = 34, RBRACKET = 93, RPAREN = 41, DOLLAR = 36;

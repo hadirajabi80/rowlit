@@ -81,6 +81,19 @@ public static partial class SnowflakeSql
         return n.ToUpperInvariant();
     }
 
+    /// <summary>
+    /// The spellings to try for a database or schema name of unknown origin: a quoted name as written; otherwise the name
+    /// as stored (a name picked from a list: <c>MyDb</c>, <c>sales</c>) first, then its upper-case fold (a typed unquoted
+    /// name: <c>shop</c> is <c>SHOP</c>). One entry when both are the same.
+    /// </summary>
+    public static IReadOnlyList<string> NameCandidates(string name)
+    {
+        var n = name.Trim();
+        var folded = Normalize(n);
+        if (n.Length >= 2 && n[0] == '"' && n[^1] == '"') return [folded];
+        return string.Equals(n, folded, StringComparison.Ordinal) ? [n] : [n, folded];
+    }
+
     // ------------------------------------------------------------------ catalog commands (no warehouse needed)
 
     public const string ShowDatabases = "SHOW DATABASES";

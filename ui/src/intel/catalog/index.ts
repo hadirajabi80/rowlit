@@ -456,7 +456,7 @@ export class CatalogIndex {
         if (this.database && this.keyOf(db.text, db.quoted) !== this.keyOfCatalog(this.database)) return null;
         return pick(this.lookupIn(sch.text, name, sch.quoted));
       }
-      if (this.spec.id === 'tsql') {
+      if (this.spec.id === 'tsql' || this.spec.id === 'snowflake') {
         // `db.schema.object` / `db..object`: this database, or another one of the server (its catalog loads on demand)
         const ix = this.indexOfDatabase(db.text, db.quoted);
         if (!ix) return null;
@@ -603,7 +603,7 @@ export class CatalogIndex {
    */
   resolveDatabase(text: string, quoted: boolean): DatabaseRef | null {
     const home = this.home;
-    if (home.spec.id !== 'tsql') return null;
+    if (home.spec.id !== 'tsql' && home.spec.id !== 'snowflake') return null;
     const name = this.listedDatabase(text, quoted);
     if (!name) return null;
     const k = home.keyOfCatalog(name);

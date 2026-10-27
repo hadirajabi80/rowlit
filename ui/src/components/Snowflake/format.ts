@@ -10,12 +10,21 @@ export const OBJECT_ACTIONS: Partial<Record<SnowflakeObjectKind, string[]>> = {
   alerts: ['resume', 'suspend'],
 };
 
+/** A name as Snowflake stores it: "Mixed" keeps its case (quotes removed), anything else folds to upper case. Empty = undefined. */
+export function foldName(name: string | null | undefined): string | undefined {
+  const n = (name ?? '').trim();
+  if (!n) return undefined;
+  if (n.length >= 2 && n.startsWith('"') && n.endsWith('"')) return n.slice(1, -1).replace(/""/g, '"');
+  return n.toUpperCase();
+}
+
 export function formatMs(ms: string | undefined): string {
   const n = Number(ms);
   if (!ms || !Number.isFinite(n)) return '';
   if (n < 1000) return `${n} ms`;
   if (n < 60_000) return `${(n / 1000).toFixed(1)} s`;
-  return `${Math.floor(n / 60_000)} min ${Math.round((n % 60_000) / 1000)} s`;
+  const total = Math.round(n / 1000);
+  return `${Math.floor(total / 60)} min ${total % 60} s`;
 }
 
 export function formatBytes(b: string | undefined): string {

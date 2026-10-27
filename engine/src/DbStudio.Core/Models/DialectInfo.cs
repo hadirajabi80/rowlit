@@ -47,8 +47,8 @@ public static class DialectInfo
     /// <summary><c>$$…$$</c> / <c>$tag$…$tag$</c> string bodies (PostgreSQL, Snowflake, CQL function bodies, DuckDB).</summary>
     public static bool DollarQuotedStrings(Dialect d) => d is Dialect.PgSql or Dialect.Snowflake or Dialect.Cql or Dialect.DuckDb;
 
-    /// <summary><c>// …</c> is a line comment (CQL).</summary>
-    public static bool SlashLineComments(Dialect d) => d is Dialect.Cql;
+    /// <summary><c>// …</c> is a line comment (CQL, Snowflake).</summary>
+    public static bool SlashLineComments(Dialect d) => d is Dialect.Cql or Dialect.Snowflake;
 
     /// <summary>Open/close characters the engine uses to quote an identifier it generates.</summary>
     public static (char Open, char Close) IdentifierQuote(Dialect d) =>

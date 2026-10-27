@@ -7,14 +7,14 @@ import type {
   SnowflakeDdlResponse, SnowflakeObject, SnowflakeObjectKind, SnowflakeObjectsResponse, SnowflakeRole, SnowflakeSessionContext, SnowflakeUseKind,
   SnowflakeWarehouse,
 } from '../../api/types.snowflake';
-import { newConsole } from '../../app/actions';
+import { newConsole, preloadCatalog } from '../../app/actions';
 import { getConnection } from '../../store/connections';
 import { useSessions } from '../../store/sessions';
 import { useTabs } from '../../store/tabs';
 import { toast, useUi } from '../../store/ui';
 import type { TabViewProps } from '../layout/tabViews';
 import { SF_VIEWS, type SfViewState } from './commands';
-import { formatBytes, formatMs, OBJECT_ACTIONS, queryText } from './format';
+import { foldName, formatBytes, formatMs, OBJECT_ACTIONS, queryText } from './format';
 import './snowflake.css';
 
 const stateOf = (p: TabViewProps) => (p.tab.state ?? {}) as SfViewState;
@@ -90,8 +90,19 @@ export function SessionView(p: TabViewProps) {
     setBusy(true);
     try {
       const s = await session();
-      setCtx(kind === 'database' ? (await useSessions.getState().changeDatabase(consoleTab!.id, name), await api.snowflake.sessionContext(s.sessionId))
-        : await api.snowflake.use(s.sessionId, kind, kind === 'schema' && ctx?.database ? `${ctx.database}.${name}` : name));
+      const tabId = consoleTab!.id;
+      if (kind === 'database') {
+        await useSessions.getState().changeDatabase(tabId, name);
+        // the tab follows its session: IntelliSense and the explorer read the tab's database
+        useTabs.getState().setDatabase(tabId, name);
+        void preloadCatalog(cid, name);
+        setCtx(await api.snowflake.sessionContext(s.sessionId));
+      } else if (kind === 'schema') {
+        await useSessions.getState().changeSchema(tabId, name); // also remembered on the tab (a reopened session returns to it)
+        setCtx(await api.snowflake.sessionContext(s.sessionId));
+      } else {
+        setCtx(await api.snowflake.use(s.sessionId, kind, name));
+      }
       toast('success', `USE ${kind.toUpperCase()} ${name}`);
     } catch (e) {
       toast('error', `Could not use ${kind} ${name}`, errorMessage(e));
@@ -195,13 +206,14 @@ export function ObjectsView(p: TabViewProps) {
   const st = stateOf(p);
   const kind = (st.kind as SnowflakeObjectKind | undefined) ?? 'stages';
   const conn = getConnection(cid);
-  const database = st.database ?? (conn?.props.database as string | undefined)?.toUpperCase() ?? undefined;
-  const schema = st.schema ?? (conn?.props.schema as string | undefined)?.toUpperCase() ?? undefined;
+  const database = st.database ?? foldName(conn?.props.database as string | undefined);
+  const schema = st.schema ?? foldName(conn?.props.schema as string | undefined);
   const { data, error, loading, reload } = useLoad<SnowflakeObjectsResponse>(() => api.snowflake.objects(cid, kind, database, schema), [cid, kind, database, schema]);
   const [selected, setSelected] = useState<SnowflakeObject | null>(null);
   const [ddl, setDdl] = useState<SnowflakeDdlResponse | null>(null);
   useEffect(() => { setSelected(null); setDdl(null); }, [kind, database, schema]);
   useEffect(() => {
+    setDdl(null); // never show the previous object's DDL under the new name
     if (!selected) return;
     let live = true;
     api.snowflake.objectDdl(cid, kind, selected.name, data?.database, data?.schema).then((d) => { if (live) setDdl(d); }, (e) => toast('error', 'Could not read the DDL', errorMessage(e)));
@@ -227,8 +239,8 @@ export function ObjectsView(p: TabViewProps) {
             <button key={k.kind} role="tab" aria-selected={k.kind === kind} className={`sf-kind ${k.kind === kind ? 'active' : ''}`} onClick={() => patch(p.tab.id, { kind: k.kind })}>{k.label}</button>
           ))}
         </div>
-        <input className="input sf-narrow mono" aria-label="Database" placeholder="Database" defaultValue={database ?? ''} onBlur={(e) => patch(p.tab.id, { database: e.target.value.trim() || null })} />
-        <input className="input sf-narrow mono" aria-label="Schema" placeholder="Schema" defaultValue={schema ?? ''} onBlur={(e) => patch(p.tab.id, { schema: e.target.value.trim() || null })} />
+        <input className="input sf-narrow mono" aria-label="Database" placeholder="Database" defaultValue={database ?? ''} onBlur={(e) => patch(p.tab.id, { database: foldName(e.target.value) ?? null })} />
+        <input className="input sf-narrow mono" aria-label="Schema" placeholder="Schema" defaultValue={schema ?? ''} onBlur={(e) => patch(p.tab.id, { schema: foldName(e.target.value) ?? null })} />
       </Header>
       {error && <div className="message sev-error sf-banner" role="alert">{error}</div>}
       {data?.note && <div className="message sev-warning sf-banner">{data.note}</div>}

@@ -53,13 +53,18 @@ public static class ConnectionEndpoints
             var provider = providers.Get(req.Profile.ProviderId);
             var password = req.Password;
             var profile = req.Profile;
-            if (req.UseStoredPassword && !string.IsNullOrEmpty(req.Profile.Id))
+            if (!string.IsNullOrEmpty(req.Profile.Id))
             {
-                password ??= store.GetPassword(req.Profile.Id);
-                profile = store.WithSecrets(req.Profile); // extra password-typed fields (D12) not retyped in the dialog
+                // extra password-typed fields (D12: key passphrase, token, API key…) not retyped in the dialog come from the store,
+                // also for providers whose main password is unused (Snowflake key pair / OAuth)
+                profile = store.WithSecrets(req.Profile);
+                if (req.UseStoredPassword) password ??= store.GetPassword(req.Profile.Id);
             }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(req.Profile.GetInt("connectTimeout", 15) + 15, 5, 300)));
+            var seconds = Math.Clamp(req.Profile.GetInt("connectTimeout", 15) + 15, 5, 300);
+            // Snowflake browser SSO waits up to 120 s for the person to finish the identity provider's login (MFA included)
+            if (string.Equals(req.Profile.GetString("authenticator"), "externalbrowser", StringComparison.OrdinalIgnoreCase)) seconds = Math.Max(seconds, 135);
+            timeout.CancelAfter(TimeSpan.FromSeconds(seconds));
             try
             {
                 return await provider.TestAsync(profile, password, timeout.Token);

@@ -2,6 +2,7 @@ using DbStudio.Core.Models;
 using DbStudio.Core.Providers;
 using DbStudio.Core.Search;
 using DbStudio.Core.Services;
+using DbStudio.Logs.Sql;
 
 namespace DbStudio.Providers.Snowflake.Tests;
 
@@ -24,6 +25,24 @@ public sealed class CatalogTests
         var schemas = await r.ListSchemasAsync("SHOP", Ct);
         Assert.Equal(["PUBLIC", "SALES"], schemas.Select(s => s.Name));
         Assert.Contains("SHOW SCHEMAS IN DATABASE \"SHOP\"", _gateways.Opened[0].Sent);
+    }
+
+    [Theory]
+    [InlineData("MyDb", "MyDb")]       // as listed (stored mixed case): kept, not folded to MYDB
+    [InlineData("sales_raw", "sales_raw")] // as listed (stored lower case)
+    [InlineData("shop", "SHOP")]       // typed in a profile: folds
+    [InlineData("\"Quoted\"", "Quoted")]
+    [InlineData("SHOP", "SHOP")]
+    public async Task Database_arguments_may_be_listed_names_or_typed_ones(string argument, string expected)
+    {
+        _gateways.Configure = g =>
+        {
+            g.Overrides["SHOW DATABASES"] = () => new SqlRowSet(["name"], [["SHOP"], ["MyDb"], ["sales_raw"]]);
+            g.Overrides[$"SHOW SCHEMAS IN DATABASE \"{expected}\""] = () => new SqlRowSet(["name"], [["PUBLIC"]]);
+        };
+        await using var r = await ReaderAsync();
+        await r.ListSchemasAsync(argument, Ct);
+        Assert.Contains($"SHOW SCHEMAS IN DATABASE \"{expected}\"", _gateways.Opened[0].Sent);
     }
 
     [Fact]
