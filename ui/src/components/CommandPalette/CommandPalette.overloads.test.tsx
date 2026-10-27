@@ -1,5 +1,5 @@
-// QA (feature coverage round): Ctrl+P lists overloaded routines (PostgreSQL / Oracle index them under one name) as
-// separate rows with unique React keys. Duplicate keys left stale rows behind when the list changed, so "q:" kept
+// QA (feature coverage round): Ctrl+P lists an overloaded routine (PostgreSQL / Oracle index it once per overload) as
+// one row, like the Objects tab, with unique React keys. Duplicate keys left stale rows behind when the list changed, so "q:" kept
 // showing functions after typing a filter.
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,11 +32,11 @@ afterEach(() => {
 });
 
 describe('Ctrl+P with overloaded routines', () => {
-  it('renders every overload as its own row without duplicate React keys', () => {
+  it('lists an overloaded routine once, without duplicate React keys', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<CommandPalette />);
-    expect(screen.getAllByText('fn_tax')).toHaveLength(3);
-    expect(screen.getAllByText('price_range')).toHaveLength(2);
+    expect(screen.getAllByText('fn_tax')).toHaveLength(1);
+    expect(screen.getAllByText('price_range')).toHaveLength(1);
     const dup = err.mock.calls.filter((c) => String(c[0]).includes('same key'));
     expect(dup).toEqual([]);
   });
