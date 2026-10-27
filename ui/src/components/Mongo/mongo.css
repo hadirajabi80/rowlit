@@ -8,7 +8,7 @@
 .mg-head-stats > span + span::before { content: '·'; margin-right: var(--space-3); color: var(--fg-muted); }
 .mg-head .pill svg { margin-right: 3px; }
 
-.mg-subtabs { display: flex; gap: 2px; padding: 0 var(--space-2); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
+.mg-subtabs { display: flex; gap: 2px; padding: 0 var(--space-2); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
 .mg-subtab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-3); border: 0; background: transparent; color: var(--fg-muted); font: inherit; cursor: pointer; white-space: nowrap; }
 .mg-subtab:hover:not(:disabled) { color: var(--fg); }
 .mg-subtab.on { color: var(--fg); font-weight: var(--weight-strong); }
