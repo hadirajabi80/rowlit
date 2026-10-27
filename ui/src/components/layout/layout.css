@@ -188,13 +188,24 @@
 }
 .message-help {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--space-2);
   margin-top: 2px;
   color: var(--text-muted);
+  white-space: normal; /* the message text above keeps its line breaks (pre-wrap); the hint is a flowing sentence */
+}
+/* The bulb, the sentence and the action stay on one row; the sentence is what shrinks and wraps. (It used to wrap
+   the whole sentence below the bulb in a narrow, right-docked results pane.) */
+.message-help > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.message-help > span {
+  min-width: 0;
 }
 .message-help .btn {
+  flex-shrink: 0;
+  align-self: center;
   height: 22px;
 }
 .message-text {

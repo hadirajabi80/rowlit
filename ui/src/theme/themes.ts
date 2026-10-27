@@ -180,6 +180,8 @@ const NORD: ThemeVars = {
   '--obj-key': '#ebcb8b',
   '--obj-fk': '#88c0d0',
   '--obj-other': '#aab4c4',
+  // the dark base's 28% yellow leaves --fg at 4.3:1 on the selected row (Find in database / palette highlights)
+  '--mark-bg': 'rgb(250 204 21 / 20%)',
   ...glass('46 52 64', true, '#30353f'),
 };
 

@@ -43,6 +43,7 @@ export const CONTRAST_MATRIX: Pair[] = [
   // changed cells: text is --fg (a muted NULL on dark --cell-edited is ~3:1, so changed cells draw NULL in --fg)
   ...['--cell-edited', '--cell-inserted', '--cell-deleted'].flatMap((cell) => ['--bg-panel', '--bg-grid-alt'].map((base) => pair('--fg', cell, TEXT, 'changed-cell text', base))),
   pair('--fg', '--mark-bg', TEXT, 'search/filter highlight', '--bg-panel'),
+  pair('--fg', '--mark-bg', TEXT, 'matched text on a selected row (Find in database, palette)', '--bg-selected'),
   pair('--border', '--bg-panel', 1.5, 'decorative separators (5.1)'),
   pair('--border-strong', '--bg-panel', UI, 'control boundaries (5.1)'), pair('--border-strong', '--bg-input', UI, 'input boundaries'),
   ...['--bg-panel', '--bg-app', '--bg-elevated', '--bg-input', '--bg-selected'].map((bg) => pair('--focus-ring', bg, UI, 'focus ring')),
@@ -50,6 +51,10 @@ export const CONTRAST_MATRIX: Pair[] = [
   ...['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'grey'].flatMap((c) => ['--bg-panel', '--bg-app'].map((bg) => pair(`--conn-${c}`, bg, UI, 'connection colour dots/bars'))),
   ...['table', 'view', 'routine', 'package', 'trigger', 'key', 'fk', 'db', 'other'].flatMap((o) => ['--bg-panel', '--bg-selected'].map((bg) => pair(`--obj-${o}`, bg, UI, 'object-type icons'))),
   pair('--fg-muted', '--bg-selected', UI, 'icons on a selected row'),
+  // Find in database: the coloured "N columns / N in code / N in data" badges are text on --bg-sunken pills, drawn
+  // in the kind colour mixed with --fg (search.css: color-mix(in srgb, kind 65%, var(--fg))): the plain kind colours
+  // are icon colours (3:1) and fall short of 4.5:1 on the pill in several themes.
+  ...['--kind-column', '--obj-routine', '--obj-package'].map((k) => pair(`mix:${k}:--fg:65`, '--bg-sunken', TEXT, 'Find in database result badges')),
   ...['sqlserver', 'oracle', 'sqlite', 'postgresql', 'redis', 'mongodb', 'kafka', 'mysql', 'mariadb', 'clickhouse', 'snowflake', 'elasticsearch', 'cassandra', 'linked']
     .map((p) => pair('--provider-fg', `--provider-${p}`, UI, 'provider tile glyph')),
   // M2: log level text in the Logs view (rows on panel / alternating rows, selected row)
@@ -76,6 +81,13 @@ export const CONTRAST_MATRIX: Pair[] = [
 /** Contrast of one matrix pair in a resolved token map (throws when a token is not a colour). */
 export function pairRatio(t: TokenMap, p: Pair): number {
   const value = (name: string) => {
+    // `mix:--a:--b:65` = color-mix(in srgb, a 65%, b): a colour the CSS derives from two tokens
+    const m = /^mix:(--[\w-]+):(--[\w-]+):(\d+)$/.exec(name);
+    if (m) {
+      const a = parseColor(t[m[1]] ?? ''), b = parseColor(t[m[2]] ?? '');
+      if (!a || !b) throw new Error(`${name} is not made of colours`);
+      return toHex(blend({ ...a, a: Number(m[3]) / 100 }, b));
+    }
     const v = t[name];
     if (!v || !parseColor(v)) throw new Error(`${name} is not a colour (${v})`);
     return v;

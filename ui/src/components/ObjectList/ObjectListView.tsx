@@ -399,7 +399,7 @@ export function ObjectList({ state, patch, visible, highlight, header, tabId }: 
   }
   const columns: Column[] = [
     {
-      key: 'name', label: 'Name', width: 'minmax(200px, 2.2fr)',
+      key: 'name', label: 'Name', width: 'minmax(150px, 2.2fr)',
       render: (it) => (
         <span className="ol-name">
           <ObjectIcon type={it.type} kind={it.kind} size={15} />
@@ -412,7 +412,7 @@ export function ObjectList({ state, patch, visible, highlight, header, tabId }: 
     ...(anyRows ? [{ key: 'rows' as const, label: 'Rows', width: '96px', numeric: true, render: (it: ObjectListItem) => (it.rowCount === null ? <span className="ol-faint">{it.type === 'table' || it.type === 'mview' ? '—' : ''}</span> : it.rowCount.toLocaleString('en-US')) }] : []),
     ...(anySize ? [{ key: 'size' as const, label: 'Size', width: '88px', numeric: true, render: (it: ObjectListItem) => formatSize(it.sizeBytes) }] : []),
     ...(anyModified ? [{ key: 'modified' as const, label: 'Modified', width: '138px', render: (it: ObjectListItem) => <span className="ol-muted">{formatModified(it.modified)}</span> }] : []),
-    ...(anyComment ? [{ key: 'comment' as const, label: 'Comment', width: 'minmax(140px, 2fr)', render: (it: ObjectListItem) => <span className="ol-comment" title={it.comment ?? undefined}>{it.comment}</span> }] : []),
+    ...(anyComment ? [{ key: 'comment' as const, label: 'Comment', width: 'minmax(100px, 2fr)', render: (it: ObjectListItem) => <span className="ol-comment" title={it.comment ?? undefined}>{it.comment}</span> }] : []),
   ];
   const template = columns.map((c) => c.width).join(' ');
 

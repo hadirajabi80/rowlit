@@ -387,6 +387,10 @@
   background: var(--bg-selected);
   box-shadow: inset 2px 0 0 var(--accent);
 }
+/* secondary text on the selected row (matrix pairs --fg-muted-on-selected on --bg-selected / --bg-selected-inactive) */
+.sx-row.active {
+  --text-muted: var(--fg-muted-on-selected);
+}
 .sx-conn {
   font-weight: var(--weight-strong);
 }
@@ -453,14 +457,16 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* text on the --bg-sunken pill: the kind colour mixed with --fg (the plain kind colours are icon colours, 3:1 only;
+   the contrast matrix declares these mixes: theme/contrastMatrix.ts) */
 .sx-badge.column {
-  color: var(--kind-column);
+  color: color-mix(in srgb, var(--kind-column) 65%, var(--fg));
 }
 .sx-badge.code {
-  color: var(--obj-routine);
+  color: color-mix(in srgb, var(--obj-routine) 65%, var(--fg));
 }
 .sx-badge.data {
-  color: var(--obj-package);
+  color: color-mix(in srgb, var(--obj-package) 65%, var(--fg));
 }
 .sx-hit-icon {
   flex-shrink: 0;

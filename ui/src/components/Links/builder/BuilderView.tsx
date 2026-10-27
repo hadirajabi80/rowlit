@@ -506,7 +506,7 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
         </span>
       </header>
       <div className="lkb-main" style={{ gridTemplateRows: `minmax(160px, 1fr) auto ${sizesUi.panel}px` }}>
-        <div className="lkb-top" style={{ gridTemplateColumns: `${sizesUi.list}px auto minmax(240px, 1fr) auto ${sizesUi.sql}px` }}>
+        <div className="lkb-top" style={{ gridTemplateColumns: `minmax(0, ${sizesUi.list}px) auto minmax(200px, 1fr) auto minmax(0, ${sizesUi.sql}px)` }}>
           <TableList
             ref={listRef}
             linkId={linkId}
