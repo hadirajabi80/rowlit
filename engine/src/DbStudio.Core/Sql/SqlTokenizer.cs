@@ -57,8 +57,9 @@ public static class SqlTokenizer
                 continue;
             }
 
-            // // line comment (CQL)
-            if (c == '/' && i + 1 < n && sql[i + 1] == '/' && DialectInfo.SlashLineComments(dialect))
+            // // line comment (CQL, Snowflake; in Snowflake not inside a URL such as PUT file:///tmp/a.csv or a stage path @s//x)
+            if (c == '/' && i + 1 < n && sql[i + 1] == '/' && DialectInfo.SlashLineComments(dialect)
+                && !(dialect == Dialect.Snowflake && IsUrlOrStagePath(sql, i)))
             {
                 while (i < n && sql[i] != '\n') i++;
                 continue;
@@ -259,6 +260,18 @@ public static class SqlTokenizer
     }
 
     /// <summary>PostgreSQL $$…$$ / $tag$…$tag$ (tag = [A-Za-z_][A-Za-z0-9_]*); false when '$' does not open one ($1 is a parameter).</summary>
+    /// <summary>The blank-delimited word before <paramref name="at"/> is a stage reference (<c>@s</c>) or a URL scheme with slashes (<c>file:</c>, <c>file:/</c>).</summary>
+    private static bool IsUrlOrStagePath(string sql, int at)
+    {
+        var w = at;
+        while (w > 0 && !char.IsWhiteSpace(sql[w - 1])) w--;
+        if (w == at) return false;
+        if (sql[w] == '@') return true;
+        var e = at;
+        while (e > w && sql[e - 1] == '/') e--;
+        return e > w && sql[e - 1] == ':';
+    }
+
     private static bool TryDollarQuote(string sql, ref int i, ref int line, ref int lineStart)
     {
         var j = i + 1;

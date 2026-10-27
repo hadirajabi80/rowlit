@@ -41,6 +41,23 @@ public sealed class SnowflakeProvider : IDbProvider, IObjectBrowserProvider, IDa
     public string BuildConnectionString(ConnectionProfile profile, string? password) =>
         SnowflakeConnectionStrings.Masked(SnowflakeConnectionStrings.Build(profile, password, pooling: false));
 
+    /// <summary>
+    /// Resources: the catalog, designer and module gateways share one driver pool per connection (same connection string);
+    /// closing the connection or releasing its idle metadata ends those server sessions too.
+    /// </summary>
+    public void ClearPooledConnections(ConnectionProfile profile, string? password, IReadOnlyList<string?> databases)
+    {
+        try
+        {
+            var built = SnowflakeConnectionStrings.Build(_secrets.Hydrate(profile), password, pooling: true);
+            SnowflakeDbConnectionPool.GetPool(built.ConnectionString, built.Password).ClearPool();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or SnowflakeDbException)
+        {
+            // an incomplete profile, or a driver without a pool for it: nothing was pooled
+        }
+    }
+
     public async Task<TestConnectionResult> TestAsync(ConnectionProfile profile, string? password, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
@@ -60,13 +77,21 @@ public sealed class SnowflakeProvider : IDbProvider, IObjectBrowserProvider, IDa
     public async Task<IDbSession> OpenSessionAsync(ConnectionProfile profile, string? password, SessionOptions options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var database = string.IsNullOrWhiteSpace(options.Database) ? null : SnowflakeSql.Normalize(options.Database);
-        var built = SnowflakeConnectionStrings.Build(_secrets.Hydrate(profile), password, pooling: false, database);
+        var hydrated = _secrets.Hydrate(profile);
+        // The tab's database is a name as listed (stored: "MyDb") or the profile's typed one. The connection string can only
+        // carry an unquoted (upper-cased) name, so a database that differs from the profile's is selected with USE DATABASE
+        // after login, which tries the stored spelling first.
+        var requested = string.IsNullOrWhiteSpace(options.Database) ? null : options.Database.Trim();
+        var profileDb = hydrated.GetString("database");
+        var needsUse = requested is not null
+            && !string.Equals(SnowflakeSql.Normalize(requested), string.IsNullOrWhiteSpace(profileDb) ? null : SnowflakeSql.Normalize(profileDb), StringComparison.Ordinal);
+        var built = SnowflakeConnectionStrings.Build(hydrated, password, pooling: false);
         var conn = await SnowflakeDriver.OpenAsync(built, ct).ConfigureAwait(false);
         try
         {
             var info = await ReadServerInfoAsync(conn, ct).ConfigureAwait(false);
             var session = new SnowflakeSession(conn, profile, options, info, c => _gateways.OpenAsync(profile, password, c));
+            if (needsUse) await session.ChangeDatabaseAsync(requested!, ct).ConfigureAwait(false);
             await session.InitializeSchemaAsync(ct).ConfigureAwait(false);
             return session;
         }

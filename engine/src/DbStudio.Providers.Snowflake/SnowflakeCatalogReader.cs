@@ -55,9 +55,27 @@ public sealed class SnowflakeCatalogReader : ICatalogReader
         return rs.Rows.Count == 0 ? null : rs.Str(rs.Rows[0], "DATABASE_NAME");
     }
 
+    private IReadOnlyList<string>? _listedDatabases;
+
+    /// <summary>
+    /// A database argument is a name as listed (stored: <c>MyDb</c>, <c>sales_raw</c>) or one typed in a profile (<c>shop</c>,
+    /// an unquoted name that folds to <c>SHOP</c>). A name equal to its fold is used as is; any other is looked up among the
+    /// account's databases (the stored spelling wins), else it folds.
+    /// </summary>
+    internal async Task<string?> ResolveDatabaseAsync(string? database, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(database)) return null;
+        var candidates = SnowflakeSql.NameCandidates(database);
+        if (candidates.Count == 1) return candidates[0];
+        _listedDatabases ??= await ListDatabasesAsync(ct).ConfigureAwait(false);
+        foreach (var c in candidates)
+            if (_listedDatabases.Contains(c, StringComparer.Ordinal)) return c;
+        return candidates[^1];
+    }
+
     internal async Task<string> DatabaseOrCurrentAsync(string? database, CancellationToken ct)
     {
-        var db = Norm(database) ?? await GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
+        var db = await ResolveDatabaseAsync(database, ct).ConfigureAwait(false) ?? await GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(db))
             throw EngineException.Validation("No database selected: pick a database (or set one in the connection).", new { field = "database" });
         return db;
@@ -65,7 +83,7 @@ public sealed class SnowflakeCatalogReader : ICatalogReader
 
     public async Task<IReadOnlyList<SchemaInfo>> ListSchemasAsync(string? database, CancellationToken ct)
     {
-        var db = Norm(database) ?? await GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
+        var db = await ResolveDatabaseAsync(database, ct).ConfigureAwait(false) ?? await GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(db)) return [];
         var rs = await Gateway.QueryAsync(SnowflakeSql.ShowSchemas(db), ct).ConfigureAwait(false);
         return rs.Rows.Select(r => rs.Str(r, "name") ?? "")

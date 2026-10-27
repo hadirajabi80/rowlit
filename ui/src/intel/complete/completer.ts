@@ -156,7 +156,7 @@ function containerItems(items: Items, c: CursorContext, env: CompleteEnv, group:
   for (const sc of index.schemas.values()) addSchema(sc.name);
   for (const name of index.unloadedSchemaNames()) addSchema(name);
   const dbs: Container[] = [];
-  if (spec.id === 'tsql' && opts.databases !== false) {
+  if ((spec.id === 'tsql' || spec.id === 'snowflake') && opts.databases !== false) {
     const cur = index.database ? index.keyOfCatalog(index.database) : null;
     for (const d of index.databases) {
       const isCur = cur !== null && index.keyOfCatalog(d) === cur;

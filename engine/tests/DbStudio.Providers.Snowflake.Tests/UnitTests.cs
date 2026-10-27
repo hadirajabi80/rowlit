@@ -39,7 +39,7 @@ public sealed class ConnectionStringTests
         Assert.NotNull(b.Password);
         Assert.Contains("account=org-acct;authenticator=snowflake;user=JSMITH", b.ConnectionString);
         Assert.Contains("db=SHOP;schema=PUBLIC;warehouse=COMPUTE_WH;role=SYSADMIN", b.ConnectionString);
-        Assert.Contains("query_tag=my;;tag", b.ConnectionString); // ';' doubled
+        Assert.Contains("query_tag=\"my;tag\"", b.ConnectionString); // quoted: DbConnectionStringBuilder rules (a doubled ';;' is not an escape)
         Assert.Contains("poolingEnabled=false", b.ConnectionString);
         Assert.Contains("CLIENT_TELEMETRY_ENABLED=false", b.ConnectionString);
         Assert.Contains("application=Rowlit", b.ConnectionString);
@@ -62,7 +62,7 @@ public sealed class ConnectionStringTests
                 ("privateKeyFile", key), ("privateKeyPassphrase", "pa;ss")), null, false);
             Assert.Contains("authenticator=snowflake_jwt", jwt.ConnectionString);
             Assert.Contains($"private_key_file={key}", jwt.ConnectionString);
-            Assert.Contains("private_key_pwd=pa;;ss", jwt.ConnectionString);
+            Assert.Contains("private_key_pwd=\"pa;ss\"", jwt.ConnectionString);
             Assert.Contains("private_key_pwd=***", SnowflakeConnectionStrings.Masked(jwt));
         }
         finally { File.Delete(key); }
@@ -74,6 +74,61 @@ public sealed class ConnectionStringTests
         var oauth = SnowflakeConnectionStrings.Build(Profile(("account", "a"), ("authenticator", "oauth"), ("token", "tok")), null, false);
         Assert.NotNull(oauth.Token);
         Assert.DoesNotContain("tok", oauth.ConnectionString.Replace("authenticator=oauth", ""));
+    }
+
+    /// <summary>Parses a connection string with the driver's own parser (internal API, pinned by the package version).</summary>
+    private static Dictionary<string, string> DriverParse(string connectionString)
+    {
+        var asm = typeof(global::Snowflake.Data.Client.SnowflakeDbConnection).Assembly;
+        var parse = asm.GetType("Snowflake.Data.Core.SFSessionProperties")!.GetMethod("ParseConnectionString",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!;
+        var context = Activator.CreateInstance(parse.GetParameters()[1].ParameterType, true);
+        var props = (System.Collections.IEnumerable)parse.Invoke(null, [connectionString, context])!;
+        var result = new Dictionary<string, string>();
+        foreach (var kv in props)
+        {
+            var t = kv.GetType();
+            result[t.GetProperty("Key")!.GetValue(kv)!.ToString()!] = Convert.ToString(t.GetProperty("Value")!.GetValue(kv)) ?? "";
+        }
+        return result;
+    }
+
+    [Theory]
+    [InlineData("my;tag")]
+    [InlineData("say \"hi\"; ok")]
+    [InlineData("it's; fine")]
+    [InlineData("a=b")]
+    public void Values_with_special_characters_survive_the_drivers_parser(string tag)
+    {
+        // regression: `;;` was written for ';' but the driver does not read it as an escape (it cut the value and dropped
+        // every property after it, e.g. connection_timeout), and a bare quote is a format error.
+        var b = SnowflakeConnectionStrings.Build(Profile(("account", "org-acct"), ("user", "U"), ("queryTag", tag), ("role", "\"My Role\""), ("database", "\"MyDb\""), ("connectTimeout", 7)), "pw", pooling: false);
+        var parsed = DriverParse(b.ConnectionString + ";password=x");
+        Assert.Equal(tag, parsed["QUERY_TAG"]);
+        // identifiers keep their own quoting (a case-sensitive name), the driver reads them itself
+        Assert.Equal("\"My Role\"", parsed["ROLE"]);
+        Assert.Equal("\"MyDb\"", parsed["DB"]);
+        Assert.Equal("7", parsed["CONNECTION_TIMEOUT"]);
+        Assert.Equal("org-acct", parsed["ACCOUNT"]);
+    }
+
+    [Fact]
+    public void Key_passphrase_with_a_semicolon_is_quoted_and_masked()
+    {
+        var key = Path.Combine(Path.GetTempPath(), "rowlit-sf-test-key2.p8");
+        File.WriteAllText(key, "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n");
+        try
+        {
+            var jwt = SnowflakeConnectionStrings.Build(Profile(("account", "a"), ("user", "u"), ("authenticator", "snowflake_jwt"), ("privateKeyFile", key),
+                ("privateKeyPassphrase", "pa;ss\"w'd"), ("warehouse", "WH")), null, false);
+            Assert.Equal("pa;ss\"w'd", DriverParse(jwt.ConnectionString)["PRIVATE_KEY_PWD"]);
+            var masked = SnowflakeConnectionStrings.Masked(jwt);
+            Assert.DoesNotContain("pa;ss", masked);
+            Assert.DoesNotContain("w'd", masked);
+            Assert.Contains("private_key_pwd=***;", masked);
+            Assert.Contains("warehouse=WH", masked);
+        }
+        finally { File.Delete(key); }
     }
 
     [Fact]
@@ -224,6 +279,34 @@ public sealed class SqlTextTests
         Assert.StartsWith("SELECT $$", st[2].Text);
         Assert.Equal("COMMIT", st[3].Text);
         Assert.Equal(2, st[1].Line);
+    }
+
+    [Theory]
+    [InlineData("SHOP", new[] { "SHOP" })]
+    [InlineData("shop", new[] { "shop", "SHOP" })]
+    [InlineData("MyDb", new[] { "MyDb", "MYDB" })]
+    [InlineData("\"MyDb\"", new[] { "MyDb" })]
+    [InlineData("  sales ", new[] { "sales", "SALES" })]
+    public void NameCandidates_TriesTheStoredSpellingThenTheFold(string name, string[] expected) =>
+        Assert.Equal(expected, SnowflakeSql.NameCandidates(name));
+
+    [Fact]
+    public void ClearPooledConnections_NeverThrows()
+    {
+        var provider = new SnowflakeProvider(new Gateway.SnowflakeGatewayFactory());
+        var profile = new ConnectionProfile { Id = "c1", Name = "sf", ProviderId = "snowflake", Props = new Dictionary<string, JsonNode?> { ["account"] = JsonValue.Create("org-acct"), ["user"] = JsonValue.Create("U") } };
+        provider.ClearPooledConnections(profile, "pw", []);
+        provider.ClearPooledConnections(new ConnectionProfile { Id = "c2", Name = "incomplete", ProviderId = "snowflake" }, null, []); // no account: nothing pooled
+    }
+
+    [Fact]
+    public void SplitStatements_SlashSlashIsALineComment()
+    {
+        var st = SnowflakeSql.SplitStatements("// it's; a note\nSELECT 1; // x; y\nSELECT 2");
+        Assert.Equal(2, st.Count);
+        Assert.Equal("SELECT 1", st[0].Text);
+        Assert.Equal("SELECT 2", st[1].Text);
+        Assert.Equal(2, st[0].Line);
     }
 
     [Theory]

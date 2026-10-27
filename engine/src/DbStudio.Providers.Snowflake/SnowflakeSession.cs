@@ -218,10 +218,27 @@ public sealed class SnowflakeSession : AdoSessionBase
 
     protected override async Task ChangeDatabaseCoreAsync(string database, CancellationToken ct)
     {
-        var name = SnowflakeSql.Normalize(database);
-        await using (var cmd = CreateCommand("USE DATABASE " + SnowflakeSql.AlwaysQuote(name)))
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        CurrentDatabase = string.IsNullOrEmpty(_conn.Database) ? name : _conn.Database;
+        // The UI passes names as listed (stored: "MyDb"); a typed unquoted name folds to upper case.
+        var used = await UseFirstThatExistsAsync(SnowflakeSql.NameCandidates(database), n => "USE DATABASE " + SnowflakeSql.AlwaysQuote(n), ct).ConfigureAwait(false);
+        CurrentDatabase = string.IsNullOrEmpty(_conn.Database) ? used : _conn.Database;
+    }
+
+    /// <summary>Runs the USE statement of each spelling in turn: the first that succeeds wins; the last one's error is the answer.</summary>
+    private async Task<string> UseFirstThatExistsAsync(IReadOnlyList<string> candidates, Func<string, string> sql, CancellationToken ct)
+    {
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                await using var cmd = CreateCommand(sql(candidates[i]));
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                return candidates[i];
+            }
+            catch (SnowflakeDbException) when (i < candidates.Count - 1)
+            {
+                // does not exist under this spelling: try the next
+            }
+        }
     }
 
     // ------------------------------------------------------------------ default schema (USE SCHEMA)
@@ -250,20 +267,18 @@ public sealed class SnowflakeSession : AdoSessionBase
     protected override async Task ChangeSchemaCoreAsync(string? schema, CancellationToken ct)
     {
         var target = schema ?? _startupSchema ?? throw EngineException.Validation("The session started without a schema to return to.");
-        // A DB.SCHEMA pair is taken as typed; a bare name stays in the current database.
-        var path = target.Contains('.') && !target.TrimStart().StartsWith('"')
-            ? string.Join('.', target.Split('.', 2).Select(p => SnowflakeSql.AlwaysQuote(SnowflakeSql.Normalize(p.Trim()))))
-            : SnowflakeSql.AlwaysQuote(SnowflakeSql.Normalize(target));
-        await using (var cmd = CreateCommand("USE SCHEMA " + path))
+        // A typed DB.SCHEMA pair is taken as typed; a single name is a schema of the current database, as listed (stored) or typed.
+        var pair = target.Contains('.') && !target.TrimStart().StartsWith('"');
+        IReadOnlyList<string> candidates = pair
+            ? [string.Join('.', target.Split('.', 2).Select(p => SnowflakeSql.AlwaysQuote(SnowflakeSql.Normalize(p.Trim()))))]
+            : SnowflakeSql.NameCandidates(target).Select(SnowflakeSql.AlwaysQuote).ToList();
+        try
         {
-            try
-            {
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-            catch (SnowflakeDbException ex)
-            {
-                throw new EngineException(400, SnowflakeErrors.Code(ex.ErrorCode), SnowflakeErrors.CleanMessage(ex.Message));
-            }
+            await UseFirstThatExistsAsync(candidates, path => "USE SCHEMA " + path, ct).ConfigureAwait(false);
+        }
+        catch (SnowflakeDbException ex)
+        {
+            throw new EngineException(400, SnowflakeErrors.Code(ex.ErrorCode), SnowflakeErrors.CleanMessage(ex.Message));
         }
         await ReadSchemaCoreAsync(ct).ConfigureAwait(false);
         var db = _conn.Database;

@@ -11,10 +11,19 @@ export default function SnowflakeTableOptions({ table, existing, disabled, onCha
     onChange(next);
   };
   const transient = extra.kind === 'transient';
+  const maxDays = transient ? 1 : 90; // a transient table has at most 1 day of Time Travel
+  const setTransient = (on: boolean) => {
+    const next = { ...extra };
+    if (on) {
+      next.kind = 'transient';
+      if (Number(next.retentionDays) > 1) next.retentionDays = '1';
+    } else delete next.kind;
+    onChange(next);
+  };
   return (
     <div className="dz-engine" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', padding: '6px 12px', borderBottom: '1px solid var(--border)' }} data-testid="sf-table-options">
       <label className="check sm" title="A transient table has no Fail-safe and at most 1 day of Time Travel (fixed when the table is created)">
-        <input type="checkbox" checked={transient} disabled={disabled || existing} onChange={(e) => set('kind', e.target.checked ? 'transient' : null)} />
+        <input type="checkbox" checked={transient} disabled={disabled || existing} onChange={(e) => setTransient(e.target.checked)} />
         TRANSIENT
       </label>
       <label className="dz-field" title="DATA_RETENTION_TIME_IN_DAYS: Time Travel retention, 0 to 90 days (empty = the schema's default)">
@@ -24,10 +33,10 @@ export default function SnowflakeTableOptions({ table, existing, disabled, onCha
           style={{ width: 70 }}
           type="number"
           min={0}
-          max={transient ? 1 : 90}
+          max={maxDays}
           value={extra.retentionDays ?? ''}
           disabled={disabled}
-          onChange={(e) => set('retentionDays', e.target.value === '' ? null : String(Math.max(0, Math.min(90, Math.floor(Number(e.target.value) || 0)))))}
+          onChange={(e) => set('retentionDays', e.target.value === '' ? null : String(Math.max(0, Math.min(maxDays, Math.floor(Number(e.target.value) || 0)))))}
         />
       </label>
       <label className="check sm" title="CHANGE_TRACKING: lets streams and CHANGES queries read the table's changes">

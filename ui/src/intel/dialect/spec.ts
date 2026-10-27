@@ -41,6 +41,8 @@ export interface LexTraits {
   backtickIdent?: boolean;
   /** `# …` is a line comment (MySQL, ClickHouse). */
   hashComment?: boolean;
+  /** `// …` is a line comment (Snowflake; CQL has its own hook). */
+  slashComment?: boolean;
   /** A backslash escapes the next character inside '…' (MySQL, ClickHouse, Snowflake); '' still doubles. */
   backslashEscapes?: boolean;
   /** `$$…$$` / `$tag$…$tag$` string bodies (Snowflake; PostgreSQL has them built in). */

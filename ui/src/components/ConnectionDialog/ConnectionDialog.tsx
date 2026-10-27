@@ -31,6 +31,9 @@ function fieldText(providerId: string | undefined, f: FormField): FormField {
   return o ? { ...f, label: o.label ?? f.label, help: o.help ?? f.help } : f;
 }
 
+/** The field key of the profile's main secret (the password); other password-typed fields travel as props (engine D12). */
+const MAIN_SECRET = 'password';
+
 export function isFieldVisible(f: FormField, values: Values): boolean {
   if (!f.visibleWhen) return true;
   return Object.entries(f.visibleWhen).every(([k, v]) => String(values[k] ?? '') === String(v));
@@ -117,6 +120,8 @@ export function ConnectionDialog({ state, onClose }: Props) {
   const [savePassword, setSavePassword] = useState(editing?.savePassword ?? true);
   /** null = keep the stored password (edit) / none. */
   const [password, setPassword] = useState<string | null>(null);
+  /** Extra password-typed fields (key passphrase, OAuth token, API key…): sent as props, which the engine keeps in the secret store; empty = keep. */
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -148,7 +153,7 @@ export function ConnectionDialog({ state, onClose }: Props) {
     for (const f of visible) {
       if (!f.required) continue;
       if (f.type === 'password') {
-        if (!password && !hasStored) e[f.key] = `${f.label} is required`;
+        if (f.key === MAIN_SECRET ? !password && !hasStored : !secrets[f.key] && !isEdit) e[f.key] = `${f.label} is required`;
         continue;
       }
       const v = values[f.key];
@@ -165,7 +170,11 @@ export function ConnectionDialog({ state, onClose }: Props) {
   const cleanProps = (): Values => {
     const out: Values = {};
     for (const f of fields) {
-      if (f.type === 'password' || !isFieldVisible(f, values)) continue;
+      if (!isFieldVisible(f, values)) continue;
+      if (f.type === 'password') {
+        if (f.key !== MAIN_SECRET && secrets[f.key]) out[f.key] = secrets[f.key];
+        continue;
+      }
       if (values[f.key] !== undefined) out[f.key] = values[f.key];
     }
     return out;
@@ -316,11 +325,12 @@ export function ConnectionDialog({ state, onClose }: Props) {
                 field={f}
                 value={values[f.key]}
                 error={errors[f.key]}
-                password={password}
-                hasStoredPassword={hasStored}
+                password={f.key === MAIN_SECRET ? password : secrets[f.key] ?? ''}
+                hasStoredPassword={f.key === MAIN_SECRET ? hasStored : isEdit}
                 onChange={(v) => setValue(f.key, v)}
                 onPassword={(v) => {
-                  setPassword(v);
+                  if (f.key === MAIN_SECRET) setPassword(v);
+                  else setSecrets((prev) => ({ ...prev, [f.key]: v ?? '' }));
                   setTestResult(null);
                 }}
               />

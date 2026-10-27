@@ -120,6 +120,7 @@ export class Binder {
     }
     const pred = ref.kind === 'function' ? (e: ObjectEntry) => e.type === 'tablefunc' || e.isTabular : TABULAR;
     const raw = this.index.resolveRaw(parts, (e) => e.type === 'synonym' || pred(e));
+    const sfFn = ref.kind === 'function' && this.index.spec.id === 'snowflake'; // FLATTEN / SPLIT_TO_TABLE output columns
     const pgFn = ref.kind === 'function' && this.index.spec.id === 'pgsql';
     if (raw) {
       const syn = raw.type === 'synonym' ? raw : null;
@@ -139,10 +140,10 @@ export class Binder {
         return this.mk(ref, { display: `PUBLIC.${pub.name}`, shortName: pub.name, entry: pub, columns: () => pub.columns() });
       }
     }
-    if (pgFn && parts.length <= 2) {
+    if ((pgFn || sfFn) && parts.length <= 2) {
       // built-in set-returning function: generate_series(…) AS g(n), jsonb_each(…), unnest(…) WITH ORDINALITY
       const f = this.index.spec.functionMap.get(last.text.toUpperCase());
-      if (f) {
+      if (f && (pgFn || f.columns)) {
         const base = (f.columns ?? [ref.alias ?? f.name]).map((n, i): ColumnDef => ({ name: n, type: '', ordinal: i + 1 }));
         return this.mk(ref, { display: `${f.name}()`, shortName: f.name, columns: () => functionColumns(base, ref) });
       }
@@ -340,7 +341,7 @@ export class Binder {
       if (obj && obj.type === 'package') return { kind: 'package', entry: obj };
       if (obj && obj.type === 'sequence') return { kind: 'sequence', entry: obj };
       if (sch) return { kind: 'schema', schema: sch, name: sch.name };
-      const db = idx.spec.id === 'tsql' ? idx.resolveDatabase(q.text, q.quoted) : null;
+      const db = idx.spec.id === 'tsql' || idx.spec.id === 'snowflake' ? idx.resolveDatabase(q.text, q.quoted) : null;
       if (db) return { kind: 'database', name: q.text, db };
       if (obj) return { kind: 'object', entry: obj };
       const temp = this.symbols.tables.get(q.text.toUpperCase());
@@ -349,7 +350,7 @@ export class Binder {
     }
     if (parts.length === 2) {
       const [a, b] = parts;
-      const sch = b.text === '' && idx.spec.id === 'tsql' ? undefined : idx.schema(a.text, a.quoted);
+      const sch = b.text === '' && (idx.spec.id === 'tsql' || idx.spec.id === 'snowflake') ? undefined : idx.schema(a.text, a.quoted);
       if (sch) {
         const obj = idx.resolve([a, b], (e) => e.type === 'package' || e.type === 'sequence' || e.isTabular);
         if (obj?.type === 'package') return { kind: 'package', entry: obj };
@@ -357,7 +358,7 @@ export class Binder {
         if (obj) return { kind: 'object', entry: obj };
         return null;
       }
-      const db = idx.spec.id === 'tsql' ? idx.resolveDatabase(a.text, a.quoted) : null;
+      const db = idx.spec.id === 'tsql' || idx.spec.id === 'snowflake' ? idx.resolveDatabase(a.text, a.quoted) : null;
       if (db) {
         // `db.schema.` / `db..` (the database's default schema): that database's catalog, which may not be loaded yet
         const ix = db.index;
@@ -366,7 +367,7 @@ export class Binder {
       }
       return null;
     }
-    if (parts.length === 3 && (idx.spec.id === 'tsql' || idx.spec.id === 'pgsql')) {
+    if (parts.length === 3 && (idx.spec.id === 'tsql' || idx.spec.id === 'pgsql' || idx.spec.id === 'snowflake')) {
       const obj = idx.resolve(parts, TABULAR);
       if (obj) return { kind: 'object', entry: obj };
     }

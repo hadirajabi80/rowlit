@@ -7,6 +7,8 @@ import { tokenize } from '../lexer/lexer';
 import { createIntel } from '../index';
 import { rulesFor } from '../../format/layout';
 import { formatSql } from '../../format';
+import type { CatalogSnapshot } from '../../api/types';
+import { doc, fixtures, labels } from './helpers';
 
 const kinds = (s: string) => tokenize(s, getSpec('snowflake')).filter((t) => t.kind !== 'eof' && t.kind !== 'ws').map((t) => `${t.kind}:${t.text}`);
 
@@ -26,6 +28,14 @@ describe('Snowflake lexer', () => {
   it('staged-file columns with a path are identifiers; $$ bodies and backslash escapes are strings', () => {
     expect(kinds('SELECT $1:sku FROM @stage')).toEqual(['keyword:SELECT', 'ident:$1', 'op::', 'ident:sku', 'keyword:FROM', 'op:@', 'ident:stage']);
     expect(kinds("SELECT 'it\\'s', $$a;b$$")).toEqual(['keyword:SELECT', "string:'it\\'s'", 'punct:,', 'string:$$a;b$$']);
+  });
+
+  it('// starts a line comment (as -- does): quotes and semicolons inside it are text', () => {
+    expect(kinds("SELECT 1 // it's; not 'a string\n, 2")).toEqual(['keyword:SELECT', 'number:1', "comment:// it's; not 'a string", 'punct:,', 'number:2']);
+    const i = createIntel('snowflake');
+    i.setDocument('sf://c', "// a; b 'x\nSELECT 1; // c; d\nSELECT 2");
+    expect(i.statements('sf://c').map((st) => st.text.split('\n').pop())).toEqual(['SELECT 1', 'SELECT 2']);
+    expect(i.classify('// drop table x\nSELECT 1')).toBe('select');
   });
 
   it('folds unquoted names to upper case', () => {
@@ -115,5 +125,63 @@ describe('Snowflake formatter', () => {
     const out = formatSql('select * from t qualify row_number() over (partition by a order by b) = 1 and x > 0', 'snowflake');
     expect(out.warnings).toEqual([]);
     expect(out.text).toMatch(/\nQUALIFY ROW_NUMBER\(\) OVER \(PARTITION BY a ORDER BY b\) = 1\n {4}AND x > 0$/);
+  });
+});
+
+// The shop fixture is a copy of the SQLite one (lower-case names); Snowflake stores unquoted names in upper case.
+function upperShop(): CatalogSnapshot {
+  const j = JSON.parse(JSON.stringify(fixtures.snowflake)) as {
+    database: string; defaultSchema: string; databases: string[];
+    schemas: { name: string; objects: { n: string; c?: [string, ...unknown[]][]; pk?: string[]; fk?: { cols: string[]; rs: string; rt: string; rcols: string[] }[] }[] }[];
+  };
+  const U = (x: string) => x.toUpperCase();
+  j.database = 'SHOP'; j.defaultSchema = 'MAIN'; j.databases = ['SHOP', 'ARCHIVE'];
+  for (const sc of j.schemas) {
+    sc.name = U(sc.name);
+    for (const o of sc.objects) {
+      o.n = U(o.n);
+      o.c = o.c?.map((c) => [U(c[0]), ...c.slice(1)] as [string, ...unknown[]]);
+      o.pk = o.pk?.map(U);
+      for (const f of o.fk ?? []) { f.cols = f.cols.map(U); f.rs = U(f.rs); f.rt = U(f.rt); f.rcols = f.rcols.map(U); }
+    }
+  }
+  return j as unknown as CatalogSnapshot;
+}
+
+describe('Snowflake IntelliSense', () => {
+  let intel: ReturnType<typeof createIntel>;
+  beforeAll(() => {
+    intel = createIntel('snowflake');
+    intel.setCatalog(upperShop());
+  });
+  const at = (input: string) => {
+    const d = doc(intel, input);
+    return labels(intel.complete(d.uri, d.offset).items).filter((l) => l !== '*');
+  };
+
+  it('QUALIFY is a clause: its expression completes the columns of the FROM sources (also without a WHERE)', () => {
+    expect(at('SELECT * FROM orders o QUALIFY ROW_NUMBER() OVER (ORDER BY |')).toEqual(expect.arrayContaining(['ID', 'TOTAL']));
+    expect(at('SELECT * FROM orders o QUALIFY ROW_NUMBER() OVER (PARTITION BY o.| ORDER BY id) = 1')).toEqual(['ID', 'CUSTOMER_ID', 'ORDER_DATE', 'TOTAL']);
+    expect(at('SELECT * FROM orders o GROUP BY ALL HAVING COUNT(*) > 1 QUALIFY o.|')).toContain('TOTAL');
+  });
+
+  it('table functions: FLATTEN / SPLIT_TO_TABLE output columns, also inside TABLE(…)', () => {
+    const cols = ['SEQ', 'KEY', 'PATH', 'INDEX', 'VALUE', 'THIS'];
+    expect(at('SELECT f.| FROM orders o, LATERAL FLATTEN(input => o.id) f')).toEqual(cols);
+    expect(at('SELECT f.| FROM orders o, TABLE(FLATTEN(input => o.id)) f')).toEqual(cols);
+    expect(at("SELECT s.| FROM TABLE(SPLIT_TO_TABLE('a,b', ',')) s")).toEqual(['SEQ', 'INDEX', 'VALUE']);
+  });
+
+  it('SAMPLE and Time Travel clauses do not hide the alias', () => {
+    expect(at('SELECT * FROM orders o SAMPLE (10) WHERE o.|')).toContain('TOTAL');
+    expect(at('SELECT * FROM orders AT (OFFSET => -60) o WHERE o.|')).toContain('TOTAL');
+    expect(at('SELECT * FROM orders o TABLESAMPLE BERNOULLI (10 ROWS) REPEATABLE (7) WHERE o.|')).toContain('TOTAL');
+  });
+
+  it('three-part names of the console database: tables after db.schema., columns of db.schema.table', () => {
+    expect(at('SELECT * FROM SHOP.MAIN.|')).toEqual(expect.arrayContaining(['ORDERS', 'CUSTOMERS']));
+    expect(at('SELECT * FROM shop.main.|')).toEqual(expect.arrayContaining(['ORDERS']));
+    expect(at('SELECT * FROM SHOP.MAIN.ORDERS o WHERE o.|')).toContain('TOTAL');
+    expect(at('SELECT SHOP.MAIN.ORDERS.| FROM SHOP.MAIN.ORDERS')).toContain('TOTAL');
   });
 });

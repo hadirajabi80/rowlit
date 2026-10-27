@@ -122,4 +122,36 @@ describe('ConnectionDialog', () => {
     expect(c.name).toBe('Production');
     expect(c.hasPassword).toBe(true);
   });
+
+  it('sends extra password-typed fields (key passphrase, OAuth token) as props, never as the main password', async () => {
+    const user = userEvent.setup();
+    const saved = { id: 'c_new', name: 'sf', providerId: 'snowflake', props: {}, readOnly: false, savePassword: true, hasPassword: false } as never;
+    const save = vi.fn().mockResolvedValue(saved);
+    useConnections.setState({ save });
+    render(<ConnectionDialog state={{ mode: 'new', providerId: 'snowflake', connectAfter: false }} onClose={() => {}} />);
+    await user.type(screen.getByLabelText(/^Account/), 'xy12345.eu-central-1');
+    await user.type(screen.getByLabelText('User'), 'JSMITH');
+    await user.click(screen.getByLabelText('Authentication'));
+    await user.click(screen.getAllByRole('option').find((o) => o.getAttribute('data-value') === 'snowflake_jwt')!);
+    await user.type(screen.getByLabelText('Private key file'), '/keys/rsa_key.p8');
+    await user.type(screen.getByLabelText('Key passphrase'), 's3cret;pass');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    let input = save.mock.calls[0][0];
+    expect(input.props).toMatchObject({ authenticator: 'snowflake_jwt', privateKeyFile: '/keys/rsa_key.p8', privateKeyPassphrase: 's3cret;pass' });
+    expect(input.password).toBeNull();
+    expect(input.props.token).toBeUndefined();
+
+    // switching to OAuth: only the token field is sent (the passphrase belongs to the key-pair method)
+    save.mockClear();
+    await user.click(screen.getByLabelText('Authentication'));
+    await user.click(screen.getAllByRole('option').find((o) => o.getAttribute('data-value') === 'oauth')!);
+    await user.type(screen.getByLabelText('OAuth token'), 'tok-123');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    input = save.mock.calls[0][0];
+    expect(input.props).toMatchObject({ authenticator: 'oauth', token: 'tok-123' });
+    expect(input.props.privateKeyPassphrase).toBeUndefined();
+    expect(input.password).toBeNull();
+  });
 });

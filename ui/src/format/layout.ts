@@ -378,9 +378,21 @@ export class Layout {
     return false;
   }
 
+  /** Snowflake `@stage/path/file.csv` (also `@~`, `@%table`, `@db.s.stage`): token k continues a stage reference written without blanks. */
+  private inStageRef(k: number): boolean {
+    if (this.d !== 'snowflake') return false;
+    for (let j = k; j > 0; j--) {
+      const cur = this.S(j)!, prev = this.S(j - 1)!;
+      if (prev.t.end !== cur.t.start) return false;
+      if (prev.kind === 'op' && prev.text === '@') return true;
+    }
+    return false;
+  }
+
   private spaceBefore(k: number): boolean {
     const a = this.S(k - 1), b = this.S(k)!;
     if (!a) return false;
+    if (this.inStageRef(k)) return false;
     if (this.prevUnary) return false;
     const at = a.text, bt = b.text;
     if (b.kind === 'punct' && (bt === ',' || bt === ';' || bt === ')' || bt === '.')) return false;
@@ -459,6 +471,7 @@ export class Layout {
 
   private caseText(k: number, kw: boolean): string {
     const t = this.S(k)!;
+    if (this.inStageRef(k)) return t.text; // a stage path is case-sensitive
     const next = this.S(k + 1);
     const call = !!next && next.kind === 'punct' && next.text === '(' && this.S(k - 1)?.text !== '.';
     if (t.kind === 'keyword' || t.kind === 'batchSep') {

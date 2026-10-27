@@ -421,7 +421,7 @@ export function foreignCatalogInput(d: DbCatalog, dialect: Dialect): ForeignCata
     snapshot = listSnapshots.get(d.schemasResp) ?? null;
     if (!snapshot) {
       snapshot = {
-        connectionId: d.connectionId, dialect: d.dialect ?? dialect, database: d.database, defaultSchema: d.schemasResp.defaultSchema ?? d.defaultSchema ?? 'dbo',
+        connectionId: d.connectionId, dialect: d.dialect ?? dialect, database: d.database, defaultSchema: d.schemasResp.defaultSchema ?? d.defaultSchema ?? (dialect === 'snowflake' ? 'PUBLIC' : 'dbo'),
         version: 0, databases: [], schemas: [], schemaNames: d.schemasResp.schemas.map((s) => s.name),
       };
       listSnapshots.set(d.schemasResp, snapshot);
@@ -449,7 +449,7 @@ const NO_FOREIGN: ForeignCatalogInput[] = [];
 
 /** `foreignCatalogInputs` as a hook: re-renders only when one of those inputs changes. SQL Server consoles only. */
 export function useForeignCatalogs(connectionId: string | null | undefined, exceptDb: string | null | undefined, dialect: Dialect | null | undefined): ForeignCatalogInput[] {
-  return useCatalog(useShallow((s) => (connectionId && dialect === 'tsql' ? foreignCatalogInputs(s.dbs, connectionId, exceptDb, dialect) : NO_FOREIGN)));
+  return useCatalog(useShallow((s) => (connectionId && (dialect === 'tsql' || dialect === 'snowflake') ? foreignCatalogInputs(s.dbs, connectionId, exceptDb, dialect) : NO_FOREIGN)));
 }
 
 /** Requests are coalesced for this long: typing `Other.` and a few more characters asks the server once. */

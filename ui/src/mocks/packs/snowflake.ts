@@ -34,7 +34,7 @@ export const snowflakeProvider: ProviderInfo = {
         { value: 'externalbrowser', label: 'Browser SSO (externalbrowser)' }, { value: 'oauth', label: 'OAuth access token' },
       ] },
       { key: 'password', label: 'Password', type: 'password', visibleWhen: when('snowflake') },
-      { key: 'privateKeyFile', label: 'Private key file', type: 'file', visibleWhen: when('snowflake_jwt'), fileFilter: '*.p8;*.pem;*.key', help: 'PKCS#8 private key (rsa_key.p8) whose public key is set on the user (ALTER USER … SET RSA_PUBLIC_KEY).' },
+      { key: 'privateKeyFile', label: 'Private key file', type: 'file', visibleWhen: when('snowflake_jwt'), fileFilter: '*.p8;*.pem;*.key', placeholder: '/path/to/rsa_key.p8', help: 'PKCS#8 private key (rsa_key.p8) whose public key is set on the user (ALTER USER … SET RSA_PUBLIC_KEY).' },
       { key: 'privateKeyPassphrase', label: 'Key passphrase', type: 'password', visibleWhen: when('snowflake_jwt'), help: 'Only for an encrypted key (ENCRYPTED PRIVATE KEY).' },
       { key: 'token', label: 'OAuth token', type: 'password', visibleWhen: when('oauth'), help: 'Access token from your identity provider (it expires: paste a fresh one when Snowflake rejects it).' },
       { key: 'warehouse', label: 'Warehouse', type: 'text', placeholder: 'COMPUTE_WH' },

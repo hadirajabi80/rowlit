@@ -1,14 +1,15 @@
 // plan-batch3 WP-SF: Snowflake commands and views against the MSW mock engine (mocks/packs/snowflake.ts).
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { api } from '../../../api/client';
 import { isEnabled, runCommand } from '../../../commands/registry';
 import { MOCK_WAREHOUSES } from '../../../mocks/packs/snowflake';
 import { useConnections } from '../../../store/connections';
-import { useTabs, type ViewTab } from '../../../store/tabs';
+import { useSessions } from '../../../store/sessions';
+import { useTabs, type ConsoleTab, type ViewTab } from '../../../store/tabs';
 import { installMockEngine } from '../../../test/mockServer';
 import { registerSnowflakeCommands, SF_VIEWS } from '../commands';
-import { formatBytes, formatMs, queryText } from '../format';
+import { foldName, formatBytes, formatMs, queryText } from '../format';
 import SnowflakeViews from '../views';
 
 const CID = 'c_snowflake';
@@ -63,6 +64,20 @@ describe('Snowflake module', () => {
     expect(screen.getAllByRole('button', { name: /execute/ }).length).toBeGreaterThan(0);
   });
 
+  it('session chips: the schema and database the console runs on are remembered on its tab', async () => {
+    const tabId = useTabs.getState().newConsole({ connectionId: CID, database: 'SHOP' });
+    await useSessions.getState().ensure(tabId, CID, 'SHOP', 'auto');
+    await runCommand('snowflake.session', target);
+    const tab = useTabs.getState().tabs.find((t) => t.kind === 'view' && t.view === SF_VIEWS.session)!;
+    render(<Host id={tab.id} />);
+    const schema = await screen.findByRole('combobox', { name: 'Schema' });
+    await waitFor(() => expect(within(schema).getAllByRole('option').length).toBeGreaterThan(1));
+    const other = within(schema).getAllByRole('option').map((o) => o.textContent ?? '').find((n) => n !== 'PUBLIC')!;
+    fireEvent.change(schema, { target: { value: other } });
+    await waitFor(() => expect((useTabs.getState().tabs.find((t) => t.id === tabId) as ConsoleTab).schema).toBe(other));
+    expect(useSessions.getState().forTab(tabId)?.schema).toBe(other);
+  });
+
   it('session context endpoints switch warehouse and schema', async () => {
     const ctx = await api.snowflake.sessionContext('s_test');
     expect(ctx.warehouse).toBe('COMPUTE_WH');
@@ -77,8 +92,18 @@ describe('helpers', () => {
     expect(formatMs('47')).toBe('47 ms');
     expect(formatMs('1205')).toBe('1.2 s');
     expect(formatMs('125000')).toBe('2 min 5 s');
+    expect(formatMs('119600')).toBe('2 min 0 s'); // no "1 min 60 s"
     expect(formatBytes('5632')).toBe('5.5 KB');
     expect(formatBytes('')).toBe('');
+  });
+
+  it('folds typed names the way Snowflake stores them (profile database / schema, objects view inputs)', () => {
+    expect(foldName('shop')).toBe('SHOP');
+    expect(foldName('  Shop ')).toBe('SHOP');
+    expect(foldName('"MyDb"')).toBe('MyDb');
+    expect(foldName('"a""b"')).toBe('a"b');
+    expect(foldName('  ')).toBeUndefined();
+    expect(foldName(undefined)).toBeUndefined();
   });
 
   it('recovers the statement of a failed history entry', () => {
