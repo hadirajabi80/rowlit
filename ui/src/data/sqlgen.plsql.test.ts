@@ -58,9 +58,10 @@ describe('Oracle ROWID row identity (table without a primary key)', () => {
     expect(q.sql).toBe('SELECT NOPK.*, ROWID\nFROM NOPK\nWHERE ROWID = :k1 OR ROWID = :k2');
   });
 
-  it('isRowidColumn is Oracle-only', () => {
+  it('isRowidColumn covers Oracle and SQLite (see sqlgen.sqlite.test.ts), no other dialect', () => {
     expect(isRowidColumn(ROWID, 'plsql')).toBe(true);
-    expect(isRowidColumn({ name: 'rowid' }, 'sqlite')).toBe(false);
+    expect(isRowidColumn({ name: 'rowid' }, 'sqlite')).toBe(true);
+    expect(isRowidColumn({ name: 'rowid' }, 'tsql')).toBe(false);
     expect(isRowidColumn(B, 'plsql')).toBe(false);
   });
 });

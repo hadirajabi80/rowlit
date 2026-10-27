@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using DbStudio.Core.Services;
 using DbStudio.Import.Parsing;
+using DbStudio.Import.Run;
 using Microsoft.Data.Sqlite;
 
 namespace DbStudio.Import.Tests;
@@ -75,6 +76,31 @@ public sealed class SqliteImportTests : IDisposable
         Assert.Equal("completed", s.Outcome);
         Assert.Equal("Dan", await _h.ScalarAsync(cid, "SELECT name FROM t WHERE id = 10"));
         Assert.Equal(3L, await _h.ScalarAsync(cid, "SELECT COUNT(*) FROM t"));
+    }
+
+    [Fact]
+    public async Task Imports_into_an_attached_database()
+    {
+        // The target schema is an attached database: the import connection has to attach it like a session does.
+        var cid = _h.AddConnection(new Core.Models.ConnectionProfile
+        {
+            Name = "att",
+            ProviderId = "sqlite",
+            Props = new()
+            {
+                ["path"] = Path.Combine(_d.Path, "main.db"),
+                ["createIfMissing"] = true,
+                ["attach"] = new System.Text.Json.Nodes.JsonArray($"arch={Path.Combine(_d.Path, "arch.db")}"),
+            },
+        }, null);
+        var p = await _h.PreviewAsync(_d.File("a.csv", "id,name\n1,Ann\n2,Bob\n"));
+        var s = await _h.RunAsync(cid, Harness.Request(p, "people", "arch", null, create: true));
+        Assert.Equal("completed", s.Outcome);
+        Assert.Equal(2, s.RowsWritten);
+        Assert.Contains("\"arch\".\"people\"", s.Ddl);
+        Assert.Equal(2L, await _h.ScalarAsync(cid, "SELECT COUNT(*) FROM arch.people"));
+        var info = await _h.Service.TableInfoAsync(cid, new TableRefDto { Schema = "arch", Table = "people" }, default);
+        Assert.True(info.Exists);
     }
 
     [Fact]

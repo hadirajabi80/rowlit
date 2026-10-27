@@ -31,24 +31,45 @@ public sealed partial class SqliteDesignerDatabase : IDesignerDatabase
         return new DdlScriptContext(version, SqliteDdlScripter.MainSchema, dependents);
     }
 
-    /// <summary>Triggers on the table, plus views and triggers of other tables whose SQL mentions it.</summary>
+    /// <summary>
+    /// Triggers on the table, plus views and triggers of other tables whose SQL mentions it, plus (transitively) the views and
+    /// triggers mentioning one of those views: a rebuild's RENAME makes SQLite re-check every view and trigger of the schema
+    /// ("error in view v: no such table"), so a view over a dependent view must be dropped and recreated with it.
+    /// </summary>
     internal static async Task<IReadOnlyList<DependentObject>> ReadDependentsAsync(SqliteConnection c, string schema, string table, CancellationToken ct)
     {
-        var list = new List<DependentObject>();
-        var word = new Regex(@"(?<![\w$])[""\[`]?" + Regex.Escape(table) + @"[""\]`]?(?![\w$])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT type, name, tbl_name, sql FROM {SqliteNames.Quote(schema)}.sqlite_master WHERE type IN ('trigger','view') AND sql IS NOT NULL ORDER BY type DESC, name";
-        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        var all = new List<(string Type, string Name, string Table, string Sql)>();
+        await using (var cmd = c.CreateCommand())
         {
-            var type = r.GetString(0);
-            var name = r.GetString(1);
-            var tblName = r.GetString(2);
-            var sql = r.GetString(3);
-            var onTable = type == "trigger" && tblName.Equals(table, StringComparison.OrdinalIgnoreCase);
-            if (onTable || word.IsMatch(sql)) list.Add(new DependentObject(type, name, sql, onTable));
+            cmd.CommandText = $"SELECT type, name, tbl_name, sql FROM {SqliteNames.Quote(schema)}.sqlite_master WHERE type IN ('trigger','view') AND sql IS NOT NULL ORDER BY type DESC, name";
+            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await r.ReadAsync(ct).ConfigureAwait(false)) all.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3)));
         }
-        return list;
+
+        static Regex Word(string name) => new(@"(?<![\w$])[""\[`]?" + Regex.Escape(name) + @"[""\]`]?(?![\w$])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var found = new HashSet<int>();
+        var tableWord = Word(table);
+        for (var i = 0; i < all.Count; i++)
+            if ((all[i].Type == "trigger" && all[i].Table.Equals(table, StringComparison.OrdinalIgnoreCase)) || tableWord.IsMatch(all[i].Sql)) found.Add(i);
+
+        // Views (and the triggers on them) found so far pull in whatever mentions their names.
+        var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var i in found.Where(i => all[i].Type == "view" && !expanded.Contains(all[i].Name)).ToList())
+            {
+                expanded.Add(all[i].Name);
+                var viewWord = Word(all[i].Name);
+                for (var j = 0; j < all.Count; j++)
+                    if (!found.Contains(j) && viewWord.IsMatch(all[j].Sql)) { found.Add(j); grew = true; }
+            }
+        }
+
+        return found.OrderBy(i => i)
+            .Select(i => new DependentObject(all[i].Type, all[i].Name, all[i].Sql,
+                all[i].Type == "trigger" && all[i].Table.Equals(table, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
     }
 
     public async Task<TableModel> ReadTableAsync(ConnectionProfile profile, string? password, string? database, string? schema, string name, CancellationToken ct)
@@ -243,6 +264,11 @@ public sealed partial class SqliteDesignerDatabase : IDesignerDatabase
             body.Add(sql ?? "");
         }
 
+        // PRAGMA foreign_key_check reports every violation of the database, including ones that were there before (data loaded
+        // with foreign keys off): only violations that are new compared to this baseline fail the apply.
+        Dictionary<(string Table, string Parent), int>? baseline = null;
+        if (body.Any(s => ForeignKeyCheckPragma().IsMatch(s))) baseline = CountViolations(await ReadViolationsAsync(c, ct).ConfigureAwait(false));
+
         var before = Convert.ToInt64(await ScalarAsync(c, "PRAGMA foreign_keys", ct).ConfigureAwait(false));
         if (fkOff == true) await ExecAsync(c, "PRAGMA foreign_keys = OFF", ct).ConfigureAwait(false);
         try
@@ -261,10 +287,11 @@ public sealed partial class SqliteDesignerDatabase : IDesignerDatabase
                         await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                         return;
                     }
-                    var problems = new List<string>();
-                    await using var r = await cmd.ExecuteReaderAsync(token).ConfigureAwait(false);
-                    while (await r.ReadAsync(token).ConfigureAwait(false) && problems.Count < 5)
-                        problems.Add($"{r.GetValue(0)} row {r.GetValue(1)} → {r.GetValue(2)}");
+                    var violations = new List<(string Table, string Row, string Parent)>();
+                    await using (var r = await cmd.ExecuteReaderAsync(token).ConfigureAwait(false))
+                        while (await r.ReadAsync(token).ConfigureAwait(false))
+                            violations.Add((Convert.ToString(r.GetValue(0)) ?? "", Convert.ToString(r.GetValue(1)) ?? "", Convert.ToString(r.GetValue(2)) ?? ""));
+                    var problems = NewViolations(violations, baseline).Take(5).Select(v => $"{v.Table} row {v.Row} → {v.Parent}").ToList();
                     if (problems.Count > 0)
                         throw new ForeignKeyCheckException("Foreign key check failed: " + string.Join("; ", problems) + ".");
                 },
@@ -282,6 +309,32 @@ public sealed partial class SqliteDesignerDatabase : IDesignerDatabase
     }
 
     private sealed class ForeignKeyCheckException(string message) : Exception(message);
+
+    private static async Task<List<(string Table, string Row, string Parent)>> ReadViolationsAsync(SqliteConnection c, CancellationToken ct)
+    {
+        var list = new List<(string, string, string)>();
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = "PRAGMA foreign_key_check";
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+            list.Add((Convert.ToString(r.GetValue(0)) ?? "", Convert.ToString(r.GetValue(1)) ?? "", Convert.ToString(r.GetValue(2)) ?? ""));
+        return list;
+    }
+
+    private static Dictionary<(string Table, string Parent), int> CountViolations(IEnumerable<(string Table, string Row, string Parent)> violations) =>
+        violations.GroupBy(v => (v.Table, v.Parent)).ToDictionary(g => g.Key, g => g.Count());
+
+    /// <summary>
+    /// Violations beyond those of the baseline. Row ids change across a rebuild, so the comparison is per (child table, parent
+    /// table): a group with more rows than before is reported in full, one with the same or fewer is not.
+    /// </summary>
+    internal static IEnumerable<(string Table, string Row, string Parent)> NewViolations(
+        IReadOnlyList<(string Table, string Row, string Parent)> now, Dictionary<(string Table, string Parent), int>? baseline)
+    {
+        if (baseline is null) return now;
+        var counts = CountViolations(now);
+        return now.Where(v => counts[(v.Table, v.Parent)] > baseline.GetValueOrDefault((v.Table, v.Parent)));
+    }
 
     private static async Task<object?> ScalarAsync(SqliteConnection c, string sql, CancellationToken ct)
     {

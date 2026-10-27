@@ -68,11 +68,13 @@ internal static class SqliteConnections
         var result = new List<(string, string)>();
         foreach (var entry in profile.GetList("attach"))
         {
+            if (string.IsNullOrWhiteSpace(entry)) continue;
             var eq = entry.IndexOf('=');
-            if (eq <= 0 || eq == entry.Length - 1) continue;
-            var name = entry[..eq].Trim();
-            var path = entry[(eq + 1)..].Trim().Trim('"');
-            if (name.Length == 0 || path.Length == 0) continue;
+            var name = eq > 0 ? entry[..eq].Trim() : "";
+            var path = eq > 0 ? entry[(eq + 1)..].Trim().Trim('"') : "";
+            // A malformed entry would otherwise be skipped silently and the schema just never show up.
+            if (name.Length == 0 || path.Length == 0)
+                throw new ArgumentException($"Attached database \"{entry.Trim()}\" must be written name=path, for example archive={(OperatingSystem.IsWindows() ? @"C:\data\archive.db" : "/data/archive.db")}.");
             if (path != MemoryPath) path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
             result.Add((name, path));
         }
@@ -92,8 +94,13 @@ internal static class SqliteConnections
         // A file opened read-only must exist; a guarded session opens read-write (createIfMissing applies as before).
         var readOnly = forceReadOnly || profile.GetBool("readOnly") || (profile.ReadOnly && !guard);
         var mustExist = path != MemoryPath && (readOnly || !profile.GetBool("createIfMissing"));
+        if (path != MemoryPath && Directory.Exists(path))
+            throw new ArgumentException($"The path is a folder, not a database file: {path}");
         if (mustExist && !File.Exists(path))
             throw new FileNotFoundException($"Database file not found: {path}", path);
+        // Create-if-missing creates the file, not its folder: say so instead of the driver's "unable to open database file".
+        if (path != MemoryPath && !File.Exists(path) && Path.GetDirectoryName(path) is { Length: > 0 } folder && !Directory.Exists(folder))
+            throw new FileNotFoundException($"Cannot create the database file: the folder does not exist: {folder}", path);
 
         var connection = new SqliteConnection(BuildConnectionString(profile, forceReadOnly, guard));
         try
@@ -101,7 +108,8 @@ internal static class SqliteConnections
             await connection.OpenAsync(ct).ConfigureAwait(false);
             foreach (var (name, attachPath) in Attachments(profile))
             {
-                if (attachPath != MemoryPath && !File.Exists(attachPath) && readOnly)
+                // The attached file is opened with the main connection's mode: only a read-write-create connection creates it.
+                if (attachPath != MemoryPath && !File.Exists(attachPath) && (readOnly || !profile.GetBool("createIfMissing")))
                     throw new FileNotFoundException($"Attached database file not found: {attachPath}", attachPath);
                 await using var cmd = connection.CreateCommand();
                 cmd.CommandText = $"ATTACH DATABASE $path AS {SqliteNames.Quote(name)}";

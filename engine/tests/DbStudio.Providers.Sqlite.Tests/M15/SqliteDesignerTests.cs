@@ -310,6 +310,97 @@ public sealed class SqliteDesignerRoundTripTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Rebuild_WithRename_RepointsForeignKeysOfOtherTables()
+    {
+        // Renaming and redefining at once used to leave Orders.CustomerId pointing at the dropped "Customers" table, and the
+        // foreign key check then failed the whole apply.
+        var customers = await _db.ReadTableAsync(_profile, null, null, null, "Customers", CancellationToken.None);
+        var desired = customers with
+        {
+            Name = "Clients",
+            Columns = customers.Columns.Select(c => c.Name == "Phone" ? c with { Type = "VARCHAR(40)" } : c).ToList(),
+        };
+        await ApplyAsync(customers, desired, expectRebuild: true);
+        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE name IN ('Customers', 'Customers__new', 'Clients__new')"));
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('Orders') WHERE \"table\" = 'Clients'"));
+        Assert.Equal(SampleDatabase.OrderCount, await ScalarAsync("SELECT count(*) FROM Orders o JOIN Clients c ON c.Id = o.CustomerId"));
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE type = 'view' AND name = 'CustomerOrderTotals' AND sql LIKE '%Clients%'"));
+        Assert.Equal(SampleDatabase.CustomerCount, await ScalarAsync("SELECT count(*) FROM Clients"));
+        Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_check"));
+        // The sqlite_sequence row followed the table.
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM sqlite_sequence WHERE name = 'Clients'"));
+    }
+
+    [Fact]
+    public async Task Rebuild_WithAViewOverADependentView_Succeeds()
+    {
+        // TopCustomers reads CustomerOrderTotals (a view over Orders) and never names Orders: SQLite's RENAME still re-checks it.
+        await ScalarAsync("CREATE VIEW TopCustomers AS SELECT * FROM CustomerOrderTotals WHERE 1; SELECT 0");
+        var context = await _db.GetScriptContextAsync(_profile, null, null, "main", "Orders", CancellationToken.None);
+        Assert.Contains(context.Dependents!, d => d is { Type: "view", Name: "TopCustomers", OnTable: false });
+        var orders = await _db.ReadTableAsync(_profile, null, null, null, "Orders", CancellationToken.None);
+        var desired = orders with { Columns = orders.Columns.Select(c => c.Name == "Note" ? c with { Type = "VARCHAR(500)" } : c).ToList() };
+        await ApplyAsync(orders, desired, expectRebuild: true);
+        Assert.Equal(SampleDatabase.CustomerCount, await ScalarAsync("SELECT count(*) FROM TopCustomers"));
+    }
+
+    [Fact]
+    public async Task Rebuild_IgnoresViolationsThatWereThereBefore_ButNotNewOnes()
+    {
+        // Data loaded with foreign keys off: an orphan in an unrelated table must not block a rebuild.
+        await ScalarAsync("PRAGMA foreign_keys = OFF; CREATE TABLE P (Id INTEGER PRIMARY KEY); CREATE TABLE C (Id INTEGER PRIMARY KEY, PId INTEGER REFERENCES P (Id)); INSERT INTO C (PId) VALUES (99); SELECT 0");
+        var orders = await _db.ReadTableAsync(_profile, null, null, null, "Orders", CancellationToken.None);
+        var desired = orders with { Columns = orders.Columns.Select(c => c.Name == "Note" ? c with { Type = "VARCHAR(500)" } : c).ToList() };
+        await ApplyAsync(orders, desired, expectRebuild: true);
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_check"));
+
+        // A new violation still fails and rolls back.
+        var ex = await Assert.ThrowsAsync<DdlFailedException>(() => _db.ApplyAsync(_profile, null, new DdlApplyRequest(null,
+        [
+            "PRAGMA foreign_keys = OFF",
+            "INSERT INTO C (PId) VALUES (100)",
+            "PRAGMA foreign_key_check",
+            "PRAGMA foreign_keys = ON",
+        ], true), CancellationToken.None));
+        Assert.Contains("C row", ex.Message);
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM C"));
+    }
+
+    [Fact]
+    public async Task RenameOnlyTheCaseOfATable_Works()
+    {
+        var customers = await _db.ReadTableAsync(_profile, null, null, null, "Customers", CancellationToken.None);
+        await ApplyAsync(customers, customers with { Name = "CUSTOMERS" }, expectRebuild: false);
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'CUSTOMERS'"));
+        Assert.Equal(SampleDatabase.CustomerCount, await ScalarAsync("SELECT count(*) FROM CUSTOMERS"));
+        Assert.Equal(SampleDatabase.OrderCount, await ScalarAsync("SELECT count(*) FROM Orders o JOIN Customers c ON c.Id = o.CustomerId"));
+    }
+
+    [Fact]
+    public async Task EditingAView_KeepsItsInsteadOfTriggers()
+    {
+        await ScalarAsync("CREATE VIEW CountryNames AS SELECT Id, Name FROM Countries; "
+                          + "CREATE TRIGGER TR_CountryNames_Insert INSTEAD OF INSERT ON CountryNames BEGIN INSERT INTO Countries (Code, Name, Region) VALUES (substr(NEW.Name, 1, 2), NEW.Name, 'X'); END; SELECT 0");
+        async Task Apply(string name, string? original, string body)
+        {
+            var context = await _db.GetScriptContextAsync(_profile, null, null, "main", original, CancellationToken.None);
+            var script = _scripter.ScriptView(new ViewDefinition(null, name, original, body, new ViewOptions()), context);
+            await _db.ApplyAsync(_profile, null, new DdlApplyRequest(null, script.Statements.Select(s => s.Sql).ToList(), true), CancellationToken.None);
+        }
+
+        await Apply("CountryNames", "CountryNames", "SELECT Id, Name, Code FROM Countries");
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'TR_CountryNames_Insert' AND tbl_name = 'CountryNames'"));
+        await ScalarAsync("INSERT INTO CountryNames (Name) VALUES ('Zedland'); SELECT 0");
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM Countries WHERE Name = 'Zedland'"));
+
+        // Renamed: the trigger moves to the new view.
+        await Apply("Nations", "CountryNames", "SELECT Id, Name, Code FROM Countries");
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'TR_CountryNames_Insert' AND tbl_name = 'Nations'"));
+        await ScalarAsync("INSERT INTO Nations (Name) VALUES ('Yland'); SELECT 0");
+        Assert.Equal(1, await ScalarAsync("SELECT count(*) FROM Countries WHERE Name = 'Yland'"));
+    }
+
+    [Fact]
     public async Task Rebuild_OfAutoincrementTable_KeepsTheCounter_SoDeletedIdsAreNotReused()
     {
         // Ids above max(Id) were handed out and deleted: AUTOINCREMENT must never hand them out again.

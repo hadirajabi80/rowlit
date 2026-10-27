@@ -142,6 +142,8 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   /** Source of truth for the loaded rows (appended outside React updaters, so StrictMode cannot duplicate pages). */
   const rowsRef = useRef(new ChunkedList<CellValue[]>());
   const colsRef = useRef<ColumnInfo[] | null>(null);
+  /** SQLite: the table has a column of its own named rowid (read from the probe), which shadows the pseudo-column. */
+  const ownRowidColumn = useRef(false);
   const hasMoreRef = useRef(false);
   const pagesRef = useRef<PageRef[]>([]);
   /** A "next page" load is already queued (two quick clicks load one page, not the same offset twice). */
@@ -177,8 +179,10 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const isView = state.type === 'view' || found?.obj.t === 'view';
   /** Every column read, including the hidden Oracle ROWID of a keyless table (always the last one). */
   const allColumns = useMemo(() => data.columns ?? [], [data.columns]);
+  /** The dialect whose hidden ROWID / rowid column is dropped from `allColumns` (none when a SQLite column is named rowid). */
+  const rowidDialect = ownRowidColumn.current ? null : dialect;
   /** The columns shown, filtered, sorted and exported: the table's own columns. */
-  const columns = useMemo(() => allColumns.filter((c) => !isRowidColumn(c, dialect)), [allColumns, dialect]);
+  const columns = useMemo(() => allColumns.filter((c) => !isRowidColumn(c, rowidDialect)), [allColumns, rowidDialect]);
   const keyColumns = useMemo(() => {
     if (found?.obj.pk?.length) return found.obj.pk;
     return columns.filter((c) => c.isKey).map((c) => c.name);
@@ -188,8 +192,8 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     [found, state.schema, state.name, keyColumns, currentSchema, snapshot?.defaultSchema],
   );
   const editability = useMemo(
-    () => (data.columns ? tableEditability(data.columns, state.schema, state.name, snapshot, conn, isView, dialect, currentSchema) : null),
-    [data.columns, state.schema, state.name, snapshot, conn, isView, dialect, currentSchema],
+    () => (data.columns ? tableEditability(data.columns, state.schema, state.name, snapshot, conn, isView, rowidDialect, currentSchema) : null),
+    [data.columns, state.schema, state.name, snapshot, conn, isView, rowidDialect, currentSchema],
   );
   // The table's schema may not be loaded in the catalog yet (opened from search, FK navigation, a restored tab): its
   // primary key, identity and computed columns decide what can be edited, so load it.
@@ -407,9 +411,10 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
           throw Object.assign(new Error(probe.error?.message ?? `${state.name} returned no columns: it has none, or the server cannot describe it.`), { code: probe.error?.code ?? null });
         }
         cols = probe.resultSets[0].columns;
+        ownRowidColumn.current = dialect === 'sqlite' && cols.some((c) => c.name.toLowerCase() === 'rowid');
       }
       // The hidden ROWID column of an earlier page is neither searched nor sorted.
-      const own = cols.filter((c) => !isRowidColumn(c, dialect));
+      const own = cols.filter((c) => !isRowidColumn(c, ownRowidColumn.current ? null : dialect));
       const pred = buildPredicate(filter, own, dialect, { alias: null, quick });
       const spec = specFor(sortNames, own);
       const sig = querySig(connectionId, pred, spec);
@@ -438,9 +443,12 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         }
       }
       const replace = offset === 0;
-      // Oracle table without a primary key: read ROWID too (hidden last column), so its rows can be edited by ROWID.
+      // Oracle / SQLite table without a primary key: read ROWID / rowid too (hidden last column), so its rows can be edited
+      // by it. A SQLite table with a column of its own named rowid shadows the pseudo-column: it stays read-only.
       // Decided with page 0; later pages keep the same columns.
-      if (req === 0) withRowid.current = dialect === 'plsql' && !isView && !found?.obj.pk?.length && !rowidRefused.current;
+      if (req === 0) {
+        withRowid.current = (dialect === 'plsql' || dialect === 'sqlite') && !ownRowidColumn.current && !isView && !found?.obj.pk?.length && !rowidRefused.current;
+      }
       const t: TableTarget = { ...target, keyColumns: keys, ...(fallback ? { orderFallback: fallback } : {}), ...(withRowid.current ? { rowid: true } : {}) };
       let page = selectPageSql(t, dialect, { where: pred.where, sort: spec, offset, limit, serverVersion: s.serverInfo.productVersion });
       // One history entry per (re)load of the table; later pages are internal.

@@ -314,6 +314,7 @@ export function ConnectionDialog({ state, onClose }: Props) {
               <FieldRow
                 key={f.key}
                 field={f}
+                allowNewFile={values.createIfMissing === true}
                 value={values[f.key]}
                 error={errors[f.key]}
                 password={password}
@@ -440,6 +441,8 @@ function TestResultPanel({ r }: { r: TestConnectionResult }) {
 
 interface FieldRowProps {
   field: FormField;
+  /** File fields: the browse dialog may name a file that does not exist yet (SQLite "Create the file if it does not exist"). */
+  allowNewFile?: boolean;
   value: unknown;
   error?: string;
   password: string | null;
@@ -448,7 +451,7 @@ interface FieldRowProps {
   onPassword: (v: string | null) => void;
 }
 
-function FieldRow({ field: f, value, error, password, hasStoredPassword, onChange, onPassword }: FieldRowProps) {
+function FieldRow({ field: f, allowNewFile, value, error, password, hasStoredPassword, onChange, onPassword }: FieldRowProps) {
   const id = `conn-f-${f.key}`;
   const cls = `input${error ? ' invalid' : ''}`;
   // Accessible error state: the message under the field describes the invalid control.
@@ -503,7 +506,7 @@ function FieldRow({ field: f, value, error, password, hasStoredPassword, onChang
       );
       break;
     case 'file':
-      control = <FileInput id={id} aria={aria} className={cls} field={f} value={typeof value === 'string' ? value : ''} onChange={onChange} />;
+      control = <FileInput id={id} aria={aria} className={cls} field={f} allowNew={allowNewFile} value={typeof value === 'string' ? value : ''} onChange={onChange} />;
       break;
     case 'list':
       control = (
@@ -549,7 +552,7 @@ function FieldRow({ field: f, value, error, password, hasStoredPassword, onChang
   );
 }
 
-function FileInput({ id, aria, className, field, value, onChange }: { id: string; aria: Record<string, unknown>; className: string; field: FormField; value: string; onChange: (v: string) => void }) {
+function FileInput({ id, aria, className, field, allowNew, value, onChange }: { id: string; aria: Record<string, unknown>; className: string; field: FormField; allowNew?: boolean; value: string; onChange: (v: string) => void }) {
   const platform = getPlatform();
   const exts = (field.fileFilter ?? '').split(';').map((s) => s.trim().replace(/^\*\./, '')).filter(Boolean);
   return (
@@ -561,7 +564,7 @@ function FileInput({ id, aria, className, field, value, onChange }: { id: string
           type="button"
           title="Browse"
           onClick={async () => {
-            const p = await platform.showOpenDialog({ title: field.label, filters: exts.length ? [{ name: field.label, extensions: exts }, { name: 'All files', extensions: ['*'] }] : undefined });
+            const p = await platform.showOpenDialog({ title: field.label, filters: exts.length ? [{ name: field.label, extensions: exts }, { name: 'All files', extensions: ['*'] }] : undefined, ...(allowNew ? { createIfMissing: true } : {}) });
             if (p) onChange(p);
           }}
         >

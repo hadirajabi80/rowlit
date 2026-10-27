@@ -1,6 +1,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setPlatform } from '../../platform';
+import { createBrowserPlatform } from '../../platform/browser';
 import { useConnections } from '../../store/connections';
 import { installMockEngine } from '../../test/mockServer';
 import { CONNECTION_PALETTE } from '../../theme/connColors';
@@ -96,6 +98,23 @@ describe('ConnectionDialog', () => {
     expect(field).toHaveAccessibleDescription('Database file is required');
     expect(mock.hits('/connections/test', 'POST')).toHaveLength(0);
     await waitFor(() => expect(field).toHaveFocus());
+  });
+
+  it('lets the SQLite browse dialog name a new file once "Create the file" is ticked', async () => {
+    const user = userEvent.setup();
+    const showOpenDialog = vi.fn(async () => 'C:\\data\\new.db');
+    setPlatform({ ...createBrowserPlatform(), hasFileSystem: true, showOpenDialog });
+    try {
+      render(<ConnectionDialog state={{ mode: 'new', providerId: 'sqlite' }} onClose={() => {}} />);
+      await user.click(screen.getByRole('button', { name: 'Browse' }));
+      expect(showOpenDialog).toHaveBeenLastCalledWith(expect.not.objectContaining({ createIfMissing: true }));
+      await user.click(screen.getByRole('checkbox', { name: 'Create the file if it does not exist' }));
+      await user.click(screen.getByRole('button', { name: 'Browse' }));
+      expect(showOpenDialog).toHaveBeenLastCalledWith(expect.objectContaining({ createIfMissing: true }));
+      expect(screen.getByLabelText(/Database file/)).toHaveValue('C:\\data\\new.db');
+    } finally {
+      setPlatform(null);
+    }
   });
 
   it('uses one provider naming set and keeps the two SQLite read-only options apart', () => {

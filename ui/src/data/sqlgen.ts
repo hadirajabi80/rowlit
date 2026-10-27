@@ -20,9 +20,9 @@ export interface TableTarget {
    */
   orderFallback?: string[];
   /**
-   * Oracle table without a primary key: every read also selects the ROWID pseudo-column (named `ROWID`, last column),
-   * which is then the row identity of UPDATE / DELETE / refetch and is returned by INSERT … RETURNING (like SQL
-   * Developer and Navicat). The data tab hides that column.
+   * Oracle / SQLite table without a primary key: every read also selects the ROWID pseudo-column (named `ROWID` /
+   * `rowid`, last column), which is then the row identity of UPDATE / DELETE / refetch and is returned by INSERT …
+   * RETURNING (like SQL Developer and Navicat). The data tab hides that column.
    */
   rowid?: boolean;
 }
@@ -30,13 +30,21 @@ export interface TableTarget {
 /** Name of the hidden Oracle ROWID column of a keyless table (see `TableTarget.rowid`). */
 export const ROWID_COLUMN = 'ROWID';
 
-/** The Oracle ROWID column (`SELECT t.*, ROWID`): never written, never shown as a data column of the table. */
-export const isRowidColumn = (c: Pick<ColumnInfo, 'name'>, dialect: Dialect | null | undefined): boolean =>
-  dialect === 'plsql' && c.name.toUpperCase() === ROWID_COLUMN;
+/** The hidden row identity column of a keyless table as the dialect spells it: Oracle `ROWID`, SQLite `rowid`. */
+export const rowidColumnFor = (dialect: Dialect | null | undefined): string => (dialect === 'sqlite' ? 'rowid' : ROWID_COLUMN);
 
-/** `t.*, ROWID` (or `*`): the select list of a read of the target. */
+/**
+ * The hidden row identity column of a keyless table (`SELECT t.*, ROWID` on Oracle, `SELECT *, rowid` on SQLite):
+ * never written, never shown as a data column of the table.
+ */
+export const isRowidColumn = (c: Pick<ColumnInfo, 'name'>, dialect: Dialect | null | undefined): boolean =>
+  (dialect === 'plsql' || dialect === 'sqlite') && c.name.toUpperCase() === ROWID_COLUMN;
+
+/** `t.*, ROWID` / `*, rowid` (or `*`): the select list of a read of the target. */
 function selectList(t: TableTarget, dialect: Dialect, table: string): string {
-  return t.rowid && dialect === 'plsql' ? `${table}.*, ${ROWID_COLUMN}` : '*';
+  if (!t.rowid) return '*';
+  if (dialect === 'plsql') return `${table}.*, ${ROWID_COLUMN}`;
+  return dialect === 'sqlite' ? '*, rowid' : '*';
 }
 
 /**
@@ -434,7 +442,7 @@ export function selectPageSql(t: TableTarget, dialect: Dialect, o: PageOptions):
     }
     return { sql: `SELECT ${cols}\nFROM ${table}${where}${order ? `\nORDER BY ${order}` : ''}\nOFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`, pageable: true };
   }
-  return { sql: `SELECT *\nFROM ${table}${where}${order ? `\nORDER BY ${order}` : ''}\nLIMIT ${limit} OFFSET ${offset}`, pageable: true };
+  return { sql: `SELECT ${cols}\nFROM ${table}${where}${order ? `\nORDER BY ${order}` : ''}\nLIMIT ${limit} OFFSET ${offset}`, pageable: true };
 }
 
 export interface ExportSelectOptions {

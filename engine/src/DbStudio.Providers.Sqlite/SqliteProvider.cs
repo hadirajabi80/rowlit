@@ -21,6 +21,13 @@ public sealed class SqliteProvider : IDbProvider, IObjectBrowserProvider, IDatab
     public async Task<IObjectListReader> OpenObjectListReaderAsync(ConnectionProfile profile, string? password, CancellationToken ct) =>
         new SqliteDependencyReader(await SqliteConnections.OpenAsync(profile, forceReadOnly: false, ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// A read-write connection for the import wizard: the profile's file (created when "create if missing" is on), the
+    /// foreign key setting and the attached databases, so a table of an attached schema can be a target.
+    /// </summary>
+    public static async Task<SqliteConnection> OpenImportConnectionAsync(ConnectionProfile profile, CancellationToken ct) =>
+        await SqliteConnections.OpenAsync(profile, forceReadOnly: false, ct).ConfigureAwait(false);
+
     private static readonly SqliteDdlGenerator Ddl = new();
     private static readonly SqlitePrepareDiagnostics Prepare = new();
 
@@ -31,7 +38,7 @@ public sealed class SqliteProvider : IDbProvider, IObjectBrowserProvider, IDatab
     public ConnectionFormSpec FormSpec { get; } = new(
     [
         new FormField("path", "Database file", "file", Required: true, Placeholder: @"C:\data\app.db",
-            FileFilter: "*.db;*.sqlite;*.sqlite3", Help: "Path to the database file, or :memory: for a private in-memory database."),
+            FileFilter: "*.db;*.sqlite;*.sqlite3;*.db3", Help: "Path to the database file, or :memory: for a private in-memory database."),
         new FormField("readOnly", "Open read-only", "bool", Default: JsonValue.Create(false),
             Help: "Opens the file with Mode=ReadOnly; no statement can modify it."),
         new FormField("createIfMissing", "Create the file if it does not exist", "bool", Default: JsonValue.Create(false)),
@@ -101,8 +108,7 @@ public sealed class SqliteProvider : IDbProvider, IObjectBrowserProvider, IDatab
         SqliteException se when SqliteConnections.IsLockError(se) => new ErrorInfo(SqliteNames.CodeName(se.SqliteErrorCode), DbStudio.Core.Services.LockWait.Message + ".",
             Detail: "SQLite: " + SqliteNames.CleanMessage(se.Message), ProviderCode: se.SqliteErrorCode),
         SqliteException se => new ErrorInfo(SqliteNames.CodeName(se.SqliteErrorCode), SqliteNames.CleanMessage(se.Message), ProviderCode: se.SqliteErrorCode),
-        FileNotFoundException fnf => new ErrorInfo("SQLITE_CANTOPEN", fnf.Message, ProviderCode: 14),
-        ArgumentException ae => new ErrorInfo("VALIDATION", ae.Message),
+        FileNotFoundException fnf => new ErrorInfo("SQLITE_CANTOPEN", fnf.Message, ProviderCode: 14),        ArgumentException ae => new ErrorInfo("VALIDATION", ae.Message),
         UnauthorizedAccessException ua => new ErrorInfo("SQLITE_PERM", ua.Message, ProviderCode: 3),
         _ => new ErrorInfo("PROVIDER_ERROR", ex.Message),
     };
