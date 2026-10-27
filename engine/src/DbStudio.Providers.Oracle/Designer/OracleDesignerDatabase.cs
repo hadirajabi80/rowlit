@@ -155,6 +155,7 @@ public sealed partial class OracleDesignerDatabase : IDesignerDatabase
         var fks = new List<ForeignKeyModel>();
         var checks = new List<CheckModel>();
         var constraintIndexes = new HashSet<string>(StringComparer.Ordinal);
+        var visibleColumns = columns.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var c in constraints.OrderBy(c => c.Name, StringComparer.Ordinal))
         {
             var cols = consColumns.GetValueOrDefault(c.Name) ?? [];
@@ -165,6 +166,9 @@ public sealed partial class OracleDesignerDatabase : IDesignerDatabase
                     pk = new PrimaryKeyModel { Name = c.Name, Columns = cols, Clustered = true };
                     break;
                 case "U":
+                    // Oracle adds a unique constraint on a hidden SYS_NC...$ column for object / nested-table columns: it is not
+                    // part of the table the user designed (and the designer could not script it).
+                    if (cols.Any(col => !visibleColumns.Contains(col))) break;
                     uniques.Add(new UniqueModel { Name = c.Name, Columns = cols });
                     break;
                 case "R":

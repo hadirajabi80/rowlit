@@ -3,6 +3,37 @@ using Oracle.ManagedDataAccess.Types;
 
 namespace DbStudio.Providers.Oracle.Tests;
 
+/// <summary>Oracle QA round: value text helpers that need no server.</summary>
+public sealed class OracleValueTextTests
+{
+    [Theory]
+    [InlineData(2026, 1, 1, 10, 20, 30, 123456789, "2026-01-01T10:20:30.123456789")]
+    [InlineData(2026, 1, 1, 10, 20, 30, 500000000, "2026-01-01T10:20:30.5")]
+    [InlineData(2026, 1, 1, 10, 20, 30, 120000, "2026-01-01T10:20:30.00012")]
+    [InlineData(2026, 12, 31, 0, 0, 0, 0, "2026-12-31T00:00:00")]
+    public void TimestampText_KeepsNanosecondsAndTrimsTrailingZeros(int y, int mo, int d, int h, int mi, int s, int ns, string expected) =>
+        Assert.Equal(expected, OracleSession.TimestampText(y, mo, d, h, mi, s, ns));
+
+    [Fact]
+    public void NanosecondTimestampText_StillParsesAsADateTimeParam()
+    {
+        // The grid sends a displayed TIMESTAMP(9) value back as a datetime parameter: nine digits must not fail validation.
+        var p = new DbStudio.Core.Params.QueryParam("ts", "datetime", System.Text.Json.Nodes.JsonValue.Create("2026-01-01T10:20:30.123456789"));
+        DbStudio.Core.Params.ParamValues.Validate([p]);
+        var parsed = Assert.IsType<DateTime>(DbStudio.Core.Params.ParamValues.ToClr(p));
+        Assert.InRange((parsed - new DateTime(2026, 1, 1, 10, 20, 30)).Ticks, 1234567, 1234568); // .NET keeps 100 ns
+    }
+
+    [Fact]
+    public void VectorText_UsesInvariantShortestRoundTrip()
+    {
+        Assert.Equal("[1,2.5,-3]", OracleSession.VectorText(new float[] { 1f, 2.5f, -3f }));
+        Assert.Equal("[0.1,1E-05]", OracleSession.VectorText(new double[] { 0.1, 0.00001 }));
+        Assert.Equal("[1,-2,3]", OracleSession.VectorText(new sbyte[] { 1, -2, 3 }));
+        Assert.Equal("[]", OracleSession.VectorText(Array.Empty<float>()));
+    }
+}
+
 public sealed class OracleErrorMappingTests
 {
     private static ErrorInfo Map(int number, string message, string batchSql, int line = 1, int col = 1)
@@ -61,6 +92,34 @@ public sealed class OracleErrorMappingTests
     {
         var e = Map(6550, "ORA-06550: line 1, column 7:\nPLS-00201: identifier 'NOPE' must be declared", "EXEC nope", 4);
         Assert.Equal(4, e.Line);
+    }
+
+    [Fact]
+    public void RuntimeErrorInAnonymousBlock_PointsAtTheFailingLine()
+    {
+        // RAISE_APPLICATION_ERROR / NO_DATA_FOUND: only "ORA-06512: at line N" tells where (QA round: it used to point at BEGIN).
+        var e = Map(20001, "ORA-20001: boom\nORA-06512: at line 4\nhttps://docs.oracle.com/error-help/db/ora-20001/",
+            "BEGIN\n  DBMS_OUTPUT.PUT_LINE('before');\n  NULL;\n    RAISE_APPLICATION_ERROR(-20001, 'boom');\nEND;", 10);
+        Assert.Equal((13, 5), (e.Line, e.Col));
+    }
+
+    [Fact]
+    public void RuntimeErrorInStoredUnit_UsesTheOutermostAnonymousFrame()
+    {
+        var e = Map(1403, "ORA-01403: no data found\nORA-06512: at \"SHOP.P\", line 7\nORA-06512: at line 2",
+            "BEGIN\n  p;\nEND;", 1);
+        Assert.Equal((2, 3), (e.Line, e.Col));
+        // only named frames: no anonymous line to map, the statement start is used
+        var f = Map(1403, "ORA-01403: no data found\nORA-06512: at \"SHOP.P\", line 7", "CALL p()", 3);
+        Assert.Equal((3, 1), (f.Line, f.Col));
+        Assert.Null(OracleErrors.AnonymousBlockLine("ORA-06512: at \"SHOP.P\", line 7"));
+    }
+
+    [Fact]
+    public void RuntimeErrorFrame_OnRewrittenExec_IsNotMapped()
+    {
+        var e = Map(20001, "ORA-20001: x\nORA-06512: at line 1", "EXEC p", 6);
+        Assert.Equal(6, e.Line);
     }
 
     [Theory]

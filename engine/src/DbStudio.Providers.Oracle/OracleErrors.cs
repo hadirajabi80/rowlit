@@ -23,6 +23,27 @@ public static partial class OracleErrors
     [GeneratedRegex(@"^(?<code>(?:ORA|PLS|PLW|SP2)-\d{4,5})", RegexOptions.CultureInvariant)]
     private static partial Regex LeadingCode();
 
+    [GeneratedRegex(@"ORA-06512: at line (?<line>\d+)", RegexOptions.CultureInvariant)]
+    private static partial Regex BlockFrame();
+
+    /// <summary>The line of the last unnamed ORA-06512 frame ("at line N" = the anonymous block itself), or null.</summary>
+    public static int? AnonymousBlockLine(string text)
+    {
+        var matches = BlockFrame().Matches(text);
+        return matches.Count > 0 && int.TryParse(matches[^1].Groups["line"].Value, CultureInfo.InvariantCulture, out var n) && n > 0 ? n : null;
+    }
+
+    /// <summary>1-based column of the first non-blank character of 1-based <paramref name="line"/> (1 when the line is absent).</summary>
+    private static int FirstColumnOfLine(string sql, int line)
+    {
+        var lines = sql.Replace("\r\n", "\n").Split('\n');
+        if (line < 1 || line > lines.Length) return 1;
+        var l = lines[line - 1];
+        int i = 0;
+        while (i < l.Length && char.IsWhiteSpace(l[i])) i++;
+        return i + 1;
+    }
+
     /// <summary>Splits ODP.NET's message into the text and the "https://docs.oracle.com/error-help/..." help link (23ai).</summary>
     public static (string Message, string? HelpUrl) CleanMessage(string message)
     {
@@ -59,6 +80,12 @@ public static partial class OracleErrors
             int l = int.Parse(lc.Groups["line"].Value, CultureInfo.InvariantCulture);
             int c = int.Parse(lc.Groups["col"].Value, CultureInfo.InvariantCulture);
             pos = FromExecutedLineCol(batch, executedOffset, l, c);
+        }
+        else if (!rewritten && AnonymousBlockLine(text) is { } blockLine)
+        {
+            // A run-time error inside an anonymous block / CREATE-less batch: "ORA-06512: at line 3" names the line of the
+            // executed text (the outermost frame; frames of stored units read `at "OWNER.NAME", line n`).
+            pos = FromExecutedLineCol(batch, executedOffset, blockLine, FirstColumnOfLine(executedSql, blockLine));
         }
         else
         {

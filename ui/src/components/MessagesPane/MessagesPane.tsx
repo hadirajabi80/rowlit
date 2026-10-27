@@ -19,6 +19,11 @@ function time(ts: number) {
 
 const SUMMARY_RE = /^(Completed|Cancelled|Finished with errors) in /;
 
+/** Oracle (and a few other) messages already open with their own code ("ORA-00942: …"): no second "[ORA-00942]" prefix. */
+export function startsWithCode(text: string, code: string | number): boolean {
+  return text.trimStart().toUpperCase().startsWith(String(code).toUpperCase());
+}
+
 /** The run summary ("Finished with errors in 11 ms · …") that the reducer appends at exec.done. */
 export function summaryMessage(exec: ExecutionState): ExecMessage | null {
   if (exec.status === 'starting' || exec.status === 'running') return null;
@@ -144,7 +149,7 @@ export function MessagesPane({ exec }: { exec: ExecutionState }) {
               <span className="message-time">{time(m.ts)}</span>
               <I size={13} className="message-icon" />
               <span className="message-text">
-                {m.code && m.severity === 'error' && <span className="message-code">[{m.code}] </span>}
+                {m.code && m.severity === 'error' && !startsWithCode(m.text, m.code) && <span className="message-code">[{m.code}] </span>}
                 {m.text}
                 {(help || fix) && (
                   <span className="message-help" onClick={(e) => e.stopPropagation()}>

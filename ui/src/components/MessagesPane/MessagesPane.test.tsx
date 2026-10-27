@@ -51,3 +51,21 @@ describe('Messages header (styles-r2-03, logic-r2-04)', () => {
     expect(screen.getByText('Running script · 2 batches')).toBeInTheDocument();
   });
 });
+
+describe('error code prefix (Oracle QA round)', () => {
+  const err = (text: string, code: string) => exec({
+    status: 'error',
+    messages: [{ seq: 2, ts: 1_000, severity: 'error', text, line: 1, col: 1, code, source: 'server', batchIndex: 0 }],
+  });
+
+  it('does not repeat the code when the message already starts with it (ORA-00942: …)', () => {
+    const { container } = render(<MessagesPane exec={err('ORA-00942: table or view does not exist', 'ORA-00942')} />);
+    expect(container.querySelector('.message-code')).toBeNull();
+    expect(container.querySelector('.message-text')!.textContent).toContain('ORA-00942: table or view does not exist');
+  });
+
+  it('still prefixes a message that does not carry its code', () => {
+    const { container } = render(<MessagesPane exec={err('relation "x" does not exist', '42P01')} />);
+    expect(container.querySelector('.message-code')!.textContent).toBe('[42P01] ');
+  });
+});

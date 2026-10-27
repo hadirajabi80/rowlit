@@ -157,14 +157,39 @@ public sealed class OracleSession : AdoSessionBase
     {
         var cols = base.DescribeColumns(reader, context);
         var names = new string[cols.Length];
+        string?[]? udtNames = null;
         for (int i = 0; i < cols.Length; i++)
         {
             names[i] = cols[i].DbType;
             if (OdpTypes.TryGetValue(cols[i].DbType, out var t))
                 cols[i] = cols[i] with { DbType = t.Display, Kind = t.Kind };
+            else if (cols[i].DbType is "Object" or "Array")
+            {
+                // ODP.NET names an object / VARRAY / nested-table column "Object" / "Array"; the schema table knows the real type.
+                udtNames ??= UdtTypeNames(reader, cols.Length);
+                if (udtNames[i] is { Length: > 0 } udt) cols[i] = cols[i] with { DbType = udt };
+            }
         }
         _odpTypeNames = names;
         return cols;
+    }
+
+    /// <summary>Schema-table <c>UdtTypeName</c> ("SHOP.ADDRESS_T") per column; empty/null when unknown.</summary>
+    private static string?[] UdtTypeNames(DbDataReader reader, int count)
+    {
+        var result = new string?[count];
+        try
+        {
+            var table = reader.GetSchemaTable();
+            if (table is null || !table.Columns.Contains("UdtTypeName")) return result;
+            for (int i = 0; i < count && i < table.Rows.Count; i++)
+                result[i] = table.Rows[i]["UdtTypeName"] as string;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or OracleException)
+        {
+            // best effort: the placeholder keeps the generic name
+        }
+        return result;
     }
 
     protected override object? ReadValue(DbDataReader reader, int ordinal, ColumnInfo column)
@@ -185,7 +210,14 @@ public sealed class OracleSession : AdoSessionBase
                 case "TIMESTAMPTZ":
                 {
                     var tz = r.GetOracleTimeStampTZ(ordinal);
-                    return ValueConverter.ToWire(new DateTimeOffset(DateTime.SpecifyKind(tz.Value, DateTimeKind.Unspecified), tz.GetTimeZoneOffset()));
+                    var offset = tz.GetTimeZoneOffset();
+                    return TimestampText(tz.Year, tz.Month, tz.Day, tz.Hour, tz.Minute, tz.Second, tz.Nanosecond)
+                        + (offset < TimeSpan.Zero ? "-" : "+") + offset.Duration().ToString(@"hh\:mm", System.Globalization.CultureInfo.InvariantCulture);
+                }
+                case "TIMESTAMP": // TIMESTAMP(7..9): .NET ticks stop at 100 ns, OracleTimeStamp keeps the nanoseconds
+                {
+                    var ts = r.GetOracleTimeStamp(ordinal);
+                    return TimestampText(ts.Year, ts.Month, ts.Day, ts.Hour, ts.Minute, ts.Second, ts.Nanosecond);
                 }
                 case "INTERVALYM":
                     return r.GetOracleIntervalYM(ordinal).ToString();
@@ -199,6 +231,8 @@ public sealed class OracleSession : AdoSessionBase
             var value = r.GetValue(ordinal);
             return value switch
             {
+                // 23ai VECTOR columns arrive as a CLR array (float[]/double[]/sbyte[], byte[] for BINARY vectors)
+                Array vector when IsVectorColumn(column) => ValueConverter.Text(VectorText(vector)),
                 OracleRefCursor => CursorValue.Instance,
                 OracleXmlType x => ValueConverter.Text(x.Value),
                 OracleBFile bf => bf.IsNull ? null : ValueConverter.Text("(BFILE " + bf.DirectoryName + "/" + bf.FileName + ")"),
@@ -228,6 +262,37 @@ public sealed class OracleSession : AdoSessionBase
         || (ex is InvalidOperationException && ex.Message.Contains("ORA-" + UnmappedCustomTypeError, StringComparison.Ordinal));
 
     public const int UnmappedCustomTypeError = 50071;
+
+    /// <summary><c>yyyy-MM-ddTHH:mm:ss[.fffffffff]</c> (wire format of DateTime, fraction up to nanoseconds, trailing zeros trimmed).</summary>
+    public static string TimestampText(int year, int month, int day, int hour, int minute, int second, int nanosecond)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var text = string.Create(inv, $"{year:D4}-{month:D2}-{day:D2}T{hour:D2}:{minute:D2}:{second:D2}");
+        if (nanosecond <= 0) return text;
+        return text + "." + nanosecond.ToString("D9", inv).TrimEnd('0');
+    }
+
+    private static bool IsVectorColumn(ColumnInfo column) => column.DbType.StartsWith("VECTOR", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A VECTOR value as the text Oracle itself shows (<c>[1,2.5,3]</c>).</summary>
+    public static string VectorText(Array vector)
+    {
+        var sb = new System.Text.StringBuilder("[");
+        bool first = true;
+        foreach (var item in vector)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append(item switch
+            {
+                float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                IFormattable x => x.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                var o => o?.ToString() ?? "null",
+            });
+        }
+        return sb.Append(']').ToString();
+    }
 
     /// <summary>Placeholder text of a cell that cannot be read, e.g. "(OBJ_T)".</summary>
     public static string UnreadableValueText(string? dbType) => string.IsNullOrWhiteSpace(dbType) ? "(unsupported type)" : "(" + dbType + ")";

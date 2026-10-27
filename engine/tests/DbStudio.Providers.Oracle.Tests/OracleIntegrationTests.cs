@@ -74,11 +74,73 @@ public sealed class OracleIntegrationTests(OracleFixture fixture) : IClassFixtur
             Assert.Equal("1", row[0]?.ToString());
             Assert.StartsWith("(", row[1]?.ToString());
             Assert.Equal("alpha", row[2]?.ToString());
+            // QA round: the placeholder names the real type, not ODP.NET's generic "Object"
+            Assert.EndsWith(".QA_UDT_T", rs.Columns[1].DbType);
+            Assert.Equal("(" + rs.Columns[1].DbType + ")", row[1]?.ToString());
         }
         finally
         {
             await RunAsync(session, false, new SqlBatch("DROP TABLE QA_UDT_TAB PURGE", 1, 1), new SqlBatch("DROP TYPE QA_UDT_T FORCE", 2, 1));
         }
+    }
+
+    [SkippableFact]
+    public async Task Varray_and_nested_table_columns_show_their_type_name()
+    {
+        RequireAvailable();
+        await using var session = await fixture.OpenSessionAsync();
+        try
+        {
+            var (setup, _) = await RunAsync(session, false,
+                new SqlBatch("CREATE TYPE QA_VA_T AS VARRAY(3) OF VARCHAR2(10)", 1, 1),
+                new SqlBatch("CREATE TYPE QA_NT_T AS TABLE OF NUMBER", 2, 1),
+                new SqlBatch("CREATE TABLE QA_COLL_TAB (id NUMBER, v QA_VA_T, n QA_NT_T) NESTED TABLE n STORE AS QA_COLL_TAB_N", 3, 1),
+                new SqlBatch("INSERT INTO QA_COLL_TAB VALUES (1, QA_VA_T('a','b'), QA_NT_T(1,2))", 4, 1));
+            Assert.Equal(ExecutionStatus.Ok, setup.Status);
+            var (summary, sink) = await RunAsync(session, false, new SqlBatch("SELECT * FROM QA_COLL_TAB", 1, 1));
+            Assert.Equal(ExecutionStatus.Ok, summary.Status);
+            var rs = Assert.Single(sink.ResultSets);
+            Assert.EndsWith(".QA_VA_T", rs.Columns[1].DbType);
+            Assert.EndsWith(".QA_NT_T", rs.Columns[2].DbType);
+            Assert.Equal("(" + rs.Columns[1].DbType + ")", Assert.Single(rs.Rows)[1]?.ToString());
+        }
+        finally
+        {
+            await RunAsync(session, false, new SqlBatch("DROP TABLE QA_COLL_TAB PURGE", 1, 1), new SqlBatch("DROP TYPE QA_NT_T FORCE", 2, 1), new SqlBatch("DROP TYPE QA_VA_T FORCE", 3, 1));
+        }
+    }
+
+    [SkippableFact]
+    public async Task Timestamp_keeps_nanoseconds_and_a_vector_reads_as_text()
+    {
+        RequireAvailable();
+        await using var session = await fixture.OpenSessionAsync();
+        var (summary, sink) = await RunAsync(session, false, new SqlBatch(
+            "SELECT TIMESTAMP '2026-01-01 10:20:30.123456789' ts, TIMESTAMP '2026-01-01 10:20:30.5 -05:30' tz, TIMESTAMP '2026-01-01 10:20:30' ts0, " +
+            "TIMESTAMP '2026-01-01 10:20:30.123456789 +02:00' tz9 FROM dual", 1, 1));
+        Assert.Equal(ExecutionStatus.Ok, summary.Status);
+        var row = Assert.Single(Assert.Single(sink.ResultSets).Rows);
+        Assert.Equal("2026-01-01T10:20:30.123456789", row[0]?.ToString());
+        Assert.Equal("2026-01-01T10:20:30.5-05:30", row[1]?.ToString());
+        Assert.Equal("2026-01-01T10:20:30", row[2]?.ToString());
+        Assert.Equal("2026-01-01T10:20:30.123456789+02:00", row[3]?.ToString());
+
+        var (vs, vsink) = await RunAsync(session, false, new SqlBatch("SELECT TO_VECTOR('[1,2.5,3]') v FROM dual", 1, 1));
+        Skip.If(vs.Status != ExecutionStatus.Ok, "This Oracle version has no VECTOR type (23ai+).");
+        Assert.Equal("[1,2.5,3]", Assert.Single(Assert.Single(vsink.ResultSets).Rows)[0]?.ToString());
+    }
+
+    [SkippableFact]
+    public async Task Runtime_error_in_an_anonymous_block_points_at_the_failing_line()
+    {
+        RequireAvailable();
+        await using var session = await fixture.OpenSessionAsync();
+        var (summary, sink) = await RunAsync(session, false, new SqlBatch(
+            "BEGIN\n  NULL;\n  RAISE_APPLICATION_ERROR(-20001, 'boom');\nEND;", 10, 1));
+        Assert.Equal(ExecutionStatus.Error, summary.Status);
+        var e = Assert.Single(sink.Errors).Error;
+        Assert.Equal("ORA-20001", e.Code);
+        Assert.Equal((12, 3), (e.Line, e.Col));
     }
 
     [SkippableFact]
