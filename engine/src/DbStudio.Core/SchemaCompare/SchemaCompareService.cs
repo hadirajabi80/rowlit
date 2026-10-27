@@ -23,6 +23,20 @@ public sealed class SchemaCompareService(ConnectionStore connections, ProviderRe
 
     private readonly CompareStore _store = new();
 
+    /// <summary><c>GET /schema-compare/support?connectionId=</c>: whether the connection's provider can be compared, and why not.</summary>
+    public CompareSupport Support(string? connectionId)
+    {
+        if (string.IsNullOrWhiteSpace(connectionId)) throw EngineException.Validation("connectionId is required.", new { field = "connectionId" });
+        var profile = connections.Get(connectionId);
+        var provider = providers.Find(profile.ProviderId);
+        if (provider is null)
+            return new CompareSupport(false, profile.ProviderId, null, false, profile.ReadOnly, $"Schema compare needs a relational connection; '{profile.Name}' is not one.");
+        if (!Supported.Contains(provider.Id))
+            return new CompareSupport(false, provider.Id, CoreJson.ToWire(provider.Dialect), false, profile.ReadOnly,
+                $"Schema compare is not supported for {provider.DisplayName} yet. It works with SQL Server, PostgreSQL, MySQL, MariaDB, SQLite and Oracle.");
+        return new CompareSupport(true, provider.Id, CoreJson.ToWire(provider.Dialect), DialectInfo.SchemaIsDatabase(provider.Dialect), profile.ReadOnly, null);
+    }
+
     // ------------------------------------------------------------------ start
 
     /// <summary>Validates the request and starts the comparison job; returns the job id.</summary>

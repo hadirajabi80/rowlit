@@ -12,7 +12,8 @@ namespace DbStudio.Core.SchemaCompare;
 /// <list type="bullet">
 /// <item><c>POST /schema-compare</c> { source, target, options } → 202 { jobId }; the <c>schema.compare</c> job ends with a
 /// <see cref="CompareResult"/> (<c>job.done</c>); <c>DELETE /jobs/{id}</c> cancels</item>
-/// <item><c>GET /schema-compare/{id}/items?item=…</c> → <see cref="CompareItemDetail"/> (both definitions + the item's statements)</item>
+/// <item><c>GET /schema-compare/support?connectionId=…</c> → <see cref="CompareSupport"/> (the UI greys out other providers)</item>
+/// <item><c>GET /schema-compare/{id}/item?item=…</c> → <see cref="CompareItemDetail"/> (both definitions + the item's statements)</item>
 /// <item><c>POST /schema-compare/{id}/script</c> { itemIds? } → <see cref="CompareScript"/></item>
 /// <item><c>POST /schema-compare/{id}/apply</c> { itemIds?, stopOnError? } → <see cref="CompareApplyResult"/> (executes on the target)</item>
 /// <item><c>DELETE /schema-compare/{id}</c> forgets the comparison</item>
@@ -33,6 +34,9 @@ public sealed class SchemaCompareModule : IEngineModule
             var jobId = service.Start(request, ClientId(http));
             return Results.Json(new JobStarted(jobId), CoreJson.Options, statusCode: StatusCodes.Status202Accepted);
         });
+
+        g.MapGet("/support", (string? connectionId, SchemaCompareService service) =>
+            Results.Json(service.Support(connectionId), CoreJson.Options));
 
         g.MapGet("/{id}/item", async (string id, string? item, SchemaCompareService service, CancellationToken ct) =>
         {

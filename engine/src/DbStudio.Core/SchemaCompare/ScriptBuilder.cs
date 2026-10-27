@@ -52,9 +52,13 @@ internal sealed partial class ScriptBuilder
 
     private void Warn(ItemRec item, string severity, string message)
     {
-        if (_warnings.Any(w => w.ItemId == item.Id && w.Message == message)) return;
-        _warnings.Add(new ItemWarning(item.Id, severity, message));
+        var i = _warnings.FindIndex(w => w.ItemId == item.Id && w.Message == message);
+        if (i < 0) _warnings.Add(new ItemWarning(item.Id, severity, message));
+        // the same text can come from a statement (as "warning") and from the comparison (as "dataLoss"): the stronger one wins
+        else if (Rank(severity) > Rank(_warnings[i].Severity)) _warnings[i] = _warnings[i] with { Severity = severity };
     }
+
+    private static int Rank(string severity) => severity switch { "dataLoss" => 2, "warning" => 1, _ => 0 };
 
     private bool _needForeignKeyCheck;
 
@@ -120,6 +124,7 @@ internal sealed partial class ScriptBuilder
         var viewsToRecreate = ViewsToRecreate(views, selected);
         _handledDependents = selected.Where(i => i.Kind is CompareKinds.View or CompareKinds.Trigger && i.Status is CompareStatus.Drop or CompareStatus.Alter)
             .Select(i => i.Kind + ":" + i.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in viewsToRecreate) _handledDependents.Add(id);
 
         // 1. triggers that go away or are rebuilt
         foreach (var t in triggers.Where(t => t.Status == CompareStatus.Drop || (t.Status == CompareStatus.Alter && !CanReplace(t, ctx))))
@@ -293,14 +298,23 @@ internal sealed partial class ScriptBuilder
     private HashSet<string> ViewsToRecreate(List<ItemRec> views, List<ItemRec> selected)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (_d != Dialect.PgSql) return set;
-        var broken = selected.Where(t => t.Kind == CompareKinds.Table && (t.Status == CompareStatus.Drop
-                || (t.Diff is { } diff && (diff.Dropped.Count > 0 || diff.Matched.Any(m => m.TypeChanged || m.ComputedChanged)))))
-            .Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var v in views.Where(v => v.Status == CompareStatus.Alter))
+        if (_d is not (Dialect.PgSql or Dialect.Sqlite)) return set;
+        if (_d == Dialect.Sqlite)
         {
-            var refs = CompareSql.ReferencedNames(v.Tgt!.Ddl, _d);
-            if (!ColumnsCompatible(v.Tgt.Columns, v.Src!.Columns) || broken.Any(refs.Contains)) set.Add(v.Id);
+            // SQLite has no CREATE OR REPLACE VIEW, and a table rebuild (DROP + RENAME) fails while any view still names a table
+            // that is gone: every changed view is dropped before the tables change and created again after them.
+            foreach (var v in views.Where(v => v.Status == CompareStatus.Alter)) set.Add(v.Id);
+        }
+        else
+        {
+            var broken = selected.Where(t => t.Kind == CompareKinds.Table && (t.Status == CompareStatus.Drop
+                    || (t.Diff is { } diff && (diff.Dropped.Count > 0 || diff.Matched.Any(m => m.TypeChanged || m.ComputedChanged)))))
+                .Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in views.Where(v => v.Status == CompareStatus.Alter))
+            {
+                var refs = CompareSql.ReferencedNames(v.Tgt!.Ddl, _d);
+                if (!ColumnsCompatible(v.Tgt.Columns, v.Src!.Columns) || broken.Any(refs.Contains)) set.Add(v.Id);
+            }
         }
         // views of the target that use a view that is rebuilt
         var all = _m.Items.Where(i => i.Kind == CompareKinds.View && i.Tgt is not null && i.Status != CompareStatus.Drop).ToList();

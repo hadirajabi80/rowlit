@@ -101,6 +101,25 @@ public sealed class SqliteCompareTests : IDisposable
     }
 
     [Fact]
+    public void Support_ReportsDialectAndReadOnly()
+    {
+        using var env = new CompareEnv();
+        var rw = env.Add("rw", "sqlite", Servers.SqliteProps(Path.Combine(_dir, "rw.db")));
+        var ro = env.Connections.Create(new DbStudio.Core.Models.ConnectionProfile
+        {
+            Name = "ro", ProviderId = "sqlite", Props = Servers.SqliteProps(Path.Combine(_dir, "ro.db")), ReadOnly = true,
+        }, null);
+
+        var a = env.Service.Support(rw.Id);
+        Assert.True(a.Supported);
+        Assert.Equal("sqlite", a.ProviderId);
+        Assert.False(a.ReadOnly);
+        Assert.Null(a.Reason);
+        Assert.True(env.Service.Support(ro.Id).ReadOnly);
+        Assert.Throws<DbStudio.Core.Services.EngineException>(() => env.Service.Support(""));
+    }
+
+    [Fact]
     public async Task SameSchemaOnBothSides_IsRefused_AndDifferentKindsToo()
     {
         using var env = new CompareEnv();

@@ -1,6 +1,6 @@
 namespace DbStudio.Core.SchemaCompare;
 
-// Wire models of Schema Compare / Structure Synchronization (camelCase JSON, ui/src/schemacompare/types.ts).
+// Wire models of Schema Compare / Structure Synchronization (camelCase JSON, ui/src/api/types.schemaCompare.ts).
 // Source is the truth, target is changed: "create" = only in the source, "drop" = only in the target, "alter" = different.
 
 /// <summary>One side of a comparison: connection › database › schema. MySQL/MariaDB/Oracle have no database level (schema only).</summary>
@@ -80,6 +80,11 @@ public sealed record CompareScriptRequest(IReadOnlyList<string>? ItemIds);
 public sealed record CompareApplyRequest(IReadOnlyList<string>? ItemIds, bool? StopOnError);
 
 public sealed record CompareApplyFailure(int Index, string Sql, string Message, string? Code, string? ItemId);
+
+/// <param name="SchemaIsDatabase">MySQL / MariaDB / Oracle: the picker shows one level (the schema is the database).</param>
+/// <param name="Reason">Why the connection cannot be compared (null when it can).</param>
+/// <param name="ReadOnly">The connection is read-only: it can be a target of the comparison, but the script cannot be applied to it.</param>
+public sealed record CompareSupport(bool Supported, string ProviderId, string? Dialect, bool SchemaIsDatabase, bool ReadOnly, string? Reason);
 
 public sealed record CompareApplyResult(bool Ok, int Executed, int Total, bool RolledBack, bool TransactionalDdl, long ElapsedMs,
     IReadOnlyList<CompareApplyFailure> Failures);
