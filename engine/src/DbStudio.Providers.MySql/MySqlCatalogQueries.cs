@@ -72,7 +72,7 @@ public static class MySqlCatalogQueries
 
     public const string TableInfo =
         "SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT, ENGINE, TABLE_ROWS, DATA_LENGTH + INDEX_LENGTH, CREATE_TIME, UPDATE_TIME, " +
-        "TABLE_COLLATION, AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = @p0 AND TABLE_NAME = @p1";
+        "TABLE_COLLATION, AUTO_INCREMENT, ROW_FORMAT FROM information_schema.TABLES WHERE TABLE_SCHEMA = @p0 AND TABLE_NAME = @p1";
 
     public const string Routines =
         "SELECT ROUTINE_NAME, ROUTINE_TYPE, DTD_IDENTIFIER, ROUTINE_COMMENT FROM information_schema.ROUTINES " +

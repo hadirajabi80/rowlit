@@ -28,6 +28,32 @@ function isDefinition(toks: Token[]): boolean {
   return what === 'PROCEDURE' || what === 'PROC' || what === 'FUNCTION' || what === 'TRIGGER' || what === 'PACKAGE' || what === 'TYPE' || what === 'EVENT';
 }
 
+/**
+ * CQL: is the `:x` at toks[i] a map / UDT key-value separator glued to a value (`{'k':true}`, `{name:x}`)? It is when it
+ * directly follows a key (literal, name, marker, closed tuple) inside braces; a marker follows `{`, `,` or `:` instead.
+ * Mirrors the engine's CqlText.IsKeyValueColon.
+ */
+function isMapColon(toks: Token[], i: number): boolean {
+  const prev = toks[i - 1];
+  if (!prev) return false;
+  const keyLike = prev.kind === 'string' || prev.kind === 'number' || prev.kind === 'ident' || prev.kind === 'keyword'
+    || prev.kind === 'quotedIdent' || prev.kind === 'param' || prev.text === ')' || prev.text === ']' || prev.text === '}';
+  if (!keyLike) return false;
+  let depth = 0;
+  for (let k = i - 1; k >= 0; k--) {
+    const t = toks[k].text;
+    if (t === '}' || t === ')' || t === ']') depth++;
+    else if (t === '(' || t === '[') {
+      if (depth === 0) return false;
+      depth--;
+    } else if (t === '{') {
+      if (depth === 0) return true;
+      depth--;
+    }
+  }
+  return false;
+}
+
 export function detectParams(batches: readonly SqlBatch[], dialect: Dialect): DetectedParam[] {
   const spec = getSpec(dialect);
   const out: DetectedParam[] = [];
@@ -75,6 +101,7 @@ export function detectParams(batches: readonly SqlBatch[], dialect: Dialect): De
           add(name, text);
         } else {
           if (dialect === 'mysql' && text.startsWith('@')) continue; // @user_var / @@sysvar: variables, not binds
+          if (dialect === 'cql' && text.startsWith(':') && isMapColon(toks, i)) continue; // {'k':true}: a map entry
           if (text.startsWith('?')) {
             if (text.length > 1) add(text.slice(1), text, true);
             else add(String(++positional), '?', true, true);

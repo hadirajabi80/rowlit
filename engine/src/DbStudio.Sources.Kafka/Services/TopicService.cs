@@ -16,6 +16,8 @@ public sealed class ClusterService
         var md = await KafkaErrors.Call(() => gw.MetadataAsync(null, ct)).ConfigureAwait(false);
         var nodes = cluster?.Nodes is { Count: > 0 } n ? n : md.Brokers;
         var controllerId = cluster?.ControllerId;
+        // the version lookup at open time may have timed out: ask again (at most once a minute)
+        await h.TryResolveVersionAsync(new KClusterInfo(cluster?.ClusterId, controllerId, nodes), ct).ConfigureAwait(false);
         var brokers = nodes.OrderBy(b => b.Id).Select(b => new KafkaBrokerDto(b.Id, b.Host, b.Port, b.Rack, b.Id == controllerId, true)).ToList();
         var partitions = md.Topics.SelectMany(t => t.Partitions).ToList();
         var controller = nodes.FirstOrDefault(b => b.Id == controllerId) is { } c ? new KafkaNodeRef(c.Id, $"{c.Host}:{c.Port}") : null;

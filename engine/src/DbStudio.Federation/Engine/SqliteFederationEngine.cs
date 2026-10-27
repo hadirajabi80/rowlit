@@ -260,5 +260,5 @@ internal sealed class SqliteFallbackBinder : ParamBinderBase
     public override IReadOnlyList<ParamPlaceholder> FindPlaceholders(string sql) => DuckDbParamBinder.Instance.FindPlaceholders(sql);
 
     protected override DbParameter CreateParameter(DbCommand command, QueryParam p, string? placeholderName) =>
-        new SqliteParameter(placeholderName is null ? null : "$" + placeholderName, ParamValues.ToClr(p) ?? DBNull.Value);
+        new SqliteParameter(placeholderName is null ? null : "$" + placeholderName, ParamValues.ToClr(p) switch { null => DBNull.Value, ExactDecimal exact => exact.Text, var v => v });
 }

@@ -135,7 +135,7 @@ internal sealed class FederationContext : IAsyncDisposable
 
             foreach (var s in sources)
             {
-                if (s.Truncated == true)
+                if (s.Truncated == true && !planned.Sampled)
                     warnings.Add(new PlanWarning(PlanWarningCodes.RowCap,
                         $"{s.Table}: only the first {s.MaxRows.ToString("N0", CultureInfo.InvariantCulture)} rows were read (links.maxRowsPerSource); results may be incomplete.", s.Table));
                 if (s.Cached)
@@ -149,6 +149,9 @@ internal sealed class FederationContext : IAsyncDisposable
                     $"{f.Table}: {c.ConversionFailures.ToString("N0", CultureInfo.InvariantCulture)} value(s) could not be converted and were read as NULL.", f.Table));
             }
 
+            if (planned.Sampled && sources.Any(s => s.Truncated == true))
+                warnings.Add(new PlanWarning(PlanWarningCodes.Cached,
+                    $"EXPLAIN read only the first {ExplainSql.SampleRows.ToString("N0", CultureInfo.InvariantCulture)} rows of each source to build the plan, so the row estimates in it are not the sources'. EXPLAIN ANALYZE runs the query for real.", null));
             if (message is not null)
             {
                 foreach (var m in messages.OrderBy(m => m.Order)) await message(m.Severity, m.Text).ConfigureAwait(false);
@@ -257,4 +260,5 @@ internal sealed record PlannedFetch(LinkTableRef Table, string? ConnectionId, st
     SourceContext Context, FetchRequest Request);
 
 /// <summary>The fetches of one statement plus the analyzer's warnings.</summary>
-internal sealed record PlannedFetches(bool Parsed, IReadOnlyList<PlannedFetch> Fetches, IReadOnlyList<PlanWarning> Warnings, string? SyntaxError);
+/// <param name="Sampled">A plain EXPLAIN: only a sample of each source is read (the plan needs no data), so the row cap is no warning.</param>
+internal sealed record PlannedFetches(bool Parsed, IReadOnlyList<PlannedFetch> Fetches, IReadOnlyList<PlanWarning> Warnings, string? SyntaxError, bool Sampled = false);

@@ -106,12 +106,12 @@ public static class MySqlTableReader
     }
 
     /// <summary>The (schema, name, type) of a table/view/sequence, or null.</summary>
-    public static async Task<(string Name, string Type, string? Comment, string? Engine, long? Rows, long? Size, DateTimeOffset? Created, DateTimeOffset? Updated, string? Collation, long? AutoIncrement)?>
+    public static async Task<(string Name, string Type, string? Comment, string? Engine, long? Rows, long? Size, DateTimeOffset? Created, DateTimeOffset? Updated, string? Collation, long? AutoIncrement, string? RowFormat)?>
         TableInfoAsync(MySqlConnection conn, string schema, string name, CancellationToken ct)
     {
         var rows = await MySqlDb.QueryAsync(conn, MySqlCatalogQueries.TableInfo, r => (
             Name: MySqlDb.S(r, 0), Type: MySqlDb.S(r, 1), Comment: NullIfEmpty(MySqlDb.Str(r, 2)), Engine: MySqlDb.Str(r, 3), Rows: MySqlDb.Long(r, 4),
-            Size: MySqlDb.Long(r, 5), Created: MySqlDb.Time(r, 6), Updated: MySqlDb.Time(r, 7), Collation: MySqlDb.Str(r, 8), AutoIncrement: MySqlDb.Long(r, 9)),
+            Size: MySqlDb.Long(r, 5), Created: MySqlDb.Time(r, 6), Updated: MySqlDb.Time(r, 7), Collation: MySqlDb.Str(r, 8), AutoIncrement: MySqlDb.Long(r, 9), RowFormat: NullIfEmpty(MySqlDb.Str(r, 10))),
             ct, schema, name).ConfigureAwait(false);
         if (rows.Count == 0) return null;
         // exact spelling first (lower_case_table_names=0 servers can hold "Orders" and "orders")

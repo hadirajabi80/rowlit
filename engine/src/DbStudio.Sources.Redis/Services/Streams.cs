@@ -78,7 +78,7 @@ public sealed class MonitorStream(RedisClient client, IServer server, TimeSpan l
         List<string> args;
         try
         {
-            args = RedisArgs.Parse(line[(close + 1)..]).Select(RedisArgs.ToDisplay).ToList();
+            args = RedisArgs.Parse(line[(close + 1)..]).Select(b => RedisArgs.ToDisplay(b)).ToList();
         }
         catch (FormatException)
         {

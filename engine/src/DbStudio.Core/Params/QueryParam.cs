@@ -98,7 +98,8 @@ public static class ParamValues
 
     /// <summary>
     /// CLR value of an input param: null (→ DBNull) | long | decimal | double | bool | DateTime | DateTimeOffset |
-    /// TimeSpan | Guid | byte[] | string. Throws <see cref="FormatException"/> for values that do not match the kind.
+    /// TimeSpan | Guid | byte[] | string, or <see cref="ExactDecimal"/> for an int / decimal value that long / decimal
+    /// cannot hold exactly. Throws <see cref="FormatException"/> for values that do not match the kind.
     /// </summary>
     public static object? ToClr(QueryParam p)
     {
@@ -117,9 +118,13 @@ public static class ParamValues
                 if (kind is JsonValueKind.True or JsonValueKind.False) return kind == JsonValueKind.True ? 1L : 0L;
                 if (long.TryParse(text.Trim(), NumberStyles.Integer, Inv, out var l)) return l;
                 if (decimal.TryParse(text.Trim(), NumberStyles.Float, Inv, out var dl) && decimal.Truncate(dl) == dl && dl is >= long.MinValue and <= long.MaxValue) return (long)dl;
+                // Above the long range (BIGINT UNSIGNED, varint, NUMBER(38)): the exact integer, bound by each provider.
+                if (ExactDecimal.TryParse(text, out var bigInt) && bigInt.IsInteger) return bigInt.ToInteger();
                 throw new FormatException($"'{text}' is not an integer.");
             case ParamKinds.Decimal:
-                if (decimal.TryParse(text.Trim(), NumberStyles.Float, Inv, out var m)) return m;
+                // System.Decimal when it holds every digit; otherwise the exact text (more than 28 digits, NaN, ...).
+                if (decimal.TryParse(text.Trim(), NumberStyles.Float, Inv, out var m) && ExactDecimal.HoldsExactly(m, text.Trim())) return m;
+                if (ExactDecimal.TryParse(text, out var exact)) return exact;
                 throw new FormatException($"'{text}' is not a decimal number.");
             case ParamKinds.Float:
                 if (double.TryParse(text.Trim(), NumberStyles.Float, Inv, out var d)) return d;

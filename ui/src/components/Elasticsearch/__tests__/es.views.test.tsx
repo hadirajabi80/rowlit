@@ -234,6 +234,17 @@ describe('views', () => {
     expect(await screen.findByText('Query DSL')).toBeInTheDocument();
   });
 
+  it('SQL releases an open cursor when its tab is closed', async () => {
+    const close = vi.spyOn(api.es, 'sqlClose').mockResolvedValue(undefined);
+    vi.spyOn(api.es, 'sql').mockResolvedValue({ columns: [{ name: 'a', type: 'long' }], rows: [[1]], cursor: 'cur-1' } as never);
+    const view = show(openSql(CID));
+    fireEvent.click(await screen.findByRole('button', { name: /Run/ }));
+    await screen.findByRole('table', { name: 'SQL results' });
+    expect(close).not.toHaveBeenCalled();
+    view.unmount();
+    expect(close).toHaveBeenCalledWith(CID, 'cur-1');
+  });
+
   it('tasks view streams running tasks with progress', async () => {
     show(openTasks(CID));
     const table = await screen.findByRole('table', { name: 'Tasks' });
@@ -285,6 +296,54 @@ describe('dialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reindex' }));
     await waitFor(() => expect(screen.getByText(/50 created/)).toBeInTheDocument(), { timeout: 4000 });
     await waitFor(() => expect(esConn(CID).indices.data?.find((i) => i.name === 'shop-products-copy')?.docsCount).toBe(50));
+  });
+
+  it('closing a job dialog while the job runs asks whether to keep it running or cancel it', async () => {
+    const { closeWithJob } = await import('../dialogs');
+    const { useUi } = await import('../../../store/ui');
+    const cancel = vi.spyOn(api, 'cancelJob').mockResolvedValue(undefined as never);
+    const running = { status: 'running', done: 1, total: 10, message: null, result: null, error: null, jobId: 'j_1' } as const;
+    const answer = (choice: 'ok' | 'alt' | 'cancel') => vi.spyOn(useUi.getState(), 'askConfirmChoice').mockResolvedValueOnce(choice);
+    // a finished or idle job closes without asking
+    const closed = vi.fn();
+    await closeWithJob({ ...running, status: 'ok' }, closed);
+    expect(closed).toHaveBeenCalledTimes(1);
+    // stay in the dialog
+    answer('cancel');
+    await closeWithJob(running, closed);
+    expect(closed).toHaveBeenCalledTimes(1);
+    // keep running in the background: closes, the job is left alone
+    answer('ok');
+    await closeWithJob(running, closed);
+    expect(closed).toHaveBeenCalledTimes(2);
+    expect(cancel).not.toHaveBeenCalled();
+    // cancel the job: stops it, then closes
+    answer('alt');
+    await closeWithJob(running, closed);
+    expect(cancel).toHaveBeenCalledWith('j_1');
+    expect(closed).toHaveBeenCalledTimes(3);
+  });
+
+  it('the import preview reads only the head of a big file picked by path', async () => {
+    const { ImportDialog, PREVIEW_BYTES, previewDocs, headOfJsonArray } = await import('../dialogs');
+    const { setPlatform } = await import('../../../platform');
+    const { createBrowserPlatform } = await import('../../../platform/browser');
+    const head = '{"a":1}\n{"a":2}\n{"a":';
+    const open = vi.fn(async () => ({ name: 'big.ndjson', path: 'C:\\data\\big.ndjson', content: head, truncated: true, size: 3_000_000_000 }));
+    setPlatform({ ...createBrowserPlatform(), hasFileSystem: true, openTextFile: open } as never);
+    render(<ImportDialog cid={CID} index="imported" onClose={() => undefined} onDone={() => undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file…' }));
+    expect(await screen.findByText('Preview')).toBeInTheDocument();
+    // it asked for the head only
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ maxBytes: PREVIEW_BYTES }));
+    // the cut-off last line is not a document, and the dialog says how big the file really is
+    expect(screen.getByText(/2\.8 GB, preview of the first/)).toBeInTheDocument();
+    expect(previewDocs(head, 'ndjson', ',', 5, true).docs).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(previewDocs(head, 'ndjson', ',', 5, true).error).toBeNull();
+    // a cut-off JSON array previews its complete elements
+    expect(headOfJsonArray('[{"a":1},{"b":[1,2]},"x",3,{"c":"q\\"}', 5)).toEqual([{ a: 1 }, { b: [1, 2] }, 'x', 3]);
+    expect(previewDocs('{"big":', 'json', ',', 5, true).error).toMatch(/too large to preview/);
+    setPlatform(null);
   });
 
   it('import parses NDJSON and bulk-loads it', async () => {

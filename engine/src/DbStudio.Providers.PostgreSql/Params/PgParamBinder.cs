@@ -88,6 +88,23 @@ public sealed class PgParamBinder : IParamBinder
             parameter.Value = DBNull.Value;
             return parameter;
         }
+        if (value is ExactDecimal exact)
+        {
+            // More digits than System.Decimal / long hold, or NaN / Infinity. Integers are written as numeric from a
+            // BigInteger; Npgsql writes other numerics only from System.Decimal, so their exact text is sent untyped and
+            // the server reads it like a numeric literal in its context (column, operator).
+            if (exact.IsInteger)
+            {
+                parameter.NpgsqlDbType = NpgsqlDbType.Numeric;
+                parameter.Value = exact.ToBigInteger();
+            }
+            else
+            {
+                parameter.NpgsqlDbType = NpgsqlDbType.Unknown;
+                parameter.Value = exact.Text;
+            }
+            return parameter;
+        }
         switch (p.Kind)
         {
             case ParamKinds.Int:

@@ -561,7 +561,7 @@ internal sealed partial class FakeRedisServer
             case "JSON.SET":
             {
                 if (!JsonModule) return new Err("ERR unknown command 'JSON.SET'");
-                var node = JsonNode.Parse(Arg(3));
+                var node = Arg(3).Trim() == "null" ? JsonNullRoot : JsonNode.Parse(Arg(3));
                 var path = Arg(2);
                 if (path is "$" or ".") { db.Set(Arg(1), node!, db.Get(Arg(1))?.ExpiresAt); return Ok; }
                 if (db.Get(Arg(1)) is not { Value: JsonNode root }) return new Err("ERR new objects must be created at the root");
@@ -575,6 +575,7 @@ internal sealed partial class FakeRedisServer
                 if (!JsonModule) return new Err("ERR unknown command 'JSON.GET'");
                 if (db.Get(Arg(1)) is not { Value: JsonNode root }) return null;
                 var path = a.Count > 2 ? Arg(2) : ".";
+                if (ReferenceEquals(root, JsonNullRoot)) return path == "." ? "null" : "[null]";
                 if (path == "$") return new JsonArray(root.DeepClone()).ToJsonString();
                 if (path == ".") return root.ToJsonString();
                 var (parent, name) = Navigate(root, path);
@@ -587,6 +588,9 @@ internal sealed partial class FakeRedisServer
         }
         return new Err($"ERR unknown command '{cmd}', with args beginning with: ");
     }
+
+    /// <summary>A JSON null cannot be a JsonNode (it is C# null): a stored null document is this sentinel.</summary>
+    private static readonly JsonNode JsonNullRoot = JsonValue.Create("(json null)")!;
 
     private static (JsonNode? Parent, string Name) Navigate(JsonNode root, string path)
     {

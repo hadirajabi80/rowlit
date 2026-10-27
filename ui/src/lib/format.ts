@@ -120,7 +120,8 @@ export function prettyPrint(text: string, kind: ColumnKind): { text: string; lan
   const t = text.trim();
   if (kind === 'json' || ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']')))) {
     try {
-      return { text: JSON.stringify(JSON.parse(t), null, 2), language: 'json' };
+      JSON.parse(t); // valid JSON? (the parsed value is not used: it would round big numbers)
+      return { text: prettyJsonText(t), language: 'json' };
     } catch {
       /* not JSON */
     }
@@ -129,6 +130,42 @@ export function prettyPrint(text: string, kind: ColumnKind): { text: string; lan
     return { text: prettyXml(t), language: 'xml' };
   }
   return { text, language: 'text' };
+}
+
+/**
+ * Indents valid JSON text (2 spaces, like JSON.stringify(v, null, 2)) without parsing it into JS values, so numbers keep
+ * every digit as written (bigint above 2^53, decimals with 30 digits, 1.50) and strings keep their escapes.
+ */
+export function prettyJsonText(json: string): string {
+  let out = '';
+  let indent = 0;
+  const nl = () => `\n${'  '.repeat(indent)}`;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < json.length && json[j] !== '"') j += json[j] === '\\' ? 2 : 1;
+      out += json.slice(i, j + 1);
+      i = j;
+    } else if (c === '{' || c === '[') {
+      const close = c === '{' ? '}' : ']';
+      let j = i + 1;
+      while (j < json.length && /\s/.test(json[j])) j++;
+      if (json[j] === close) {
+        out += c + close;
+        i = j;
+      } else {
+        indent++;
+        out += c + nl();
+      }
+    } else if (c === '}' || c === ']') {
+      indent--;
+      out += nl() + c;
+    } else if (c === ',') out += `,${nl()}`;
+    else if (c === ':') out += ': ';
+    else if (!/\s/.test(c)) out += c;
+  }
+  return out;
 }
 
 export function prettyXml(xml: string): string {

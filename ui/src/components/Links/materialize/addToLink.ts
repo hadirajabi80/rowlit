@@ -28,8 +28,15 @@ export interface AddResult {
   newMember: boolean;
 }
 
-const sameScope = (m: LinkMember, s: TableSource) =>
-  (m.kind ?? 'connection') === 'connection' && m.connectionId === s.connectionId && (m.database ?? null) === (s.database ?? null) && (m.schema ?? null) === (s.schema ?? null);
+/**
+ * A member saved without a database means "the connection's default"; the explorer reports that default by name. With
+ * `defaultDatabase` both spellings are the same scope (case-insensitive: SQL Server / MySQL names fold).
+ */
+const sameDatabase = (a: string | null | undefined, b: string | null | undefined, defaultDatabase: string | null) =>
+  (a ?? defaultDatabase ?? '').toLowerCase() === (b ?? defaultDatabase ?? '').toLowerCase();
+
+const sameScope = (m: LinkMember, s: TableSource, defaultDatabase: string | null) =>
+  (m.kind ?? 'connection') === 'connection' && m.connectionId === s.connectionId && sameDatabase(m.database, s.database, defaultDatabase) && (m.schema ?? null) === (s.schema ?? null);
 
 /** Proposal for the alias of a new member: the schema when it says something, else the connection's name. */
 export function aliasProposal(source: TableSource, connectionName: string): string {
@@ -38,10 +45,11 @@ export function aliasProposal(source: TableSource, connectionName: string): stri
   return slugifyAlias(generic ? connectionName : `${connectionName}_${schema}`);
 }
 
-export function addTableToDefinition(definition: LinkDefinition, source: TableSource, connectionName: string): AddResult {
+/** `defaultDatabase`: the database the source connection opens on (a member without a database is on it). */
+export function addTableToDefinition(definition: LinkDefinition, source: TableSource, connectionName: string, defaultDatabase: string | null = null): AddResult {
   const mounted: MountedTable = { name: source.name, type: source.type };
   const members = definition.members.map((m) => ({ ...m, tables: [...m.tables] }));
-  const at = members.findIndex((m) => sameScope(m, source));
+  const at = members.findIndex((m) => sameScope(m, source, defaultDatabase));
   if (at >= 0) {
     const m = members[at];
     const have = m.tables.find((t) => t.name === source.name);

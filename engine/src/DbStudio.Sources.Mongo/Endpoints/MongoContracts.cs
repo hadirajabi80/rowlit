@@ -151,6 +151,8 @@ public sealed class MongoCreateIndexOptions
     public long? ExpireAfterSeconds { get; set; }
     public string? PartialFilterExpression { get; set; }
     public string? Collation { get; set; }
+    /// <summary>Wildcard indexes on the whole document (<c>$**</c>): which fields to include / exclude, e.g. <c>{ "a": 1, "b.c": 1 }</c>.</summary>
+    public string? WildcardProjection { get; set; }
 }
 
 public sealed class MongoCreateIndexRequest

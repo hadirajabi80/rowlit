@@ -120,6 +120,22 @@ public sealed class ChParamBinderTests
     }
 
     [Fact]
+    public void Bind_NumbersBeyondDecimalAndLong_UseDecimal256AndInt256()
+    {
+        using var conn = new ClickHouseConnection("Host=localhost");
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT :d, :i, :n";
+        ChParamBinder.Instance.Bind(cmd, [
+            new QueryParam("d", ParamKinds.Decimal, JsonValue.Create("12345678901234567890123456789012345.67890")),
+            new QueryParam("i", ParamKinds.Int, JsonValue.Create("123456789012345678901234567890")),
+            new QueryParam("n", ParamKinds.Decimal, JsonValue.Create("NaN")),
+        ], new ParamBindCursor());
+        Assert.Equal("SELECT {d:Decimal(76, 5)}, {i:Int256}, {n:Float64}", cmd.CommandText);
+        var values = cmd.Parameters.Cast<System.Data.Common.DbParameter>().Select(p => p.Value).ToList();
+        Assert.Equal(["12345678901234567890123456789012345.67890", "123456789012345678901234567890", "nan"], values);
+    }
+
+    [Fact]
     public void Bind_ReportsMissingValues()
     {
         using var conn = new ClickHouseConnection("Host=localhost");

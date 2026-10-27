@@ -27,6 +27,7 @@ import { showContextMenu } from '../../common/Menu';
 import { Splitter } from '../../common/Splitter';
 import { commandMenuItems } from '../../layout/commandMenu';
 import type { TabViewProps } from '../../layout/tabViews';
+import { resolveParams } from '../../ParamsDialog/ParamsDialog';
 import { ResultsPane } from '../../ResultsPane/ResultsPane';
 import { cancelBuilderQuery, refreshSources, runBuilderQuery } from './actions';
 import { BottomPanel } from './BottomPanel';
@@ -280,10 +281,11 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
   // ---------------------------------------------------------------- run, mode, save, plan
   const run = useCallback(() => {
     const cur = tabState(tab.id);
-    const sql = (cur?.mode ?? 'builder') === 'sql' ? cur?.sql ?? '' : compiled.sql;
-    const params = (cur?.mode ?? 'builder') === 'sql' ? [] : compiled.params;
+    const advanced = (cur?.mode ?? 'builder') === 'sql';
+    const sql = advanced ? cur?.sql ?? '' : compiled.sql;
+    const params = advanced ? [] : compiled.params;
     patch({ panel: 'results' });
-    void runBuilderQuery(tab.id, linkId, sql, params, tab.title);
+    void runBuilderQuery(tab.id, linkId, sql, params, tab.title, { askParams: advanced });
   }, [compiled, linkId, patch, tab.id, tab.title]);
   const cancel = useCallback(() => void cancelBuilderQuery(tab.id), [tab.id]);
 
@@ -325,6 +327,7 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
       title: 'This SQL cannot be shown in the builder',
       message: `${reason}\n\nGo back to the builder anyway? Your SQL edits are lost (the builder keeps the query it had).`,
       confirmLabel: 'Discard SQL edits',
+      danger: true,
     });
     if (ok) patch({ mode: 'builder', sql: null, sqlBase: null });
   }, [compiled, currentModel, linkId, patch, st, tab.id]);
@@ -356,12 +359,19 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
     }
   }, [currentModel, inlinedSql, link?.name, linkId, patch, st, tab.id]);
 
-  const materialize = useCallback(() => {
+  const materialize = useCallback(async () => {
     if (!runnableSql.trim()) return;
+    let params = runParams;
+    if (mode === 'sql') {
+      // Advanced SQL: the `$name` values are asked for here (the materialize dialog only previews and writes).
+      const asked = await resolveParams(tab.id, linkId, 'duckdb', [{ sql: runnableSql, line: 1, col: 1 }], { confirmLabel: 'Materialize' });
+      if (asked === null) return;
+      if (asked) params = asked;
+    }
     runCommand('links.materialize', {
-      connectionId: linkId, sql: runnableSql, params: runParams, sessionId: useSessions.getState().byTab[tab.id] ?? null, name: st.viewName ?? undefined,
+      connectionId: linkId, sql: runnableSql, params, sessionId: useSessions.getState().byTab[tab.id] ?? null, name: st.viewName ?? undefined,
     });
-  }, [linkId, runParams, runnableSql, st.viewName, tab.id]);
+  }, [linkId, mode, runParams, runnableSql, st.viewName, tab.id]);
   const canMaterialize = !!getCommand('links.materialize');
 
   const autoLayout = useCallback(async () => {
@@ -502,7 +512,7 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
         </span>
         <span className="lkb-tb-group">
           <button type="button" className="btn" onClick={() => setSaveOpen(true)} disabled={!runnableSql.trim()} title={`Save as linked view (${displayShortcut('Mod+S')})`}><Save size={13} /> {st.viewId ? 'Save view' : 'Save as view…'}</button>
-          {canMaterialize && <button type="button" className="btn" onClick={materialize} disabled={!runnableSql.trim()} title="Write the result into a table of a writable connection"><DatabaseZap size={13} /> Materialize…</button>}
+          {canMaterialize && <button type="button" className="btn" onClick={() => void materialize()} disabled={!runnableSql.trim()} title="Write the result into a table of a writable connection"><DatabaseZap size={13} /> Materialize…</button>}
           <button type="button" className="btn" onClick={() => setPlanOpen(true)} disabled={!runnableSql.trim()} title="What each source is asked for"><Network size={13} /> Plan</button>
           <button type="button" className="icon-btn" aria-label="Refresh sources" title="Refresh sources: read the tables from their servers again on the next run" onClick={() => void refreshSources(linkId, tab.id)}><RefreshCw size={14} /></button>
           <button type="button" className="icon-btn" aria-label="Open SQL in a console" title="Open the SQL in a console" disabled={!inlinedSql.trim()} onClick={openInConsole}><SquareTerminal size={14} /></button>

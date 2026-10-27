@@ -92,6 +92,7 @@ export async function unmountTable(linkId: string, alias: string, linkName: stri
       title: `Remove the source “${alias}”?`,
       message: `${alias}.${linkName} was its last table, so the source goes too.`,
       confirmLabel: 'Remove source',
+      danger: true,
     });
     if (!ok) return;
     members = members.filter((_, i) => i !== idx);

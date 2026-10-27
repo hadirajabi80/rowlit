@@ -26,14 +26,23 @@ activity snapshot, linked-server native script text.
 
 ## Open (not fixed)
 
-- `OUTPUT inserted.|` / `deleted.|` offers nothing (no pseudo-table source in the binder).
-- Columns of a table-valued function used with `CROSS APPLY ... o.|` are not completed.
-- Designer: changing the type of a column that is used by an index, check constraint or computed column scripts a bare
-  `ALTER COLUMN`, which the server refuses; the dependents are not dropped / recreated or warned about.
-- Session / catalog connection to a mistyped database still waits for the driver's 10 s connect retry (only Test was changed).
+- FIXED: `OUTPUT inserted.|` / `deleted.|` offers the columns of the INSERT / UPDATE / DELETE / MERGE target
+  (`ui/src/intel/catalog/binder.ts` `resolveQualifier`; test `tsql-completion.test.ts` "OUTPUT inserted. / deleted.").
+- FIXED: columns of a table-valued function after `CROSS APPLY ... o.|`. Catalog functions already completed (the engine
+  sends their columns; test "CROSS APPLY table-valued functions"); the gap was the built-in ones: `STRING_SPLIT`,
+  `OPENJSON`, `GENERATE_SERIES`, `CONTAINSTABLE`, `FREETEXTTABLE` now have output columns (`tsql-functions.json`, binder).
+  `OPENJSON ... WITH (...)` still shows the default key / value / type.
+- FIXED: designer `ALTER COLUMN` on a column used by an index, key, foreign key, check or computed column now drops those
+  objects first and recreates them after the alter (a warning lists them); a varchar / nvarchar / varbinary widening under
+  an index, unique or check stays a bare ALTER. Foreign keys of OTHER tables that reference a changed PK / unique key are
+  not scripted (the warning says so); user statistics are not modelled. `SqlServerDdlScripter.FindBlockedDependents`;
+  tests `SqlServerBlockedAlterTests` (7). Not run against a live server (Docker was unavailable); the scripts parse with ScriptDom.
+- FIXED: session / catalog connections to a mistyped database fail after about 1 s instead of 11 s: the driver's single
+  connect retry stays but waits 1 s (`ConnectRetryInterval`) instead of 10 s; Test keeps `ConnectRetryCount=0`
+  (`SqlServerConnectionStrings.Build`; test `ConnectRetry_StaysOnce_ButWaitsOneSecond...`). Not timed against a server.
 - Snowflake and other providers with a typed `USE DATABASE` may have the same "run reverts the database" behaviour as #4
   (the fix is limited to SQL Server).
-- `system_health` log query on this loaded server did not return within the limit; not investigated further.
+- Left: `system_health` log query on this loaded server did not return within the limit (not investigated, per brief).
 - Not re-verified because the server stalled: EXPLAIN / plan views, ER diagram, import wizard, Find in database.
 
 ## Test status

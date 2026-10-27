@@ -114,6 +114,31 @@ public sealed class TopicAndClusterTests
     }
 
     [Fact]
+    public async Task A_broker_version_that_was_unknown_at_open_is_looked_up_again_by_the_cluster_overview()
+    {
+        // the 5 s lookup at open time timed out: Version stayed null
+        await using var h = new Harness(versionKnown: false);
+        Assert.Null(h.Handle.Server.ProductVersion);
+        h.Fake.FailNext["DescribeConfigs"] = new KafkaGatewayException(KafkaErrorKind.Timeout, "Local: Timed out");
+        var first = await new ClusterService().ClusterAsync(h.Handle, default);
+        Assert.Null(first.Version);
+        // retried at most once a minute: the immediate second call does not ask again, and the next minute would
+        var second = await new ClusterService().ClusterAsync(h.Handle, default);
+        Assert.Null(second.Version);
+        Assert.Equal(1, h.Fake.Calls.Count(c => c == "DescribeConfigs"));
+    }
+
+    [Fact]
+    public async Task The_lazy_broker_version_lookup_fills_in_the_version_and_the_server_text()
+    {
+        await using var h = new Harness(versionKnown: false);
+        var c = await new ClusterService().ClusterAsync(h.Handle, default);
+        Assert.Equal("3.8", c.Version);
+        Assert.Equal("3.8", h.Handle.Server.ProductVersion);
+        Assert.Equal("Kafka 3.8 (3 brokers, controller 1)", h.Handle.Server.Version);
+    }
+
+    [Fact]
     public async Task Broker_configs_mask_sensitive_values()
     {
         await using var h = new Harness();

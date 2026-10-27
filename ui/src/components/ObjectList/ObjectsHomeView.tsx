@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import type { ConnectionProfile } from '../../api/types';
 import { catalogDatabase } from '../../app/actions';
 import type { CommandTarget } from '../../commands/types';
-import { dbKey, useCatalog } from '../../store/catalog';
+import { dbKey, useCatalog, type LoadTarget } from '../../store/catalog';
 import { hasDatabaseLevel, useConnection } from '../../store/connections';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { connColorCss } from '../../theme/connColors';
@@ -174,18 +174,26 @@ function ConnectionHome({ conn, state, visible }: { conn: ConnectionProfile; sta
     );
   }
   if (cat.status === 'error') {
+    const cancelled = cat.error === CANCELLED;
     return (
       <HomePanel conn={conn}>
         <EmptyState
           icon={<TriangleAlert size={28} strokeWidth={1.5} />}
-          title={`Could not connect to ${conn.name}`}
-          hint={cat.error ?? undefined}
-          action={{ label: 'Try again', onClick: () => void useCatalog.getState().loadDatabases(cid, true) }}
+          title={cancelled ? `Stopped waiting for ${conn.name}` : `Could not connect to ${conn.name}`}
+          hint={cancelled ? 'The server did not answer. Retry when it is reachable again.' : cat.error ?? undefined}
+          action={{ label: cancelled ? 'Retry' : 'Try again', onClick: () => void useCatalog.getState().retryLoad({ level: 'conn', connectionId: cid, database: null }) }}
         />
       </HomePanel>
     );
   }
-  if (!dbs) return <HomePanel conn={conn}><Loading text="Connecting…" /></HomePanel>;
+  // The explorer tree's slow-load state: after SLOW_LOAD_MS "Still connecting…" with Cancel.
+  if (!dbs) {
+    return (
+      <HomePanel conn={conn}>
+        <Loading text={cat.slow ? 'Still connecting…' : 'Connecting…'} cancel={cat.slow ? { level: 'conn', connectionId: cid, database: null } : undefined} />
+      </HomePanel>
+    );
+  };
 
   if (dbs.length > 1) {
     const current = cat.databases?.current ?? null;
@@ -201,14 +209,20 @@ function ConnectionHome({ conn, state, visible }: { conn: ConnectionProfile; sta
 
   if (!d?.schemasResp) {
     if (d?.schemasStatus === 'error') {
+      const cancelled = d.schemasError === CANCELLED;
       return (
         <HomePanel conn={conn}>
-          <EmptyState icon={<TriangleAlert size={28} strokeWidth={1.5} />} title="Could not load the schemas" hint={d.schemasError ?? undefined}
-            action={{ label: 'Try again', onClick: () => void useCatalog.getState().loadSchemas(cid, single ?? null, true) }} />
+          <EmptyState icon={<TriangleAlert size={28} strokeWidth={1.5} />} title={cancelled ? 'Stopped waiting for the schemas' : 'Could not load the schemas'}
+            hint={cancelled ? 'The server did not answer. Retry when it is reachable again.' : d.schemasError ?? undefined}
+            action={{ label: cancelled ? 'Retry' : 'Try again', onClick: () => void useCatalog.getState().retryLoad({ level: 'schemas', connectionId: cid, database: single ?? null }) }} />
         </HomePanel>
       );
     }
-    return <HomePanel conn={conn}><Loading text="Loading schemas…" /></HomePanel>;
+    return (
+      <HomePanel conn={conn}>
+        <Loading text={d?.schemasSlow ? 'Still loading schemas…' : 'Loading schemas…'} cancel={d?.schemasSlow ? { level: 'schemas', connectionId: cid, database: single ?? null } : undefined} />
+      </HomePanel>
+    );
   }
   const schemas = d.schemasResp.schemas;
   const db = single ?? null;
@@ -242,10 +256,18 @@ function HomePanel({ conn, db, children }: { conn: ConnectionProfile; db?: strin
   );
 }
 
-function Loading({ text }: { text: string }) {
+/** What the catalog store leaves in `error` when the user cancelled a slow load. */
+const CANCELLED = 'Cancelled.';
+
+function Loading({ text, cancel }: { text: string; cancel?: LoadTarget }) {
   return (
     <div className="oh-loading" role="status">
       <LoaderCircle size={18} className="spin" aria-hidden="true" /> {text}
+      {cancel && (
+        <button type="button" className="btn btn-xs oh-loading-cancel" title="Stop waiting for the server" onClick={() => useCatalog.getState().cancelLoad(cancel)}>
+          Cancel
+        </button>
+      )}
     </div>
   );
 }

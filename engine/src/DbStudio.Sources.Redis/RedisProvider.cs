@@ -65,6 +65,7 @@ public sealed class RedisProvider : IDataSourceProvider
     {
         var settings = RedisSettings.From(profile, password);
         var options = settings.BuildConfiguration();
+        var budget = Stopwatch.StartNew();
         ConnectionMultiplexer mux;
         try
         {
@@ -78,10 +79,14 @@ public sealed class RedisProvider : IDataSourceProvider
         {
             if (!mux.IsConnected)
             {
-                // AbortOnConnectFail=false: surface the reason now instead of on the first command.
+                // AbortOnConnectFail=false: surface the reason now instead of on the first command. The connect above already
+                // waited up to the connect timeout; only a short grace is added, so an unreachable host fails after about
+                // one timeout, not two.
+                var grace = TimeSpan.FromSeconds(settings.ConnectTimeoutSeconds) - budget.Elapsed;
+                if (grace < TimeSpan.FromMilliseconds(500)) grace = TimeSpan.FromMilliseconds(500);
                 try
                 {
-                    await RedisErrors.Guard(() => mux.GetDatabase().PingAsync().WaitAsync(TimeSpan.FromSeconds(settings.ConnectTimeoutSeconds), ct), "ping")
+                    await RedisErrors.Guard(() => mux.GetDatabase().PingAsync().WaitAsync(grace, ct), "ping")
                         .ConfigureAwait(false);
                 }
                 catch (TimeoutException)

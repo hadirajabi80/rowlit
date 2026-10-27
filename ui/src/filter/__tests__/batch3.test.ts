@@ -17,17 +17,19 @@ const one = (d: Dialect, column: string, op: FilterOp, values: FilterValue[] = [
 };
 
 describe('mysql server predicate', () => {
-  it('contains / starts / ends use CONCAT (never ||) and a valid ESCAPE literal', () => {
+  it('contains / starts / ends use CONCAT (never ||) and an ESCAPE that works with NO_BACKSLASH_ESCAPES', () => {
     const r = one('mysql', 'name', 'contains', ['50%_x']);
-    expect(r.where).toBe("q.name LIKE CONCAT('%', @fp1, '%') ESCAPE '\\\\'");
-    expect(r.params).toEqual([{ name: 'fp1', kind: 'string', value: '50\\%\\_x' }]);
-    expect(one('mysql', 'name', 'startsWith', ['ab']).where).toBe("q.name LIKE CONCAT(@fp1, '%') ESCAPE '\\\\'");
-    expect(one('mysql', 'name', 'endsWith', ['ab']).where).toBe("q.name LIKE CONCAT('%', @fp1) ESCAPE '\\\\'");
-    expect(one('mysql', 'name', 'notContains', ['ab']).where).toBe("NOT (q.name LIKE CONCAT('%', @fp1, '%') ESCAPE '\\\\')");
+    // docs/qa/round-mysql.md 12: '\\' is two characters under sql_mode NO_BACKSLASH_ESCAPES, which ESCAPE rejects.
+    expect(r.where).toBe("q.name LIKE CONCAT('%', @fp1, '%') ESCAPE '!'");
+    expect(r.params).toEqual([{ name: 'fp1', kind: 'string', value: '50!%!_x' }]);
+    expect(one('mysql', 'name', 'contains', ['a\\b!c']).params[0].value).toBe('a\\b!!c');
+    expect(one('mysql', 'name', 'startsWith', ['ab']).where).toBe("q.name LIKE CONCAT(@fp1, '%') ESCAPE '!'");
+    expect(one('mysql', 'name', 'endsWith', ['ab']).where).toBe("q.name LIKE CONCAT('%', @fp1) ESCAPE '!'");
+    expect(one('mysql', 'name', 'notContains', ['ab']).where).toBe("NOT (q.name LIKE CONCAT('%', @fp1, '%') ESCAPE '!')");
   });
 
   it('case-sensitive text uses BINARY', () => {
-    expect(one('mysql', 'name', 'contains', ['A'], true).where).toBe("q.name LIKE BINARY CONCAT('%', @fp1, '%') ESCAPE '\\\\'");
+    expect(one('mysql', 'name', 'contains', ['A'], true).where).toBe("q.name LIKE BINARY CONCAT('%', @fp1, '%') ESCAPE '!'");
     expect(one('mysql', 'name', 'eq', ['Ada'], true).where).toBe('q.name = BINARY @fp1');
   });
 
@@ -43,7 +45,7 @@ describe('mysql server predicate', () => {
 
   it('quick search concatenates with CONCAT too', () => {
     const r = buildPredicate(null, COLS, 'mysql', { alias: 'q', quick: 'ada' });
-    expect(r.where).toContain("LIKE CONCAT('%', @fp1, '%') ESCAPE '\\\\'");
+    expect(r.where).toContain("LIKE CONCAT('%', @fp1, '%') ESCAPE '!'");
     expect(r.where).not.toContain('||');
   });
 });

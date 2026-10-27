@@ -63,9 +63,15 @@
 .snip-code-clamp { font-size: var(--text-xs); line-height: 1.5; }
 .snip-code-clamp .snip-code-line { white-space: pre; overflow: hidden; text-overflow: ellipsis; min-height: 1.5em; }
 .snip-code-more { color: var(--fg-muted); }
-/* tab stops: a soft accent pill; $0 (final cursor) is outlined only */
-.snip-ph { background: var(--accent-soft); border-radius: var(--radius-sm); box-shadow: 0 0 0 1px var(--accent-soft-strong); }
-.snip-ph-final { background: transparent; box-shadow: 0 0 0 1px var(--accent-soft-strong); }
+/* Tab stops: an accent outline with an accent underline; $0 (final cursor) is the outline only. No fill: the code is
+   coloured by the editor theme, and any accent fill behind it dropped some token colours below 4.5:1 (Nord keywords
+   and comments 3.5:1, Darcula 3.6:1, Light 4.47:1 ...). The themes' token colours sit only 4.5-4.6:1 above the
+   editor background to begin with (Darcula numbers), so there is room for no tint at all. */
+.snip-ph {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), inset 0 -2px 0 color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.snip-ph-final { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
 code.snip-ph { padding: 0 2px; }
 
 /* ---- body editor (monacoBodyEditor): a form field around a small Monaco editor ---- */

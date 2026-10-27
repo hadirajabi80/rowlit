@@ -136,6 +136,34 @@ describe('Snowflake formatter', () => {
     expect(formatSql(d, 'snowflake').text).toBe(d);
   });
 
+  it('object kinds and clause words are upper-cased in their position: SHOW TABLES, USE ROLE, CLUSTER BY, RETURNS, LANGUAGE …', () => {
+    const f = (s: string) => formatSql(s, 'snowflake').text.replace(/\s+/g, ' ');
+    expect(f('show tables in schema s')).toBe('SHOW TABLES IN SCHEMA s');
+    expect(f("show databases like 'x%'")).toBe("SHOW DATABASES LIKE 'x%'");
+    expect(f('use warehouse w')).toBe('USE WAREHOUSE w');
+    expect(f('use role r')).toBe('USE ROLE r');
+    expect(f('alter table t cluster by (a, b)')).toBe('ALTER TABLE t CLUSTER BY (a, b)');
+    expect(f('create or replace transient table t clone s.t')).toBe('CREATE OR REPLACE TRANSIENT TABLE t CLONE s.t');
+    expect(f('create or replace secure view v as select 1')).toMatch(/^CREATE OR REPLACE SECURE VIEW v AS SELECT 1$/);
+    expect(f('create or replace procedure p(x int) returns string language javascript as $$ return 1; $$'))
+      .toBe('CREATE OR REPLACE PROCEDURE p (x INT) RETURNS STRING LANGUAGE JAVASCRIPT AS $$ return 1; $$');
+    expect(f('create warehouse w with warehouse_size = xsmall')).toBe('CREATE WAREHOUSE w WITH warehouse_size = xsmall');
+    expect(f('create or replace file format ff type = csv')).toBe('CREATE OR REPLACE FILE FORMAT ff type = csv');
+    expect(f('grant usage on warehouse w to role r')).toBe('GRANT usage ON WAREHOUSE w TO ROLE r');
+    expect(f('alter table t add column c int')).toBe('ALTER TABLE t ADD COLUMN c INT');
+    expect(f("create table t (a number autoincrement, b varchar default 'x' comment 'hello')")).toBe("CREATE TABLE t ( a NUMBER AUTOINCREMENT, b VARCHAR DEFAULT 'x' COMMENT 'hello' )");
+  });
+
+  it('those words stay as typed where they are names', () => {
+    const f = (s: string) => formatSql(s, 'snowflake').text.replace(/\s+/g, ' ');
+    expect(f('create table stage (tag int, role varchar, comment varchar)')).toBe('CREATE TABLE stage ( tag INT, role VARCHAR, comment VARCHAR )');
+    expect(f('alter table t add column refresh int')).toBe('ALTER TABLE t ADD COLUMN refresh INT');
+    expect(f('select role, stage, warehouse from tasks')).toBe('SELECT role, stage, warehouse FROM tasks');
+    expect(f('create table t2 as select a from stage')).toMatch(/FROM stage$/);
+    const once = formatSql('create or replace procedure p(x int) returns string language python as $$ x $$', 'snowflake').text;
+    expect(formatSql(once, 'snowflake').text).toBe(once);
+  });
+
   it('QUALIFY is a clause line of its own, broken at AND / OR like WHERE', () => {
     const out = formatSql('select * from t qualify row_number() over (partition by a order by b) = 1 and x > 0', 'snowflake');
     expect(out.warnings).toEqual([]);
@@ -191,6 +219,52 @@ describe('Snowflake IntelliSense', () => {
     expect(at('SELECT * FROM orders o SAMPLE (10) WHERE o.|')).toContain('TOTAL');
     expect(at('SELECT * FROM orders AT (OFFSET => -60) o WHERE o.|')).toContain('TOTAL');
     expect(at('SELECT * FROM orders o TABLESAMPLE BERNOULLI (10 ROWS) REPEATABLE (7) WHERE o.|')).toContain('TOTAL');
+  });
+
+  it('completes inside the $$ body of a SQL procedure / function and of EXECUTE IMMEDIATE', () => {
+    const proc = (body: string) => `CREATE OR REPLACE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS $$\n${body}\n$$`;
+    expect(at(proc('BEGIN\n  SELECT o.| FROM orders o;\nEND;'))).toEqual(['ID', 'CUSTOMER_ID', 'ORDER_DATE', 'TOTAL']);
+    expect(at(proc('BEGIN\n  SELECT * FROM |;\nEND;'))).toEqual(expect.arrayContaining(['ORDERS', 'CUSTOMERS']));
+    expect(at(proc('DECLARE\n  x INTEGER DEFAULT 1;\nBEGIN\n  LET rs RESULTSET := (SELECT t.| FROM orders t);\n  RETURN TABLE(rs);\nEND;'))).toContain('TOTAL');
+    expect(at(proc('BEGIN\n  IF (1 > 0) THEN\n    UPDATE orders SET |\n  END IF;\nEND;'))).toContain('TOTAL');
+    expect(at(proc('BEGIN\n  FOR r IN (SELECT 1) DO\n    DELETE FROM orders WHERE |;\n  END FOR;\nEND;'))).toContain('TOTAL');
+    expect(at('CREATE FUNCTION f(x INT) RETURNS INT AS $$ SELECT MAX(total) FROM orders WHERE |$$')).toContain('TOTAL');
+    expect(at('EXECUTE IMMEDIATE $$ BEGIN SELECT * FROM orders WHERE | ; END; $$')).toContain('TOTAL');
+    // an unterminated body, and the replace range maps back to the document
+    const d = doc(intel, 'CREATE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS $$ BEGIN SELECT * FROM ord|');
+    const r = intel.complete(d.uri, d.offset);
+    expect(labels(r.items)).toContain('ORDERS');
+    expect(d.text.slice(r.replaceRange[0], r.replaceRange[1])).toBe('ord');
+  });
+
+  it('other languages keep the body opaque', () => {
+    expect(at('CREATE PROCEDURE p() RETURNS STRING LANGUAGE JAVASCRIPT AS $$ select * from | $$')).toEqual([]);
+    expect(at('CREATE PROCEDURE p() RETURNS STRING LANGUAGE PYTHON RUNTIME_VERSION = 3.9 AS $$ x = | $$')).toEqual([]);
+    expect(at("SELECT '$$ a|' AS x")).toEqual([]);
+  });
+
+  it('USE | offers the databases and the object kinds; USE DATABASE | the databases; USE SCHEMA | the schemas and db.', () => {
+    const l = at('USE |');
+    expect(l).toEqual(expect.arrayContaining(['SHOP', 'ARCHIVE', 'DATABASE', 'SCHEMA', 'WAREHOUSE', 'ROLE']));
+    expect(at('USE DATABASE |')).toEqual(expect.arrayContaining(['SHOP', 'ARCHIVE']));
+    expect(at('USE DATABASE |')).not.toContain('MAIN');
+    expect(at('USE database ar|')).toEqual(['ARCHIVE']);
+    const s = at('USE SCHEMA |');
+    expect(s).toEqual(expect.arrayContaining(['MAIN', 'SHOP', 'ARCHIVE']));
+    expect(at('USE SCHEMA shop.|')).toContain('MAIN');
+    expect(at('USE WAREHOUSE |')).toEqual([]);
+    expect(at('USE ROLE |')).toEqual([]);
+    // finished: no names offered after the name
+    expect(at('USE DATABASE shop |')).not.toContain('ARCHIVE');
+  });
+
+  it('USE SCHEMA db.| inserts the bare schema (no trailing dot); USE SCHEMA | inserts the database with a dot', () => {
+    const d = doc(intel, 'USE SCHEMA shop.|');
+    const r = intel.complete(d.uri, d.offset).items.find((i) => i.label === 'MAIN');
+    expect(r?.insertText ?? r?.label).toBe('MAIN');
+    const d2 = doc(intel, 'USE SCHEMA |');
+    const r2 = intel.complete(d2.uri, d2.offset).items.find((i) => i.label === 'ARCHIVE' && i.kind === 'database');
+    expect(r2?.insertText).toBe('ARCHIVE.');
   });
 
   it('three-part names of the console database: tables after db.schema., columns of db.schema.table', () => {

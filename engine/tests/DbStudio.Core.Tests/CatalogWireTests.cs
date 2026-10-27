@@ -72,6 +72,20 @@ public class CatalogWireTests
     }
 
     [Fact]
+    public void OwnedRoutines_CarryTheirExplorerGroup()
+    {
+        // docs/qa/round-postgresql.md 16: extension members are listed apart from the user's routines.
+        var schema = new SchemaCatalog("Shop", "public",
+        [
+            new CatalogObject { Type = ObjectTypes.Func, Name = "postgres_fdw_handler", Group = "Extension postgres_fdw" },
+            new CatalogObject { Type = ObjectTypes.Func, Name = "mine" },
+        ]);
+        var json = Encoding.UTF8.GetString(CatalogWire.SerializeSchema(schema, 1));
+        Assert.Contains("""{"t":"func","n":"postgres_fdw_handler","g":"Extension postgres_fdw"}""", json);
+        Assert.Contains("""{"t":"func","n":"mine"}""", json);
+    }
+
+    [Fact]
     public void ObjectDetails_SerializeTheTypeInfoInCamelCase()
     {
         var details = new ObjectDetails(new ObjectRef(null, "dbo", "Phone", ObjectTypes.Type), [], [], [], [], [], [], null, null, null)

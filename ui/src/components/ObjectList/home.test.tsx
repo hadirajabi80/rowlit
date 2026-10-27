@@ -3,7 +3,7 @@
 // objects are highlighted); "Show objects" activates it; the setting removes / restores it; workspaces from before it
 // existed get it on restore. The view: breadcrumb + list, connection cards that drill down, the welcome content.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initCommands } from '../../commands';
 import { isEnabled, runCommand } from '../../commands/registry';
 import type { CommandTarget } from '../../commands/types';
@@ -247,6 +247,27 @@ describe('ObjectsHomeView', () => {
     // The filter chosen here is remembered for the scope.
     fireEvent.click(within(screen.getByRole('tablist', { name: 'Object types' })).getByRole('tab', { name: /^Procedures/ }));
     expect(groupForScope(homeStateOf(useTabs.getState().tabs.find((t) => t.id === OBJECTS_HOME_ID) as ViewTab), dboKey)).toBe('proc');
+  });
+
+  it('a connection that does not answer: "Connecting…", then "Still connecting…" with Cancel, then Retry (the explorer tree\'s slow-load state)', async () => {
+    const cancelLoad = vi.fn();
+    const retryLoad = vi.fn(async () => undefined);
+    useCatalog.setState({ cancelLoad, retryLoad } as never);
+    useCatalog.setState({ conns: { c_prod: { databases: null, status: 'loading', error: null, slow: false } } });
+    pin({ ...EMPTY_HOME, target: { kind: 'connection', connectionId: 'c_prod' } });
+    render(<Host />);
+    expect(screen.getByRole('status')).toHaveTextContent('Connecting…');
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+
+    act(() => useCatalog.setState({ conns: { c_prod: { databases: null, status: 'loading', error: null, slow: true } } }));
+    expect(screen.getByRole('status')).toHaveTextContent('Still connecting…');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(cancelLoad).toHaveBeenCalledWith({ level: 'conn', connectionId: 'c_prod', database: null });
+
+    act(() => useCatalog.setState({ conns: { c_prod: { databases: null, status: 'error', error: 'Cancelled.', slow: false } } }));
+    expect(screen.getByText('Stopped waiting for Prod SQL')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retryLoad).toHaveBeenCalledWith({ level: 'conn', connectionId: 'c_prod', database: null });
   });
 
   it('a connection: connect, then its databases as cards; double-click drills down and selects in the explorer', async () => {

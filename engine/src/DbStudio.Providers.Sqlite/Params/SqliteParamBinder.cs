@@ -55,6 +55,11 @@ public sealed class SqliteParamBinder : ParamBinderBase
 
     protected override string? UnnamedPlaceholderName(int ordinal) => UnnamedPrefix + ordinal.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>"@__p3": the name <see cref="RewriteUnnamed"/> gives the third unnamed <c>?</c>.</summary>
+    public static bool IsUnnamedPlaceholderName(string name) =>
+        name.Length > UnnamedPrefix.Length && name.StartsWith(UnnamedPrefix, StringComparison.Ordinal)
+        && name.AsSpan(UnnamedPrefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+
     protected override DbParameter CreateParameter(DbCommand command, QueryParam p, string? placeholderName)
     {
         if (p.Kind == ParamKinds.RefCursor)

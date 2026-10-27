@@ -4,6 +4,7 @@ import { api, errorMessage, isApiError } from '../../../api/client';
 import { linksApi, type PushdownPlan } from '../../../api/links';
 import type { QueryParam } from '../../../api/types';
 import { offerCloseIdle } from '../../../app/actions';
+import { resolveParams } from '../../ParamsDialog/ParamsDialog';
 import { getConnection, useConnections } from '../../../store/connections';
 import { useLinks } from '../../../store/links';
 import { useResults } from '../../../store/results';
@@ -15,7 +16,7 @@ import { toast } from '../../../store/ui';
 let seq = 0;
 
 /** Runs `sql` on the link in the tab's session; errors end up in the tab's Messages. */
-export async function runBuilderQuery(tabId: string, linkId: string, sql: string, params: QueryParam[], title: string): Promise<void> {
+export async function runBuilderQuery(tabId: string, linkId: string, sql: string, params: QueryParam[], title: string, opts: { askParams?: boolean } = {}): Promise<void> {
   const conn = getConnection(linkId);
   if (!conn) {
     toast('error', 'The linked database no longer exists');
@@ -31,6 +32,12 @@ export async function runBuilderQuery(tabId: string, linkId: string, sql: string
     return;
   }
   const batches = [{ sql, line: 1, col: 1 }];
+  // Advanced (SQL) mode runs the text as written: its `$name` / `?` values are asked for, as in a console.
+  if (opts.askParams) {
+    const asked = await resolveParams(tabId, conn.id, 'duckdb', batches);
+    if (asked === null) return; // cancelled
+    if (asked) params = asked;
+  }
   const maxRows = useSettings.getState().settings.results.maxRows;
   const localId = `lb${++seq}`;
   useResults.getState().begin(createExecution({

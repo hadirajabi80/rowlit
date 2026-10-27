@@ -182,7 +182,8 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   /** Oracle: unqualified names resolve in the tab session's CURRENT_SCHEMA (the tab's schema), not the login schema. */
   const currentSchema = dialect === 'plsql' ? (session?.database ?? database ?? null) : null;
   const found = useMemo(() => findTable(snapshot, state.schema, state.name, currentSchema), [snapshot, state.schema, state.name, currentSchema]);
-  const isView = state.type === 'view' || found?.obj.t === 'view';
+  // a ClickHouse dictionary (catalog type `type`) is read like a view: no ROWID / unique-key lookups, never editable
+  const isView = state.type === 'view' || found?.obj.t === 'view' || state.type === 'type' || found?.obj.t === 'type';
   /** Every column read, including the hidden Oracle ROWID of a keyless table (always the last one). */
   const allColumns = useMemo(() => data.columns ?? [], [data.columns]);
   /** The dialect whose hidden ROWID / rowid column is dropped from `allColumns` (none when a SQLite column is named rowid). */

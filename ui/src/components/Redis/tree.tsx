@@ -11,7 +11,7 @@ import { buildKeyIndex, folderPattern, type KeyFolder } from '../../redis/keyTre
 import { formatCount, formatTtl } from '../../redis/format';
 import type { TreeRow } from '../Explorer/tree';
 import { VIEW_TITLE, profileDb, type RedisView } from './open';
-import { cacheOf, loadServer, scanForExplorer, useRedis } from './store';
+import { cacheOf, loadServer, scanForExplorer, useRedis, type KeyCache } from './store';
 
 export type RedisNodeType = 'db' | 'folder' | 'key' | 'tool';
 
@@ -84,15 +84,17 @@ function keyRow(base: Base, db: number, k: RedisKeySummary, label: string, depth
   });
 }
 
-function folderRows(base: Base, db: number, folder: KeyFolder, depth: number, out: TreeRow[]): void {
+function folderRows(base: Base, db: number, folder: KeyFolder, depth: number, out: TreeRow[], cache?: KeyCache): void {
   const folders = [...folder.folders.values()].sort((a, b) => a.label.localeCompare(b.label, 'en', { numeric: true }));
   for (const f of folders) {
     const row = sourceRow({
       ...base, nodeType: 'folder', path: [String(db), f.prefix], depth, label: f.label || '(empty)', expandable: true, count: f.count,
+      // a truncated root scan holds only part of the keys: a folder not scanned on its own is a lower bound
+      countPartial: !!cache?.truncated && !cache.scanned.has(f.prefix),
       meta: { db, prefix: f.prefix } satisfies FolderMeta,
     });
     out.push(row);
-    if (row.expanded) folderRows(base, db, f, depth + 1, out);
+    if (row.expanded) folderRows(base, db, f, depth + 1, out, cache);
   }
   const keys = [...folder.keys].sort((a, b) => a.key.localeCompare(b.key, 'en', { numeric: true }));
   for (const k of keys) out.push(keyRow(base, db, k, k.key.slice(folder.prefix.length) || k.key, depth));
@@ -142,7 +144,7 @@ export function redisTree({ connection, depth, expanded, filter }: SourceTreeInp
       rows.push(statusRow(dbRow.id, depth + 1, 'empty', 'No keys'));
       continue;
     }
-    folderRows(base, db, buildKeyIndex([...cache.keys.values()], delimiter), depth + 1, rows);
+    folderRows(base, db, buildKeyIndex([...cache.keys.values()], delimiter), depth + 1, rows, cache);
     if (cache.truncated) {
       rows.push(statusRow(dbRow.id, depth + 1, 'hint', `${formatCount(cache.keys.size)} of ${formatCount(cache.dbSize)} keys: open the browser to scan more`));
     }

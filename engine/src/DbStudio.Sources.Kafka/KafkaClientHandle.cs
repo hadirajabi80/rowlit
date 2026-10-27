@@ -37,8 +37,28 @@ public sealed class KafkaClientHandle : IDataSourceClient
     /// <summary>librdkafka log / error callbacks of every client of this connection (M2-L reads it).</summary>
     public KafkaLogBuffer LogBuffer { get; }
 
-    public ServerInfo Server { get; }
+    public ServerInfo Server { get; private set; }
     public DateTimeOffset LastUsed { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>When the broker version was last looked up lazily (see <see cref="TryResolveVersionAsync"/>).</summary>
+    private long _versionTriedAt;
+
+    /// <summary>
+    /// The one-time broker-version lookup at open time has a 5 s budget; on a loaded or slow cluster it can end without an
+    /// answer and <see cref="ServerInfo.ProductVersion"/> stays null. Try again, at most once a minute, whenever someone asks.
+    /// </summary>
+    public async Task TryResolveVersionAsync(KClusterInfo cluster, CancellationToken ct)
+    {
+        if (Server.ProductVersion is not null) return;
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _versionTriedAt);
+        if (last != 0 && now - last < 60_000) return;
+        Interlocked.Exchange(ref _versionTriedAt, now);
+        var version = await KafkaProvider.BrokerVersionAsync(Gateway, cluster, ct).ConfigureAwait(false);
+        if (version is null) return;
+        var text = Server.Version.StartsWith("Kafka (", StringComparison.Ordinal) ? $"Kafka {version} (" + Server.Version["Kafka (".Length..] : Server.Version;
+        Server = Server with { Version = text, ProductVersion = version };
+    }
 
     /// <summary>Fetch jobs currently running on this connection (Activity in the Logs view).</summary>
     public int ActiveFetches;

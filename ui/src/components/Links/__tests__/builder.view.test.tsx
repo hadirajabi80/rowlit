@@ -20,6 +20,7 @@ import { useTabs, type ViewTab } from '../../../store/tabs';
 import { useUi } from '../../../store/ui';
 import { installMockEngine } from '../../../test/mockServer';
 import { chooseOption } from '../../../test/select';
+import { ParamsDialogHost } from '../../ParamsDialog/ParamsDialog';
 import { BuilderView } from '../builder/BuilderView';
 import { LINK_BUILDER_VIEW, openBuilder } from '../open';
 
@@ -153,6 +154,46 @@ describe('query builder view', () => {
     expect(useSessions.getState().sessions[useSessions.getState().byTab[tabOf().id]]?.connectionId).toBe('c_link');
     expect(useResults.getState().byTab[tabOf().id]).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Results/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('Advanced SQL asks for the $name values before it runs, and Cancel runs nothing', async () => {
+    const execute = vi.spyOn(mock.ctx.engine, 'execute');
+    openBuilder('c_link', {});
+    render(<><Host /><ParamsDialogHost /></>);
+    await screen.findByRole('treeitem', { name: /customers/ });
+    fireEvent.click(listItem('customers'));
+    await screen.findByRole('group', { name: 'Table crm.customers' });
+    fireEvent.click(screen.getByRole('button', { name: /Edit SQL \(Advanced\)/ }));
+    const ed = await screen.findByTestId('sql-editor');
+    fireEvent.change(ed, { target: { value: 'SELECT customers.name FROM crm.customers AS customers WHERE customers.id > $min' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Run/ }));
+    const dlg = await screen.findByRole('dialog', { name: 'Parameters' });
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Parameters' })).toBeNull());
+    expect(execute).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Run/ }));
+    const dlg2 = await screen.findByRole('dialog', { name: 'Parameters' });
+    fireEvent.change(within(dlg2).getByRole('textbox', { name: 'Value of $min' }), { target: { value: '2' } });
+    fireEvent.click(within(dlg2).getByRole('button', { name: /^Run/ }));
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    const req = execute.mock.calls[0][1] as ExecuteRequest;
+    expect(req.batches[0].sql).toContain('> $min');
+    expect(req.params).toEqual([{ name: 'min', kind: 'string', value: '2' }]);
+  });
+
+  it('"Discard SQL edits" is a danger confirmation (the safe button has the focus)', async () => {
+    await openAndRender();
+    fireEvent.click(listItem('customers'));
+    await screen.findByRole('group', { name: 'Table crm.customers' });
+    fireEvent.click(screen.getByRole('button', { name: /Edit SQL \(Advanced\)/ }));
+    const ed = await screen.findByTestId('sql-editor');
+    fireEvent.change(ed, { target: { value: 'SELECT 1 FROM crm.customers PIVOT (x)' } });
+    vi.spyOn(linksApi, 'parse').mockResolvedValue({ model: null, reason: 'PIVOT cannot be shown.' } as never);
+    fireEvent.click(screen.getByRole('button', { name: /Back to builder/ }));
+    await waitFor(() => expect(useUi.getState().confirm).toMatchObject({ confirmLabel: 'Discard SQL edits', danger: true }));
+    act(() => useUi.getState().resolveConfirm(false));
   });
 
   it('saves as a linked view and reopens it from the explorer saved-query target', async () => {

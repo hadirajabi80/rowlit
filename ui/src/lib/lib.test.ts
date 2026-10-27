@@ -118,6 +118,15 @@ describe('formatting and sql helpers', () => {
     expect(prettyPrint('{"a":1}', 'string')).toEqual({ text: '{\n  "a": 1\n}', language: 'json' });
     expect(prettyPrint('<a><b>1</b></a>', 'xml').text).toBe('<a>\n  <b>1</b>\n</a>');
   });
+  it('pretty prints JSON without rounding numbers (docs/qa/round-cassandra.md D)', () => {
+    // bigint above 2^53, a 30-digit decimal, trailing zeros, escapes and empty containers are kept as written.
+    const raw = '[9007199254740993, 123456789012345678901234567890.123, 1.50, {"k":"a\\"b,: {}","e":{},"l":[ ]}]';
+    const json = 'json' as const;
+    expect(prettyPrint(raw, json).text).toBe(
+      '[\n  9007199254740993,\n  123456789012345678901234567890.123,\n  1.50,\n  {\n    "k": "a\\"b,: {}",\n    "e": {},\n    "l": []\n  }\n]');
+    const plain = { a: [1, { b: 'x' }], c: null, d: true };
+    expect(prettyPrint(JSON.stringify(plain), json).text).toBe(JSON.stringify(plain, null, 2));
+  });
   it('quotes identifiers and builds select-top per dialect', () => {
     expect(qualifiedName({ schema: 'dbo', name: 'Order Lines' }, 'tsql', { always: true })).toBe('dbo.[Order Lines]');
     expect(qualifiedName({ schema: 'main', name: 'orders' }, 'sqlite')).toBe('orders');

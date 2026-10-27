@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CatalogSnapshot, Dialect, ParamKind, QueryParam, SqlBatch } from '../../api/types';
 import type { QueryParamType } from '../../codegen/model';
 import { inferQueryParamTypes } from '../../codegen/paramTypes';
+import { ensureDialect } from '../../intel/dialect/registry';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { paramHistory, recalled, rememberParams, useParams, type ParamRow, type ParamsRequest } from '../../store/params';
 import { useTabs } from '../../store/tabs';
@@ -156,6 +157,8 @@ type DialogRequest = ParamsRequest & { confirmLabel?: string };
 export async function resolveParams(
   tabId: string, connectionId: string, dialect: Dialect, batches: readonly SqlBatch[], opts: { force?: boolean; confirmLabel?: string } = {},
 ): Promise<QueryParam[] | null | undefined> {
+  // The lexer of a lazily loaded dialect (DuckDB) must be there before `$name` is recognised: a builder tab has no editor to load it.
+  await ensureDialect(dialect);
   const found = detectParams(batches, dialect);
   if (found.length === 0) return undefined;
   const inferred = inferredKinds(batches, dialect, catalogSnapshot(tabId, connectionId));

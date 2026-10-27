@@ -54,6 +54,19 @@ public sealed class CassandraUnitTests
         Assert.Equal(["p1", "k", null], names);
     }
 
+    [Fact]
+    public void Tokenize_MapAndUdtLiteralColons_AreNotBindMarkers()
+    {
+        // docs/qa/round-cassandra.md E: {'k':true} is a map entry, not the marker :true.
+        var (text, names) = CqlText.PositionalMarkers(
+            "UPDATE t SET m = m + {'k':true, 'j': :v, 1:false}, u = {name:x, \"Zip\":y}, l = [:a], tu = (:b, :c) WHERE id = :id LIMIT :n");
+        Assert.Equal("UPDATE t SET m = m + {'k':true, 'j': ?, 1:false}, u = {name:x, \"Zip\":y}, l = [?], tu = (?, ?) WHERE id = ? LIMIT ?", text);
+        Assert.Equal(["v", "a", "b", "c", "id", "n"], names);
+        var (nested, nestedNames) = CqlText.PositionalMarkers("INSERT INTO t (k, m) VALUES (:k, {(1, 2):tru, :key: :val})");
+        Assert.Equal("INSERT INTO t (k, m) VALUES (?, {(1, 2):tru, ?: ?})", nested);
+        Assert.Equal(["k", "key", "val"], nestedNames);
+    }
+
     [Theory]
     [InlineData("orders", "orders")]
     [InlineData("Orders", "\"Orders\"")]
@@ -269,6 +282,25 @@ public sealed class CassandraUnitTests
         Assert.Equal(new DateTimeOffset(2026, 1, 5, 10, 0, 0, TimeSpan.Zero), CqlValues.ToBind(new DateTime(2026, 1, 5, 10, 0, 0, DateTimeKind.Unspecified), ColumnTypeCode.Timestamp, null));
         Assert.Equal(System.Numerics.BigInteger.Parse("123456789012345678901234567890"), CqlValues.ToBind("123456789012345678901234567890", ColumnTypeCode.Varint, null));
         Assert.Throws<FormatException>(() => CqlValues.ToBind("x", ColumnTypeCode.Int, null));
+    }
+
+    [Fact]
+    public void ToBind_VarintAndDecimalBeyondSystemDecimal_StayExact()
+    {
+        // docs/qa/round-cassandra.md C: a varint edit arrives as an int param, a decimal one as a decimal param.
+        var varint = DbStudio.Core.Params.ParamValues.ToClr(new DbStudio.Core.Params.QueryParam("v", "int", JsonValue.Create("123456789012345678901234567890123")));
+        Assert.Equal(System.Numerics.BigInteger.Parse("123456789012345678901234567890123"), CqlValues.ToBind(varint, ColumnTypeCode.Varint, null));
+        Assert.Throws<FormatException>(() => CqlValues.ToBind("1.5", ColumnTypeCode.Varint, null));
+
+        const string big = "12345678901234567890123456789012345.6789";
+        var dec = DbStudio.Core.Params.ParamValues.ToClr(new DbStudio.Core.Params.QueryParam("d", "decimal", JsonValue.Create(big)));
+        var bound = Assert.IsType<DbStudio.Core.Params.ExactDecimal>(CqlValues.ToBind(dec, ColumnTypeCode.Decimal, null));
+        Assert.Equal(big, CqlValues.ScalarLiteral(bound, ColumnTypeCode.Decimal));
+        Assert.Equal(12.5m, CqlValues.ToBind("12.5", ColumnTypeCode.Decimal, null));
+        // Inside a collection literal the JSON number keeps its digits.
+        var list = new ListColumnInfo { ValueTypeCode = ColumnTypeCode.Decimal };
+        Assert.Equal("[" + big + ", 1.5]", CqlValues.Literal("[" + big + ", 1.5]", ColumnTypeCode.List, list));
+        Assert.Throws<FormatException>(() => CqlValues.ToBind(DbStudio.Core.Params.ParamValues.ToClr(new DbStudio.Core.Params.QueryParam("d", "decimal", JsonValue.Create("NaN"))), ColumnTypeCode.Decimal, null));
     }
 
     // ------------------------------------------------------------------ errors

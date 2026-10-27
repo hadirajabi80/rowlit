@@ -184,6 +184,26 @@ describe('fs-utils', () => {
     await assert.rejects(f.readTextFileDecoded(join(dir, 'u8.sql'), 4), /too large/);
     await assert.rejects(f.readTextFileDecoded(dir, 1024), /Not a file/);
   });
+  it('readTextFileHead reads only the first bytes of a big file and cuts no character in half', async () => {
+    const line = '{"name":"Grüße ✓"}\n';
+    writeFileSync(join(dir, 'big.ndjson'), line.repeat(1000), 'utf8');
+    const small = await f.readTextFileHead(join(dir, 'big.ndjson'), 100);
+    assert.equal(small.truncated, true);
+    assert.equal(small.size, Buffer.byteLength(line.repeat(1000)));
+    assert.ok(small.content.length <= 100 && small.content.startsWith('{"name":"Grüße ✓"}\n'));
+    assert.ok(!small.content.includes('�'), 'a multi-byte character cut at the end is dropped, not replaced');
+    for (const n of [20, 21, 22, 23, 24, 25]) assert.ok(!(await f.readTextFileHead(join(dir, 'big.ndjson'), n)).content.includes('�'), `cut at ${n}`);
+    const whole = await f.readTextFileHead(join(dir, 'big.ndjson'), 1 << 20);
+    assert.equal(whole.truncated, false);
+    assert.equal(whole.content, line.repeat(1000));
+    writeFileSync(join(dir, 'bom.csv'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a,b\n1,2\n', 'utf8')]));
+    assert.equal((await f.readTextFileHead(join(dir, 'bom.csv'), 1024)).content, 'a,b\n1,2\n');
+    await assert.rejects(f.readTextFileHead(dir, 1024), /Not a file/);
+  });
+  it('validateHeadBytes accepts a positive integer within the read limit', () => {
+    assert.equal(v.validateHeadBytes(262144), 262144);
+    for (const bad of [0, -1, 1.5, '10', null, undefined, v.LIMITS.readBytes + 1]) assert.throws(() => v.validateHeadBytes(bad), v.ValidationError, String(bad));
+  });
 });
 
 describe('validateMenuShortcuts (the renderer\'s keymap for the native menu)', () => {

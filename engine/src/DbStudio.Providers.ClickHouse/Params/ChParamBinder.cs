@@ -139,7 +139,7 @@ public sealed class ChParamBinder : IParamBinder
     /// <summary>The ClickHouse type a console parameter is sent as.</summary>
     public static string TypeFor(QueryParam p, object? value)
     {
-        var baseType = p.Kind switch
+        var baseType = value is ExactDecimal exact ? ExactType(exact) : p.Kind switch
         {
             ParamKinds.Int => "Int64",
             ParamKinds.Decimal => value is decimal m ? $"Decimal(38, {Math.Min(Scale(m), 37).ToString(CultureInfo.InvariantCulture)})" : "Decimal(38, 10)",
@@ -156,10 +156,25 @@ public sealed class ChParamBinder : IParamBinder
 
     private static int Scale(decimal m) => (decimal.GetBits(m)[3] >> 16) & 0xFF;
 
+    /// <summary>
+    /// The type of a value long / System.Decimal cannot hold: Int256 for integers, Decimal(76, s) (Decimal256) otherwise,
+    /// Float64 for NaN / Infinity. The driver sends the parameter as text, so every digit arrives.
+    /// </summary>
+    private static string ExactType(ExactDecimal exact)
+    {
+        if (!exact.IsFinite) return "Float64";
+        if (exact.IsInteger && exact.Precision - exact.Scale <= 76) return "Int256";
+        if (exact.Precision > 76 || exact.Scale > 76)
+            throw new FormatException($"'{exact.Text}' has more than the 76 digits of a ClickHouse Decimal256.");
+        return $"Decimal(76, {exact.Scale.ToString(CultureInfo.InvariantCulture)})";
+    }
+
     /// <summary>The CLR value handed to the driver for <paramref name="type"/>.</summary>
     public static object Convert(object? value, string type) => value switch
     {
         null => DBNull.Value,
+        ExactDecimal { IsFinite: false } special => special.Text switch { "NaN" => "nan", "-Infinity" => "-inf", _ => "inf" },
+        ExactDecimal exact => exact.IsInteger && ChTypes.BaseName(ChTypes.Unwrap(type)) is "Int256" or "UInt256" or "Int128" or "UInt128" ? exact.ToBigInteger().ToString(CultureInfo.InvariantCulture) : exact.Text,
         DateTimeOffset dto => dto.UtcDateTime,
         TimeSpan ts => ts.ToString("c", CultureInfo.InvariantCulture),
         byte[] bytes => System.Convert.ToHexString(bytes),

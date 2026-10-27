@@ -7,7 +7,7 @@ import { distinctCondition, distinctValues } from '../FilterBar/DistinctValues';
 import { describeModel } from '../FilterBar/describe';
 import { detectParams } from '../ParamsDialog/detect';
 import { convertValue } from '../ParamsDialog/ParamsDialog';
-import { foreignKeys, referencingTables, resultEditability, tableEditability } from './editability';
+import { findTable, foreignKeys, referencingTables, resultEditability, tableEditability } from './editability';
 import { parseEdit } from './editValue';
 import { overlayRows } from './overlay';
 import { cellEqualsCondition, quickFilterOptions } from './quickFilter';
@@ -57,6 +57,19 @@ describe('editability', () => {
   it('tables without a key are read-only in a data tab', () => {
     expect(tableEditability([col('a', 'int')], 'main', 'nokey', null, CONN).reason).toMatch(/No primary key/);
     expect(tableEditability(COLS, 'main', 'customers', SNAP, CONN).editable).toBe(true);
+  });
+  it('a ClickHouse dictionary opens in the data tab: found in the catalog, read-only without the "No primary key" warning', () => {
+    const snap: CatalogSnapshot = {
+      ...SNAP, dialect: 'clickhouse',
+      schemas: [{ name: 'main', version: 1, objects: [{ t: 'type', n: 'product_dict', cm: 'Dictionary', c: [['id', 'UInt64', 0, 1, 0, null], ['name', 'String', 0, 0, 0, null]], pk: ['id'] }] }],
+    };
+    const cols = [col('id', 'int', { table: 'product_dict' }), col('name', 'string', { table: 'product_dict' })];
+    const e = tableEditability(cols, 'main', 'product_dict', snap, CONN, true, 'clickhouse');
+    expect(e).toMatchObject({ editable: false, reason: 'Dictionary: read-only' });
+    expect(resultEditability(cols, { singleSelect: true, snapshot: snap, conn: CONN, dialect: 'clickhouse' })).toMatchObject({ editable: false, reason: 'Dictionary: read-only' });
+    expect(findTable(snap, 'main', 'product_dict')?.obj.pk).toEqual(['id']);
+    // a type without columns (a PostgreSQL enum) is still not a table
+    expect(findTable({ ...snap, schemas: [{ name: 'main', version: 1, objects: [{ t: 'type', n: 'mood' }] }] }, 'main', 'mood')).toBeNull();
   });
   it('finds foreign keys and referencing tables', () => {
     expect(foreignKeys(COLS, 'main', 'customers', SNAP)).toEqual([{ name: 'fk_c_country', ordinals: [2], refSchema: 'main', refTable: 'countries', refColumns: ['id'] }]);

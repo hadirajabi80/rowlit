@@ -186,6 +186,28 @@ public sealed class IndexesTests
     }
 
     [Fact]
+    public void Wildcard_indexes_are_accepted_with_an_optional_projection()
+    {
+        var all = IndexesService.BuildSpec(Req(("$**", 1)));
+        Assert.Equal(new BsonDocument("$**", 1), all["key"]);
+        Assert.Equal("$**_1", all["name"].AsString);
+        Assert.Equal(new BsonDocument("user.$**", -1), IndexesService.BuildSpec(Req(("user.$**", -1)))["key"]);
+
+        var req = Req(("$**", 1));
+        req.Options = new MongoCreateIndexOptions { WildcardProjection = "{ a: 1, 'b.c': 1 }" };
+        Assert.Equal(new BsonDocument { { "a", 1 }, { "b.c", 1 } }, IndexesService.BuildSpec(req)["wildcardProjection"]);
+
+        // a projection only belongs to the whole-document wildcard
+        var sub = Req(("user.$**", 1));
+        sub.Options = new MongoCreateIndexOptions { WildcardProjection = "{ a: 1 }" };
+        Assert.Equal("options.wildcardProjection", MongoSettingsBuilderTests.Field(Assert.Throws<EngineException>(() => IndexesService.BuildSpec(sub))));
+
+        // anything else starting with $ is still refused, and so is a wildcard that is not a whole last segment
+        foreach (var bad in new[] { "$set", "$**.a", "a$**", "$.$**", "a..$**" })
+            Assert.Equal("key[0].field", MongoSettingsBuilderTests.Field(Assert.Throws<EngineException>(() => IndexesService.BuildSpec(Req((bad, 1))))));
+    }
+
+    [Fact]
     public async Task Long_builds_become_jobs_with_progress()
     {
         var fake = T.Shop();

@@ -84,6 +84,16 @@ public sealed class SqlServerParamBinder : ParamBinderBase
 
         var parameter = new SqlParameter { ParameterName = "@" + placeholderName, Direction = DirectionOf(p) };
         var value = p.EffectiveDirection == ParamDirections.Out ? null : ParamValues.ToClr(p);
+        if (value is ExactDecimal exact)
+        {
+            // decimal(38): more digits than System.Decimal holds (29+) are bound as a SqlDecimal parsed from the text.
+            var sqlDecimal = ToSqlDecimal(exact);
+            parameter.SqlDbType = SqlDbType.Decimal;
+            parameter.Precision = 38;
+            parameter.Scale = sqlDecimal.Scale;
+            parameter.Value = sqlDecimal;
+            return parameter;
+        }
         switch (p.Kind)
         {
             case ParamKinds.Int:
@@ -139,5 +149,21 @@ public sealed class SqlServerParamBinder : ParamBinderBase
                 break;
         }
         return parameter;
+    }
+
+    /// <summary>An exact value (decimal or int param) as a SqlDecimal: up to 38 digits, a scale up to 38, no NaN.</summary>
+    public static System.Data.SqlTypes.SqlDecimal ToSqlDecimal(ExactDecimal exact)
+    {
+        if (!exact.IsFinite) throw new FormatException($"SQL Server decimal has no {exact.Text}; bind a float value instead.");
+        if (exact.Precision > 38 || exact.Scale > 38)
+            throw new FormatException($"'{exact.Text}' has more than the 38 digits of a SQL Server decimal.");
+        try
+        {
+            return System.Data.SqlTypes.SqlDecimal.Parse(exact.Text);
+        }
+        catch (Exception ex) when (ex is OverflowException or System.Data.SqlTypes.SqlTypeException)
+        {
+            throw new FormatException($"'{exact.Text}' has more than the 38 digits of a SQL Server decimal.", ex);
+        }
     }
 }

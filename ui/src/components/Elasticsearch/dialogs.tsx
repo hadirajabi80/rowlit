@@ -5,10 +5,10 @@ import { Download, Upload } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import type { EsExportRequest, EsExportResult, EsFileFormat, EsImportResult, EsReindexResult } from '../../api/types.es';
-import { formatCount, formatMs, indexNameError } from '../../es/format';
+import { formatBytes, formatCount, formatMs, indexNameError } from '../../es/format';
 import { bodyIndexSetting, isPlainObject, parseLenient, pretty } from '../../es/json';
 import { getPlatform } from '../../platform';
-import { toast } from '../../store/ui';
+import { toast, useUi } from '../../store/ui';
 import type { EffectiveTheme } from '../../theme/useTheme';
 import { Dialog } from '../common/Dialog';
 import { CodeEditor } from './CodeEditor';
@@ -191,6 +191,24 @@ function CancelJob<R>({ state }: { state: JobState<R> }) {
   return <button type="button" className="btn" onClick={() => void api.cancelJob(state.jobId!).catch(() => undefined)}>Cancel job</button>;
 }
 
+/**
+ * Closing a job dialog (Cancel button, X, Escape) while its job runs: the job lives in the engine and keeps going, so ask
+ * whether that is meant. "Keep running in background" closes the dialog (the Tasks tab shows the job); "Cancel job" stops it.
+ */
+export async function closeWithJob<R>(state: JobState<R>, close: () => void): Promise<void> {
+  if (state.status !== 'running') return close();
+  const choice = await useUi.getState().askConfirmChoice({
+    title: 'The job is still running',
+    message: 'It keeps running in the engine if you close this dialog (follow it in the Tasks tab), or you can cancel it now.',
+    confirmLabel: 'Keep running in background',
+    altLabel: 'Cancel job',
+    cancelLabel: 'Back to the dialog',
+  });
+  if (choice === 'cancel') return;
+  if (choice === 'alt' && state.jobId) await api.cancelJob(state.jobId).catch(() => undefined);
+  close();
+}
+
 // ---------------------------------------------------------------- reindex
 
 export function ReindexDialog({ cid, source, onClose, onDone }: { cid: string; source: string; onClose(): void; onDone(): void }) {
@@ -219,11 +237,11 @@ export function ReindexDialog({ cid, source, onClose, onDone }: { cid: string; s
   const running = job.state.status === 'running';
   const result = job.state.result;
   return (
-    <Dialog title="Reindex" onClose={onClose} width={640} footer={
+    <Dialog title="Reindex" onClose={() => void closeWithJob(job.state, onClose)} width={640} footer={
       <>
         <CancelJob state={job.state} />
         <span className="flex-1" />
-        <button type="button" className="btn" onClick={onClose}>{result ? 'Close' : 'Cancel'}</button>
+        <button type="button" className="btn" onClick={() => void closeWithJob(job.state, onClose)}>{result ? 'Close' : 'Cancel'}</button>
         {!result && <button type="button" className="btn btn-primary" disabled={running || !src || !dest} onClick={() => void run()}>{running ? 'Reindexing…' : 'Reindex'}</button>}
       </>
     }>
@@ -311,11 +329,11 @@ export function ExportDialog({ cid, index, onClose }: { cid: string; index: stri
   };
   const running = busy || job.state.status === 'running';
   return (
-    <Dialog title={`Export ${index}`} onClose={onClose} width={600} footer={
+    <Dialog title={`Export ${index}`} onClose={() => void closeWithJob(job.state, onClose)} width={600} footer={
       <>
         <CancelJob state={job.state} />
         <span className="flex-1" />
-        <button type="button" className="btn" onClick={onClose}>{job.state.result ? 'Close' : 'Cancel'}</button>
+        <button type="button" className="btn" onClick={() => void closeWithJob(job.state, onClose)}>{job.state.result ? 'Close' : 'Cancel'}</button>
         {!job.state.result && <button type="button" className="btn btn-primary" disabled={running} onClick={() => void run()}><Download size={14} aria-hidden /> {running ? 'Exporting…' : 'Export'}</button>}
       </>
     }>
@@ -351,14 +369,72 @@ function formatOf(name: string): EsFileFormat {
   return 'ndjson';
 }
 
-/** First documents of the picked file (client-side preview). */
-export function previewDocs(content: string, format: EsFileFormat, delimiter: string, max = 5): { docs: unknown[]; error: string | null } {
+/** How much of a picked file the dialog reads for its preview when the engine reads the file by path. */
+export const PREVIEW_BYTES = 256 * 1024;
+
+/**
+ * The first elements of a top-level JSON array that was cut somewhere in the middle: complete `{…}` / `[…]` / scalar
+ * elements only. Null when the text is not an array.
+ */
+export function headOfJsonArray(text: string, max: number): unknown[] | null {
+  let i = 0;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  if (text[i] !== '[') return null;
+  const out: unknown[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  for (i += 1; i < text.length && out.length < max; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+      if (!inString && depth === 0 && start >= 0) {
+        out.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      if (depth === 0 && start < 0) start = i;
+    } else if (c === '{' || c === '[') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === '}' || c === ']') {
+      if (depth === 0) break; // the array's own closing bracket
+      depth--;
+      if (depth === 0 && start >= 0) {
+        out.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    } else if (depth === 0 && c !== ',' && !/\s/.test(c) && start < 0) {
+      // a number / true / false / null: runs to the next comma or the closing bracket
+      const end = text.slice(i).search(/[,\]\s]/);
+      if (end < 0) break;
+      out.push(JSON.parse(text.slice(i, i + end)));
+      i += end - 1;
+    }
+  }
+  return out;
+}
+
+/** First documents of the picked file (client-side preview). `partial`: the content is only the head of a bigger file. */
+export function previewDocs(content: string, format: EsFileFormat, delimiter: string, max = 5, partial = false): { docs: unknown[]; error: string | null } {
   try {
     if (format === 'json') {
+      if (partial) {
+        const head = headOfJsonArray(content, max);
+        if (head) return { docs: head, error: null };
+        return { docs: [], error: 'The file is one big JSON value: it is too large to preview here, but it can still be imported.' };
+      }
       const v = JSON.parse(content) as unknown;
       return { docs: (Array.isArray(v) ? v : [v]).slice(0, max), error: null };
     }
-    const lines = content.split(/\r?\n/).filter((l) => l.trim());
+    let lines = content.split(/\r?\n/);
+    // the last line of a cut-off head is incomplete
+    if (partial && lines.length > 1) lines = lines.slice(0, -1);
+    lines = lines.filter((l) => l.trim());
     if (format === 'ndjson') {
       const docs: unknown[] = [];
       for (const l of lines) {
@@ -377,7 +453,9 @@ export function previewDocs(content: string, format: EsFileFormat, delimiter: st
 }
 
 export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
-  cid: string; index: string; onClose(): void; onDone(index: string): void; initialFile?: { name: string; path: string | null; content: string };
+  cid: string; index: string; onClose(): void; onDone(index: string): void;
+  /** `truncated`: `content` is only the first bytes of a bigger file (the engine reads `path`); `size`: the file's bytes. */
+  initialFile?: { name: string; path: string | null; content: string; truncated?: boolean; size?: number };
 }) {
   const [target, setTarget] = useState(index);
   const [file, setFile] = useState(initialFile ?? null);
@@ -388,9 +466,10 @@ export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
   const [error, setError] = useState<string | null>(null);
   const job = useJob<EsImportResult>();
   const targets = useMemo(() => knownTargets(cid), [cid]);
-  const preview = useMemo(() => (file ? previewDocs(file.content, format, delimiter) : null), [file, format, delimiter]);
+  const preview = useMemo(() => (file ? previewDocs(file.content, format, delimiter, 5, file.truncated === true) : null), [file, format, delimiter]);
   const pick = async () => {
-    const f = await getPlatform().openTextFile({ filters: [{ name: 'NDJSON, JSON, CSV', extensions: ['ndjson', 'jsonl', 'json', 'csv', 'tsv'] }] });
+    // the desktop app hands the path to the engine: only the head is read here, for the preview
+    const f = await getPlatform().openTextFile({ filters: [{ name: 'NDJSON, JSON, CSV', extensions: ['ndjson', 'jsonl', 'json', 'csv', 'tsv'] }], maxBytes: PREVIEW_BYTES });
     if (!f) return;
     setFile(f);
     setFormat(formatOf(f.name));
@@ -400,6 +479,7 @@ export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
     const err = indexNameError(target);
     if (err) return setError(err);
     if (!file) return setError('Choose a file.');
+    if (file.truncated && !(file.path && getPlatform().hasFileSystem)) return setError('Only the start of this file was read; choose it again.');
     setError(null);
     const r = await job.run(() => api.es.importDocs(cid, {
       index: target, format, idField: idField.trim() || null, batchSize: Number(batch) || 1000,
@@ -415,11 +495,11 @@ export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
   const running = job.state.status === 'running';
   const result = job.state.result;
   return (
-    <Dialog title="Import documents" onClose={onClose} width={720} footer={
+    <Dialog title="Import documents" onClose={() => void closeWithJob(job.state, onClose)} width={720} footer={
       <>
         <CancelJob state={job.state} />
         <span className="flex-1" />
-        <button type="button" className="btn" onClick={onClose}>{result ? 'Close' : 'Cancel'}</button>
+        <button type="button" className="btn" onClick={() => void closeWithJob(job.state, onClose)}>{result ? 'Close' : 'Cancel'}</button>
         {!result && <button type="button" className="btn btn-primary" disabled={running || !file || !target} onClick={() => void run()}><Upload size={14} aria-hidden /> {running ? 'Importing…' : 'Import'}</button>}
       </>
     }>
@@ -428,7 +508,7 @@ export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
         <span className="form-label">File</span>
         <span className="es-inline">
           <button type="button" className="btn btn-xs" onClick={() => void pick()}>Choose file…</button>
-          {file && <span className="mono" title={file.path ?? file.name}>{file.name} <span className="muted">({formatCount(file.content.length)} chars)</span></span>}
+          {file && <span className="mono" title={file.path ?? file.name}>{file.name} <span className="muted">({file.size !== undefined ? formatBytes(file.size) : `${formatCount(file.content.length)} chars`}{file.truncated ? `, preview of the first ${formatBytes(file.content.length)}` : ''})</span></span>}
         </span>
         <label className="form-label" htmlFor="es-im-index">Index<span className="req">*</span></label>
         <input id="es-im-index" className="input mono" list="es-import-targets" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="created when missing" />

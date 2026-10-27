@@ -692,7 +692,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
         />
       )}
       {r.detail && <span className="tree-detail">{r.detail}</span>}
-      {r.count !== undefined && r.kind !== 'object' && r.kind !== 'query' && <span className="tree-count">{r.count.toLocaleString()}</span>}
+      {r.count !== undefined && r.kind !== 'object' && r.kind !== 'query' && <span className="tree-count" title={r.countPartial ? 'At least this many: not every key is loaded yet' : undefined}>{r.count.toLocaleString()}{r.countPartial ? '+' : ''}</span>}
       {r.kind === 'connection' && r.connectionId && (
         <span className="tree-row-actions">
           {conn && providerKind(conn.providerId) !== 'relational' ? (

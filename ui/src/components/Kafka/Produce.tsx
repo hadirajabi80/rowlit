@@ -65,6 +65,7 @@ export function ProduceView({ tab, theme }: { tab: ViewTab; theme: EffectiveThem
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<KafkaProduceResult[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const subjects = useKafka((s) => s.conns[cid]?.subjects);
   const ro = isReadOnly(cid);
   const registry = hasRegistry(cid);
@@ -82,9 +83,13 @@ export function ProduceView({ tab, theme }: { tab: ViewTab; theme: EffectiveThem
     if (typeof req === 'string') return setError(req);
     setBusy(true);
     setError(null);
+    setWarnings([]);
     try {
       const r = await api.kafka.produce(cid, st.topic, req);
       setResults(r);
+      // fields the Avro schema does not have were not written: say so (the same warning repeats for every message)
+      const dropped = [...new Set(r.flatMap((x) => x.warnings ?? []))];
+      setWarnings(dropped);
       toast('success', `Produced ${r.length} message${r.length === 1 ? '' : 's'} to ${st.topic}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -104,6 +109,7 @@ export function ProduceView({ tab, theme }: { tab: ViewTab; theme: EffectiveThem
       </ViewHeader>
       {ro && <Banner tone="warn">This connection is read-only: producing is disabled.</Banner>}
       {error && <Banner>{error}</Banner>}
+      {warnings.length > 0 && <Banner tone="warn">Produced, but {warnings.slice(0, 5).join('; ')}{warnings.length > 5 ? `; and ${warnings.length - 5} more` : ''}</Banner>}
       <div className="kafka-scroll kafka-produce">
         <div className="form-grid kafka-produce-grid">
           <span className="form-label">Partition</span>

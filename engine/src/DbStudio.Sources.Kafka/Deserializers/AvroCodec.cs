@@ -44,9 +44,21 @@ public static class AvroCodec
         return doc.RootElement.Clone();
     }
 
-    public static byte[] Encode(Schema schema, JsonElement value)
+    public static byte[] Encode(Schema schema, JsonElement value) => Encode(schema, value, null);
+
+    /// <summary>Encoding is synchronous: the warnings of the running call travel in a thread-static list.</summary>
+    [ThreadStatic] private static List<string>? _warnings;
+
+    /// <param name="warnings">
+    /// Receives one line per field of the input that the schema does not have (it is not written: Avro records only hold the
+    /// schema's fields, so a typo such as <c>amout</c> would otherwise be dropped silently).
+    /// </param>
+    public static byte[] Encode(Schema schema, JsonElement value, List<string>? warnings)
     {
-        var datum = ToDatum(schema, value, "$");
+        _warnings = warnings;
+        object? datum;
+        try { datum = ToDatum(schema, value, "$"); }
+        finally { _warnings = null; }
         using var ms = new MemoryStream();
         new GenericDatumWriter<object?>(schema).Write(datum, new BinaryEncoder(ms));
         return ms.ToArray();
@@ -156,6 +168,12 @@ public static class AvroCodec
                     }
                     else throw Fail($"{path}.{f.Name}", "required field is missing");
                 }
+                if (_warnings is not null)
+                {
+                    foreach (var p in v.EnumerateObject())
+                        if (!r.Fields.Any(f => f.Name == p.Name || (f.Aliases?.Contains(p.Name) ?? false)))
+                            _warnings.Add($"{path}.{p.Name}: not a field of record {r.Fullname}, so it was not written");
+                }
                 return rec;
             case EnumSchema e:
                 var symbol = v.ValueKind == JsonValueKind.String ? v.GetString()! : throw Fail(path, $"expected a symbol of {e.Fullname}");
@@ -198,8 +216,13 @@ public static class AvroCodec
         var errors = new List<string>();
         foreach (var s in u.Schemas.Where(s => s.Tag != Schema.Type.Null))
         {
+            var mark = _warnings?.Count ?? 0;
             try { return ToDatum(s, v, path); }
-            catch (FormatException ex) { errors.Add(ex.Message); }
+            catch (FormatException ex)
+            {
+                errors.Add(ex.Message);
+                _warnings?.RemoveRange(mark, _warnings.Count - mark); // warnings of a branch that did not fit
+            }
         }
         throw Fail(path, $"value matches no union branch ({string.Join("; ", errors)})");
     }

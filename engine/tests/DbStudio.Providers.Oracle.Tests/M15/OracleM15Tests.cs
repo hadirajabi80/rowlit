@@ -296,6 +296,14 @@ public sealed class OracleParamBinderTests
         var parameter = (OracleParameter)cmd.Parameters[0];
         Assert.Equal(OracleDbType.Decimal, parameter.OracleDbType);
         Assert.Equal(third.ToString(), parameter.Value!.ToString());
+
+        // An int param beyond long (NUMBER(38) key) binds as an exact NUMBER too; NUMBER has no NaN.
+        using var intCmd = new OracleCommand("SELECT :p FROM dual") { BindByName = true };
+        OracleParamBinder.Instance.Bind(intCmd, [new QueryParam("p", ParamKinds.Int, JsonValue.Create("12345678901234567890123456789012345678"))], new ParamBindCursor());
+        var intParameter = (OracleParameter)intCmd.Parameters[0];
+        Assert.Equal((OracleDbType.Decimal, "12345678901234567890123456789012345678"), (intParameter.OracleDbType, intParameter.Value!.ToString()));
+        using var nanCmd = new OracleCommand("SELECT :p FROM dual") { BindByName = true };
+        Assert.Throws<EngineException>(() => OracleParamBinder.Instance.Bind(nanCmd, [P("NaN")], new ParamBindCursor()));
     }
 
     [Fact]

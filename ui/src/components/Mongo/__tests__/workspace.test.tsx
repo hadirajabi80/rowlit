@@ -122,6 +122,17 @@ describe('schema, indexes, validation, explain', () => {
     await waitFor(() => expect(screen.queryByText('total_1')).not.toBeInTheDocument());
   });
 
+  it('offers a wildcard projection only for a $** index on the whole document', async () => {
+    renderCollection('products', 'indexes');
+    fireEvent.click(await screen.findByRole('button', { name: /Create index/ }));
+    const dlg = await screen.findByRole('dialog');
+    expect(within(dlg).queryByLabelText('Wildcard projection')).not.toBeInTheDocument();
+    fireEvent.change(within(dlg).getByRole('combobox', { name: 'Field 1' }), { target: { value: '$**' } });
+    expect(await within(dlg).findByLabelText('Wildcard projection')).toBeInTheDocument();
+    fireEvent.change(within(dlg).getByRole('combobox', { name: 'Field 1' }), { target: { value: 'profile.$**' } });
+    expect(within(dlg).queryByLabelText('Wildcard projection')).not.toBeInTheDocument();
+  });
+
   it('refuses a TTL on a compound index', async () => {
     renderCollection('products', 'indexes');
     fireEvent.click(await screen.findByRole('button', { name: /Create index/ }));

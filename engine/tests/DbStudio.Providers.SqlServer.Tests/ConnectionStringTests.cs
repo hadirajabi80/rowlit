@@ -26,6 +26,16 @@ public sealed class ConnectionStringTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ConnectRetry_StaysOnce_ButWaitsOneSecond_SoAMistypedDatabaseIsReportedQuickly(bool pooling)
+    {
+        var b = new SqlConnectionStringBuilder(SqlServerConnectionStrings.Build(Profile(("server", "host"), ("database", "typo")), "p", pooling));
+        Assert.Equal(1, b.ConnectRetryCount);
+        Assert.Equal(1, b.ConnectRetryInterval); // the driver default is 10 s: sessions / catalog connections took 11 s to fail
+    }
+
+    [Theory]
     [MemberData(nameof(Combinations))]
     public void EveryFormCombination_BuildsExpectedString(string auth, string encrypt, bool trust, bool pooling, string? database, int timeout)
     {

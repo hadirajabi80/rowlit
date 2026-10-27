@@ -34,6 +34,15 @@ export function SqlView({ tab, theme, cid }: TabViewProps & { cid: string }) {
     void loadIndices(cid);
   }, [cid]);
 
+  // closing the tab releases the server-side cursor of an unfinished result instead of leaving it to expire
+  useEffect(
+    () => () => {
+      if (cursor.current) void api.es.sqlClose(cid, cursor.current).catch(() => undefined);
+      cursor.current = null;
+    },
+    [cid],
+  );
+
   useEffect(() => {
     const t = setTimeout(() => patchTab(tab.id, { query }), 400);
     return () => clearTimeout(t);

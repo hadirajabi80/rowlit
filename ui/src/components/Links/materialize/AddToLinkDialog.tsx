@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { errorMessage } from '../../../api/client';
 import { linkDefinitionOf } from '../../../api/links';
 import { runCommand } from '../../../commands/registry';
+import { useCatalog } from '../../../store/catalog';
 import { getConnection, useConnections } from '../../../store/connections';
 import { toast } from '../../../store/ui';
 import { Dialog } from '../../common/Dialog';
@@ -32,7 +33,7 @@ export function AddToLinkDialog({ source, onClose }: { source: TableSource; onCl
     }
     const profile = links.find((l) => l.id === choice);
     if (!profile) return;
-    const result = addTableToDefinition(linkDefinitionOf(profile), source, origin?.name ?? 'db');
+    const result = addTableToDefinition(linkDefinitionOf(profile), source, origin?.name ?? 'db', useCatalog.getState().conns[source.connectionId]?.databases?.current ?? null);
     if (result.already) {
       toast('info', `${label} is already in ${profile.name}`, `Query it as ${result.alias}.${result.table}.`);
       onClose();

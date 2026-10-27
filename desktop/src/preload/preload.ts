@@ -33,6 +33,8 @@ const bridge: DbStudioBridge = {
   showOpenDialog: (opts: { title?: string; filters?: FileFilter[]; createIfMissing?: boolean }) =>
     ipcRenderer.invoke(IPC.showOpenDialog, opts) as Promise<string | null>,
   readTextFile: (path: string) => ipcRenderer.invoke(IPC.readTextFile, path) as Promise<string>,
+  readTextFileHead: (path: string, maxBytes: number) =>
+    ipcRenderer.invoke(IPC.readTextFileHead, path, maxBytes) as Promise<{ content: string; size: number; truncated: boolean }>,
   writeTextFile: (path: string, content: string) =>
     ipcRenderer.invoke(IPC.writeTextFile, path, content) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,

@@ -163,16 +163,20 @@ export function CreateIndexDialog({ cid, db, coll, fields = cachedFields(cid, db
   const [ttl, setTtl] = useState('');
   const [partial, setPartial] = useState('');
   const [collation, setCollation] = useState('');
+  const [wildProj, setWildProj] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = keys.length > 0 && keys.every((k) => k.field.trim()) && new Set(keys.map((k) => k.field.trim())).size === keys.length;
   const partialErr = partial.trim() ? checkShell(partial)?.message : null;
   const collErr = collation.trim() ? checkShell(collation)?.message : null;
+  // a projection narrows a wildcard index over the whole document (`$**`)
+  const wholeWildcard = keys.length === 1 && keys[0].field.trim() === '$**';
+  const wildErr = wholeWildcard && wildProj.trim() ? checkShell(wildProj)?.message : null;
   const ttlErr = ttl && keys.length !== 1 ? 'TTL indexes have exactly one field.' : null;
   const autoName = keys.filter((k) => k.field.trim()).map((k) => `${k.field.trim()}_${k.type}`).join('_');
 
   const submit = async () => {
-    if (!valid || partialErr || collErr || ttlErr || busy) return;
+    if (!valid || partialErr || collErr || wildErr || ttlErr || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -181,6 +185,7 @@ export function CreateIndexDialog({ cid, db, coll, fields = cachedFields(cid, db
         key, options: {
           name: name.trim() || null, unique, sparse, expireAfterSeconds: ttl ? Number(ttl) : null,
           partialFilterExpression: partial.trim() || null, collation: collation.trim() || null,
+          wildcardProjection: wholeWildcard && wildProj.trim() ? wildProj.trim() : null,
         },
       });
       onStarted(r.name, r.jobId);
@@ -194,7 +199,7 @@ export function CreateIndexDialog({ cid, db, coll, fields = cachedFields(cid, db
 
   return (
     <Dialog title={`Create index on ${db}.${coll}`} onClose={onClose} width={620}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!valid || !!partialErr || !!collErr || !!ttlErr || busy} onClick={() => void submit()}>Create index</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!valid || !!partialErr || !!collErr || !!wildErr || !!ttlErr || busy} onClick={() => void submit()}>Create index</button></>}>
       <datalist id="mg-ix-fields">{fields.map((f) => <option key={f.path} value={f.path} />)}</datalist>
       <fieldset className="mg-ixfields">
         <legend>Fields</legend>
@@ -220,10 +225,16 @@ export function CreateIndexDialog({ cid, db, coll, fields = cachedFields(cid, db
         <input id="mg-ix-ttl" className={`input ${ttlErr ? 'invalid' : ''}`} inputMode="numeric" placeholder="no expiry" value={ttl} onChange={(e) => setTtl(e.target.value.replace(/\D/g, ''))} />
         <span className="form-label">Partial filter</span>
         <MongoEditor singleLine mode="filter" fields={fields} theme={theme} value={partial} onChange={setPartial} placeholder={'{ status: { $exists: true } }'} ariaLabel="Partial filter expression" invalid={!!partialErr} />
+        {wholeWildcard && (
+          <>
+            <span className="form-label">Wildcard projection</span>
+            <MongoEditor singleLine mode="projection" fields={fields} theme={theme} value={wildProj} onChange={setWildProj} placeholder={'{ "profile": 1, "tags": 1 }'} ariaLabel="Wildcard projection" invalid={!!wildErr} />
+          </>
+        )}
         <span className="form-label">Collation</span>
         <MongoEditor singleLine mode="collation" theme={theme} value={collation} onChange={setCollation} placeholder={'{ locale: "en", strength: 2 }'} ariaLabel="Collation" invalid={!!collErr} />
       </div>
-      {(error || partialErr || collErr || ttlErr) && <p className="form-error" role="alert">{error ?? partialErr ?? collErr ?? ttlErr}</p>}
+      {(error || partialErr || collErr || wildErr || ttlErr) && <p className="form-error" role="alert">{error ?? partialErr ?? collErr ?? wildErr ?? ttlErr}</p>}
     </Dialog>
   );
 }

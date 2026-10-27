@@ -129,8 +129,12 @@ public sealed class SchemaService
                 _nested?.Build() ?? [], _examples.Select(Example).ToList(), stats);
         }
 
+        /// <summary>Strings are cut at 100 characters (the UI reads a string of 100 or more as "cut" and filters by its start).</summary>
         private static JsonNode? Example(BsonValue v) =>
-            Ejson.ToJsonNode(v is BsonString { Value.Length: > 100 } s ? new BsonString(s.Value[..100]) : v);
+            Ejson.ToJsonNode(v is BsonString { Value.Length: > 100 } s ? new BsonString(CutExample(s.Value)) : v);
+
+        /// <summary>The first 100 UTF-16 units, keeping a surrogate pair whole (a lone surrogate would not survive JSON).</summary>
+        internal static string CutExample(string s) => char.IsHighSurrogate(s[99]) ? s[..101] : s[..100];
     }
 }
 

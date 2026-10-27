@@ -93,6 +93,18 @@ internal sealed class SqliteSession : AdoSessionBase
     protected override Task<DbTransaction> BeginTransactionAsync(CancellationToken ct) =>
         Task.FromResult<DbTransaction>(_connection.BeginTransaction(deferred: true));
 
+    /// <summary>
+    /// SQLite names an expression column after its text: an unnamed <c>?</c> the binder rewrote to <c>@__p1</c> would
+    /// show as "@__p1" (<c>SELECT ?</c>); it is shown as written.
+    /// </summary>
+    protected override ColumnInfo[] DescribeColumns(DbDataReader reader, BatchContext context)
+    {
+        var columns = base.DescribeColumns(reader, context);
+        for (var i = 0; i < columns.Length; i++)
+            if (SqliteParamBinder.IsUnnamedPlaceholderName(columns[i].Name)) columns[i] = columns[i] with { Name = "?" };
+        return columns;
+    }
+
     protected override object? ReadValue(DbDataReader reader, int ordinal, ColumnInfo column)
     {
         if (reader.IsDBNull(ordinal)) return null;

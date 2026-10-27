@@ -28,8 +28,18 @@ listed under "Open".
 
 ## Open (not fixed)
 
-- IntelliSense does not complete inside `$$ … $$` procedure bodies (they are string tokens, as for PostgreSQL).
-- `USE |` / `USE SCHEMA |` offer no database / schema names; keywords such as `CLUSTER`, `PROCEDURE`, `RETURNS`, `LANGUAGE` and `SHOW TABLES` are not upper-cased by the formatter (cosmetic, consistent with the contextual-word design).
+- FIXED: IntelliSense inside `$$ … $$` bodies of SQL-language procedures / functions and `EXECUTE IMMEDIATE $$ … $$`: the body is
+  completed as a document of its own (offsets mapped back; `index.ts` `scriptingBodyAt` / `completeInBody`) and Snowflake Scripting
+  (`DECLARE`, `BEGIN … END`, `IF … THEN`, `FOR … DO`, `WHILE`, `LOOP`, `LET`) is understood by the parser (`parseSfControl`).
+  JavaScript / Python / Java / Scala bodies stay opaque strings. Tests: `snowflake.test.ts` "completes inside the $$ body…",
+  "other languages keep the body opaque".
+- FIXED: `USE |` (databases and DATABASE / SCHEMA / WAREHOUSE / ROLE), `USE DATABASE |`, `USE SCHEMA |` (schemas of the current
+  database and `db.`), `USE SCHEMA db.|`; warehouse / role names are not in the catalog and are not offered. Test "USE | offers…".
+- FIXED: the formatter upper-cases object kinds and clause words in keyword position (`SHOW TABLES`, `USE WAREHOUSE`, `GRANT … TO ROLE`,
+  `CLUSTER BY`, `CLONE`, `RETURNS`, `LANGUAGE JAVASCRIPT`, `DEFAULT`, `COMMENT`, `ALTER … ADD`, `CREATE [SECURE|TRANSIENT|DYNAMIC] …`)
+  and leaves them alone where they are names (`CREATE TABLE stage (tag …)`, `ADD COLUMN refresh`). `format/layout.ts` `sfContextualKw`;
+  tests "object kinds and clause words are upper-cased…", "those words stay as typed where they are names". Property names such as
+  `warehouse_size = …` / `file_format = …` keep their typed case.
 - Browser SSO: without `ALLOW_ID_TOKEN` every pooled catalog connection and every new tab may open the IdP page again; cannot be verified without an account.
 - The mock's `/snowflake/sessions/{sid}/context` keeps its own state, so after a schema change through the standard session API the mock chip still shows the old schema (the real engine reads `CURRENT_SCHEMA()`).
 - Everything that needs a live server (USE fallbacks, cancel, transactions with DDL, plans, history views, pooled-connection clearing) is covered only by the fixtures/unit tests.

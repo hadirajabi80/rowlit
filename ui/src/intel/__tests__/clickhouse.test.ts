@@ -153,6 +153,36 @@ describe('ClickHouse completion', () => {
   });
 });
 
+describe('ClickHouse dictionaries (catalog type "type")', () => {
+  const at = (input: string) => {
+    const d = doc(chIntel(), input);
+    return d;
+  };
+  const run = (input: string) => {
+    const i = chIntel();
+    const d = doc(i, input);
+    return i.complete(d.uri, d.offset).items;
+  };
+
+  it('are offered after FROM and JOIN, with the type shown as a dictionary', () => {
+    expect(labels(run('SELECT * FROM |'))).toContain('product_dict');
+    expect(labels(run('SELECT * FROM orders o JOIN |'))).toContain('product_dict');
+    expect(labels(run('SELECT * FROM shop.|'))).toContain('product_dict');
+  });
+
+  it('bind as sources: columns after alias. and unqualified', () => {
+    expect(labels(run('SELECT d.| FROM product_dict d'))).toEqual(expect.arrayContaining(['id', 'name', 'price']));
+    expect(labels(run('SELECT | FROM product_dict'))).toEqual(expect.arrayContaining(['id', 'name', 'price']));
+  });
+
+  it('are not flagged as unknown tables', () => {
+    const i = chIntel();
+    const d = at('SELECT name FROM product_dict WHERE id = 1');
+    i.setDocument(d.uri, d.text);
+    expect(i.softDiagnostics(d.uri).filter((x) => /unknown|not found/i.test(x.message))).toEqual([]);
+  });
+});
+
 describe('ClickHouse statement classification', () => {
   it('mutations and partition drops are destructive', () => {
     expect(kindOf('ALTER TABLE orders DELETE WHERE id = 1')).toBe('delete:destructive');

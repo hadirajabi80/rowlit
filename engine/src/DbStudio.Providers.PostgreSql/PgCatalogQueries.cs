@@ -76,9 +76,21 @@ public static class PgCatalogQueries
         "l.lanname::text, p.pronargdefaults, p.proargnames, " +
         "COALESCE(p.proargmodes::text[], array_fill('i'::text, ARRAY[p.pronargs::int])) AS modes, " +
         "(SELECT array_agg(format_type(u.t, NULL) ORDER BY u.ord) FROM unnest(COALESCE(p.proallargtypes, p.proargtypes::oid[])) WITH ORDINALITY u(t, ord)) AS arg_types, " +
-        "t.typrelid, t.typtype::text, format_type(p.prorettype, NULL) " +
+        "t.typrelid, t.typtype::text, format_type(p.prorettype, NULL), " +
+        RoutineGroup + " AS grp " +
         "FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang JOIN pg_type t ON t.oid = p.prorettype " +
         "WHERE p.pronamespace = $1 AND p.prokind IN ('f','p','a','w') ORDER BY p.proname, p.oid";
+
+    /// <summary>
+    /// The explorer sub-folder of a routine <c>p</c> that is not the user's own: a member of an extension (postgres_fdw,
+    /// PostGIS: dropped with it) or a constructor PostgreSQL made for a range / multirange type; null otherwise.
+    /// </summary>
+    public const string RoutineGroup =
+        "(SELECT CASE WHEN d.refclassid = 'pg_extension'::regclass " +
+        "THEN 'Extension ' || (SELECT e.extname::text FROM pg_extension e WHERE e.oid = d.refobjid) ELSE 'Range type constructors' END " +
+        "FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid " +
+        "AND ((d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e') OR (d.refclassid = 'pg_type'::regclass AND d.deptype = 'i')) " +
+        "ORDER BY d.deptype LIMIT 1)";
 
     /// <summary>Columns of the relations that set-returning functions of schema $1 return (RETURNS SETOF table).</summary>
     public const string RoutineRowColumns =

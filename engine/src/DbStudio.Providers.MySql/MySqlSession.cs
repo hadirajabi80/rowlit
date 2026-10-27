@@ -203,6 +203,7 @@ public sealed class MySqlSession : AdoSessionBase
                 int? code = r.IsDBNull(1) ? null : Convert.ToInt32(r.GetValue(1), System.Globalization.CultureInfo.InvariantCulture);
                 var text = r.IsDBNull(2) ? "" : r.GetString(2);
                 var severity = level.ToUpperInvariant() switch { "ERROR" => MessageSeverity.Error, "NOTE" => MessageSeverity.Info, _ => MessageSeverity.Warning };
+                if (IsExplainRewriteNote(statement.Class, severity, code)) continue;
                 messages.Add((severity, text, code));
             }
         }
@@ -210,6 +211,13 @@ public sealed class MySqlSession : AdoSessionBase
         foreach (var (severity, text, code) in messages)
             await EmitMessageAsync(severity, text, null, code, MessageSource.Server).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// MySQL's note 1003 after EXPLAIN: the optimizer's rewritten statement (the EXPLAIN EXTENDED text), one long line of
+    /// fully qualified SQL that is not about the user's statement going wrong. Run SHOW WARNINGS to see it.
+    /// </summary>
+    internal static bool IsExplainRewriteNote(StatementClassification? c, MessageSeverity severity, int? code) =>
+        code == 1003 && severity == MessageSeverity.Info && c is { Kind: "EXPLAIN" };
 
     /// <summary>Out / inout parameters are user variables: set them before the statement runs.</summary>
     private async Task SetOutputVariablesAsync(BatchContext context, CancellationToken ct)

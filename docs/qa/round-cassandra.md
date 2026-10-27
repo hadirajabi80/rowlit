@@ -38,11 +38,14 @@ columns, connection test (bad port, bad DC, bad host, missing keyspace, `host:po
 |---|---|---|
 | A | Findings 2-4 were derived from the CQL grammar and the engine code, and proven with vitest; the filter predicates (`lower()`, `<>`, `IS NULL`...) and the export statement were **not run against the node** because it wedged before that script ran. | environment |
 | B | The two new integration tests (5, 6): 6 passed live; 5 failed once because the node stopped answering (30 s driver timeouts) and was not re-run after the restart. The unit tests pass (51 passed, 29 integration skipped with `DBSTUDIO_IT=0`). | environment |
-| C | Edits of a `varint` / `decimal` value with more than 28 digits are rejected with "is not a decimal number": the shared `ParamValues`/`QueryParam.ToClr` parses `decimal` as `System.Decimal`. Reading such values works. | shared Core code, affects every provider; rare |
-| D | `bigint` above 2^53 loses precision in the browser JSON number (all providers). | shared design |
-| E | A map literal written without a space after the colon next to a letter (`{'k':true}`) is lexed as a named parameter `:true` when the request also carries parameters. | needs a lexer rule for map context; rare |
+| C | Edits of a `varint` / `decimal` value with more than 28 digits are rejected with "is not a decimal number": the shared `ParamValues`/`QueryParam.ToClr` parses `decimal` as `System.Decimal`. Reading such values works. | **fixed**: `ToClr` returns an exact `ExactDecimal` (shared, every provider binds it natively); a varint binds as a BigInteger, a decimal is written into the statement as a CQL literal (the driver serializes decimal only from System.Decimal), and numbers inside collection literals keep their digits. Tests: `CassandraUnitTests.ToBind_VarintAndDecimalBeyondSystemDecimal_StayExact`, `ExactDecimalTests` |
+| D | `bigint` above 2^53 loses precision in the browser JSON number (all providers). | **fixed where it still happened**: scalar int64 values above 2^53 already reach the UI as strings (`ValueConverter.MaxSafeInteger`); the cell viewer re-parsed JSON text (collections, json columns) with `JSON.parse` to indent it, rounding big numbers. It now indents the text without parsing numbers (`lib/format.ts` `prettyJsonText`, test in `lib/lib.test.ts`) |
+| E | A map literal written without a space after the colon next to a letter (`{'k':true}`) is lexed as a named parameter `:true` when the request also carries parameters. | **fixed**: inside braces a colon right after a key is the key-value separator (engine `CqlText.IsKeyValueColon`, UI `ParamsDialog/detect.ts`). Tests: `CassandraUnitTests.Tokenize_MapAndUdtLiteralColons_AreNotBindMarkers`, `detect.cql.test.ts` |
 | F | LWT edits time out (`WriteTimeout`, write type CAS) when the node is starved of CPU; the update is applied but reported as an error. | environment (node overloaded) |
 | G | The UI was not exercised in a browser (out of memory), so the Cassandra tabs (settings, trace, cluster, table info), explorer and designer were reviewed from code and their existing vitest suites only; they pass. The `PAGING ON` / trace / cluster endpoints answered correctly through the API. | environment |
+
+A, B, F and G stay open (environment): in the follow-up round that fixed C, D and E, Docker Desktop did not answer
+`docker ps`, so nothing could be re-run against a node; C, D and E are proven by unit tests only.
 
 ## Test results
 
