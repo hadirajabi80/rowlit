@@ -52,7 +52,9 @@ export function buildTableSource(c: TableExportContext): ExportSource {
     label: filterActive ? 'Current filter & sort: all matching rows' : 'Current sort: all rows',
     hint: 'Runs the grid\'s query again without the page limit and writes every match',
     count: c.filteredCount, countKind: 'exact',
-    disabled: c.clientOnlyFilter ? 'The filter has a regular expression, which only applies to the loaded rows.'
+    disabled: c.clientOnlyFilter ? (c.dialect === 'cql'
+      ? 'The filter has conditions Cassandra cannot evaluate (NOT, IS NULL, text search, regular expressions…): they only apply to the loaded rows.'
+      : 'The filter has a regular expression, which only applies to the loaded rows.')
       : !filterActive && !sortActive ? 'No filter or sort is applied: use All records.' : null,
     ...(c.where !== null ? { countNow: stmtCount(c.where) } : {}),
   };

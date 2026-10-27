@@ -639,7 +639,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       kind: 'table', connectionId, dialect, gridKey, title: target.name, columns,
       // the target the pages were read with, without the Oracle ROWID (it is not a column of the table)
       target: { ...target, keyColumns: loadedKeys.current, ...(loadedFallback.current ? { orderFallback: loadedFallback.current } : {}) },
-      where: applied?.where ?? null, params: applied?.params ?? [], clientOnlyFilter: !!applied?.clientOnly, sort: loadedSort.current,
+      where: applied?.where ?? null, params: applied?.params ?? [], clientOnlyFilter: !!applied?.clientOnly || (dialect === 'cql' && !!quick.trim()), sort: loadedSort.current,
       filteredCount: count.value, loaded: rowsRef.current.length, hasMore: hasMoreRef.current,
       withSession: (run) => exclusive(async () => run((await ensureSession()).sessionId)),
       estimateRows: () => api.objectDetails(connectionId, database, { database, schema: target.schema, name: target.name, type: isView ? 'view' : 'table' })

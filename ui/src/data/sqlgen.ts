@@ -464,10 +464,13 @@ export interface ExportSelectOptions {
  * The statement of an export of the whole table or of what a filter matches: the page statement of `selectPageSql`
  * without the page (no LIMIT / OFFSET / FETCH / TOP), with the same WHERE and ORDER BY text, so the file holds exactly
  * the rows the grid pages through. The Oracle ROWID of a keyless table is not exported (it is no column of the table).
- * The engine adapts the statement per provider like any other (Cassandra: ORDER BY dropped, ALLOW FILTERING added).
+ * CQL: no ORDER BY and ALLOW FILTERING after a WHERE (the export runs as a plain statement, which the engine does not adapt).
  */
 export function exportSelectSql(t: TableTarget, dialect: Dialect, o: ExportSelectOptions = {}): string {
   const { where, order } = whereAndOrder(t, dialect, o.where, o.sort);
+  // CQL sorts within a partition only (ORDER BY on the grid's key or sort column is an error) and filters on non-key
+  // columns only with ALLOW FILTERING; an export runs as a plain statement, so nothing adapts it later.
+  if (dialect === 'cql') return `SELECT *\nFROM ${tableSql(t, dialect)}${where}${where ? '\nALLOW FILTERING' : ''}`;
   return `SELECT *\nFROM ${tableSql(t, dialect)}${where}${order && o.ordered !== false ? `\nORDER BY ${order}` : ''}`;
 }
 

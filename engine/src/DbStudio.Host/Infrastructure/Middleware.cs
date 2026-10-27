@@ -72,6 +72,9 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
         _ when ex.GetType().Namespace?.StartsWith("Oracle", StringComparison.Ordinal) == true
                || ex.GetType().Namespace?.StartsWith("Microsoft.Data", StringComparison.Ordinal) == true
             => (422, ErrorCodes.ProviderError, ex.Message, null),
+        // Cassandra driver failures (keyspace missing, no node reachable, timeouts) are provider errors, not engine bugs
+        _ when ex.GetType().Namespace?.StartsWith("Cassandra", StringComparison.Ordinal) == true
+            => (ex.GetType().Name == "NoHostAvailableException" ? 503 : 422, ErrorCodes.ProviderError, ex.Message, null),
         _ => (500, ErrorCodes.EngineError, ex.Message, null),
     };
 }

@@ -287,6 +287,33 @@ public sealed class CassandraUnitTests
         Assert.Equal(0x1000, u.ProviderCode);
     }
 
+    [Fact]
+    public void Errors_NoHostWithoutDetail_ExplainsContactPointsAndDatacenter()
+    {
+        var e = CqlErrors.ToError(new NoHostAvailableException(new Dictionary<System.Net.IPEndPoint, Exception>()));
+        Assert.Equal(CqlErrors.NoHostAvailable, e.Code);
+        Assert.Contains("contact point", e.Message);
+        Assert.Contains("local datacenter", e.Message);
+    }
+
+    [Fact]
+    public void Build_UserWithoutPassword_IsExplained_NotAnArgumentNullFromTheDriver()
+    {
+        var settings = new CqlConnectionSettings { ContactPoints = ["localhost"], User = "cassandra" };
+        var ex = Assert.Throws<ArgumentException>(() => CqlClusterPool.Build(settings, null));
+        Assert.Contains("password is required", ex.Message);
+        Assert.Null(ex.ParamName);
+        Assert.Throws<ArgumentException>(() => CqlClusterPool.Build(settings, ""));
+    }
+
+    [Fact]
+    public void Paging_DefaultPageSize_IsTheProfilePageSize()
+    {
+        var s = new CqlSessionSettings(new CqlConnectionSettings { PageSize = 250 });
+        s.PageSize = CqlConnectionSettings.MaxPageSize;
+        Assert.Equal(250, s.DefaultPageSize);
+    }
+
     // ------------------------------------------------------------------ data-grid statement shapes
 
     [Fact]

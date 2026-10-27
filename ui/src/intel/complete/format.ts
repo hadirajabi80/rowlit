@@ -8,10 +8,15 @@ const ORACLE_PLAIN = /^[A-Z][A-Z0-9_$#]*$/;
 /** PostgreSQL: unquoted names fold to lower case, so a name with upper-case letters must be quoted. */
 const PG_PLAIN = /^[\p{L}_][\p{L}\p{N}_$]*$/u;
 
+/** CQL: unquoted identifiers start with a letter, hold letters, digits and underscores, and are lower case. */
+const CQL_PLAIN = /^[a-z][a-z0-9_]*$/;
+
 export function needsQuoting(name: string, spec: DialectSpec): boolean {
   if (!name) return true;
   if (spec.id === 'plsql') return !ORACLE_PLAIN.test(name) || spec.keywords.has(name);
   if (spec.id === 'pgsql') return !PG_PLAIN.test(name) || name !== name.toLowerCase() || spec.keywords.has(name.toUpperCase());
+  // CQL folds unquoted names to lower case like PostgreSQL: "UserId" (created quoted) must stay quoted
+  if (spec.id === 'cql') return !CQL_PLAIN.test(name) || spec.keywords.has(name.toUpperCase());
   const re = spec.id === 'tsql' ? TSQL_PLAIN : SQLITE_PLAIN;
   if (!re.test(name)) return true;
   return spec.keywords.has(name.toUpperCase());
