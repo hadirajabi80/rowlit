@@ -89,7 +89,15 @@ internal sealed class FederationContext : IAsyncDisposable
     /// <param name="allColumns">Fetch whole tables (retry after the engine reported a column the projection missed).</param>
     /// <param name="maxRowsOverride">"Fetch all" / a materialize cap; null = the limits.</param>
     public async Task<PushdownPlan> PrepareAsync(string sql, bool allColumns, long? maxRowsOverride, IProgress<LinkFetchProgress>? progress,
-        PrepareMessage? message, CancellationToken ct)
+        PrepareMessage? message, CancellationToken ct) =>
+        (await PrepareStatementAsync(sql, allColumns, maxRowsOverride, progress, message, ct).ConfigureAwait(false)).Plan;
+
+    /// <summary>
+    /// <see cref="PrepareAsync"/>, plus the statement as the engine must run it: the multi-part names of wide members
+    /// rewritten to engine tables (Runtime/LinkNames.cs); <paramref name="sql"/> itself when there are none.
+    /// </summary>
+    public async Task<(PushdownPlan Plan, string Sql)> PrepareStatementAsync(string sql, bool allColumns, long? maxRowsOverride,
+        IProgress<LinkFetchProgress>? progress, PrepareMessage? message, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         await Gate.WaitAsync(ct).ConfigureAwait(false);
@@ -160,7 +168,7 @@ internal sealed class FederationContext : IAsyncDisposable
 
             var plan = new PushdownPlan(Engine.Name, planned.Parsed, sources, warnings);
             LastPlan = plan;
-            return plan;
+            return (plan, planned.Sql ?? sql);
         }
         finally
         {
@@ -261,4 +269,6 @@ internal sealed record PlannedFetch(LinkTableRef Table, string? ConnectionId, st
 
 /// <summary>The fetches of one statement plus the analyzer's warnings.</summary>
 /// <param name="Sampled">A plain EXPLAIN: only a sample of each source is read (the plan needs no data), so the row cap is no warning.</param>
-internal sealed record PlannedFetches(bool Parsed, IReadOnlyList<PlannedFetch> Fetches, IReadOnlyList<PlanWarning> Warnings, string? SyntaxError, bool Sampled = false);
+/// <param name="Sql">The statement as the engine runs it (wide members' multi-part names rewritten), when known.</param>
+internal sealed record PlannedFetches(bool Parsed, IReadOnlyList<PlannedFetch> Fetches, IReadOnlyList<PlanWarning> Warnings, string? SyntaxError, bool Sampled = false,
+    string? Sql = null);

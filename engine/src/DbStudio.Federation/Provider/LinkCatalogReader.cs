@@ -87,7 +87,11 @@ internal sealed class LinkCatalogReader(LinkRuntime runtime, string linkId) : IC
         var list = new List<ForeignKeyRef>();
         foreach (var fk in t.ForeignKeys)
         {
-            var target = schema.Tables.FirstOrDefault(x => string.Equals(x.Name, fk.RefTable, StringComparison.OrdinalIgnoreCase));
+            // a wide member holds several schemas: the referenced table is the one of the FK's schema (else of the table's own)
+            var refSchema = fk.RefSchema ?? t.Schema;
+            var wide = schema.Scope is LinkScopes.Database or LinkScopes.Connection;
+            var target = schema.Tables.FirstOrDefault(x => string.Equals(x.Name, fk.RefTable, StringComparison.OrdinalIgnoreCase)
+                                                           && (!wide || refSchema is null || x.Schema is null || string.Equals(x.Schema, refSchema, StringComparison.OrdinalIgnoreCase)));
             if (target is null) continue;
             list.Add(new ForeignKeyRef(fk.Name, fk.Columns, schema.Alias, target.LinkName, fk.RefColumns, fk.IsDisabled, fk.IsNotTrusted));
         }
@@ -104,8 +108,18 @@ internal sealed class LinkCatalogReader(LinkRuntime runtime, string linkId) : IC
     {
         var catalog = await CatalogAsync(ct).ConfigureAwait(false);
         var schema = await SchemaAsync(obj.Schema ?? catalog.Schemas.FirstOrDefault()?.Alias ?? "", ct).ConfigureAwait(false);
-        var table = schema.Tables.FirstOrDefault(t => string.Equals(t.LinkName, obj.Name, StringComparison.OrdinalIgnoreCase))
-                    ?? throw EngineException.NotFound($"Table '{schema.Alias}.{obj.Name}'");
+        var table = schema.Tables.FirstOrDefault(t => string.Equals(t.LinkName, obj.Name, StringComparison.OrdinalIgnoreCase));
+        if (table is null && obj.Name.Contains('.') && schema.Scope is LinkScopes.Database or LinkScopes.Connection)
+        {
+            // a table of a wide member outside its default schema (crm."sales.orders"): loaded on demand
+            var resolved = await runtime.ResolveTablesAsync(linkId, [new LinkTableRef(schema.Alias, obj.Name)], ct).ConfigureAwait(false);
+            if (resolved.Tables.FirstOrDefault() is { } hit)
+            {
+                table = hit.Table;
+                schema = schema with { Tables = [.. schema.Tables, table] };
+            }
+        }
+        if (table is null) throw EngineException.NotFound($"Table '{schema.Alias}.{obj.Name}'");
         return (catalog, schema, table);
     }
 

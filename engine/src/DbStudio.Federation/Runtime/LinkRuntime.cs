@@ -22,7 +22,7 @@ namespace DbStudio.Federation.Runtime;
 /// never sent anywhere), validation, the cached link catalog, push-down plans, federation contexts (one per console
 /// session, registered here so "Refresh sources" and materialize reach their caches) and one-off queries.
 /// </summary>
-public sealed class LinkRuntime : ILinkRuntime
+public sealed partial class LinkRuntime : ILinkRuntime
 {
     /// <summary>Sources fetched at the same time by one statement.</summary>
     internal const int MaxParallelFetches = 6;
@@ -185,7 +185,8 @@ public sealed class LinkRuntime : ILinkRuntime
         {
             if (!refresh && _catalogs.TryGetValue(linkId, out hit) && hit.Fingerprint == fingerprint && DateTimeOffset.UtcNow - hit.LoadedAt < CatalogTtl)
                 return hit.Catalog;
-            var catalog = await LoadCatalogAsync(def, ct).ConfigureAwait(false);
+            if (refresh) ForgetWide(linkId);
+            var catalog = await LoadCatalogAsync(def, ct, linkId).ConfigureAwait(false);
             _catalogs[linkId] = new CatalogEntry(fingerprint, catalog, DateTimeOffset.UtcNow);
             return catalog;
         }
@@ -196,27 +197,33 @@ public sealed class LinkRuntime : ILinkRuntime
     }
 
     /// <summary>Drops the cached catalog of a link (it reloads on the next use).</summary>
-    internal void ForgetCatalog(string linkId) => _catalogs.TryRemove(linkId, out _);
+    internal void ForgetCatalog(string linkId)
+    {
+        _catalogs.TryRemove(linkId, out _);
+        ForgetWide(linkId);
+    }
 
-    internal async Task<LinkCatalog> LoadCatalogAsync(LinkDefinition def, CancellationToken ct)
+    internal async Task<LinkCatalog> LoadCatalogAsync(LinkDefinition def, CancellationToken ct, string? linkId = null)
     {
         var limits = Limits(def, "catalog");
-        var tasks = def.Members.Select((m, i) => LoadMemberAsync(ResolveMember(i, m, limits, null), ct)).ToList();
+        var tasks = def.Members.Select((m, i) => LoadMemberAsync(ResolveMember(i, m, limits, null), ct, linkId)).ToList();
         var schemas = await Task.WhenAll(tasks).ConfigureAwait(false);
         return new LinkCatalog(schemas, def.Relations);
     }
 
-    private async Task<LinkCatalogSchema> LoadMemberAsync(MemberHandle h, CancellationToken ct)
+    private async Task<LinkCatalogSchema> LoadMemberAsync(MemberHandle h, CancellationToken ct, string? linkId = null)
     {
         var m = h.Member;
+        var scope = m.Kind == LinkMemberKinds.Files ? null : m.EffectiveScope;
         if (h.Error is not null || h.Fetcher is null || h.Context is null)
-            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, [], [], h.Error ?? "The member cannot be read.");
+            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, [], [], h.Error ?? "The member cannot be read.", scope);
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(60));
+            if (m.IsWide) return await LoadWideMemberAsync(linkId, h, timeout.Token).ConfigureAwait(false);
             var cat = await h.Fetcher.LoadCatalogAsync(h.Context, timeout.Token).ConfigureAwait(false);
-            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, cat.Tables, cat.Warnings);
+            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, cat.Tables, cat.Warnings, null, scope);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -226,7 +233,7 @@ public sealed class LinkRuntime : ILinkRuntime
         {
             _log.LogInformation("Linked database member {Alias} could not be read: {Message}", m.Alias, e.Message);
             var message = e is OperationCanceledException ? "The member did not answer within 60 s." : e.Message;
-            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, [], [], message);
+            return new LinkCatalogSchema(m.Alias, m.Kind, m.ConnectionId, h.ProviderId, [], [], message, scope);
         }
     }
 
@@ -239,6 +246,7 @@ public sealed class LinkRuntime : ILinkRuntime
     public async Task<LinkValidationResult> ValidateAsync(LinkDefinition definition, string? linkId, bool probe, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        definition = definition.Normalized();
         var problems = new List<LinkProblem>();
         var statuses = new List<LinkMemberStatus>();
         if (definition.Members.Count == 0) problems.Add(new LinkProblem("error", LinkProblemCodes.Empty, "Add at least one member."));
@@ -264,7 +272,21 @@ public sealed class LinkRuntime : ILinkRuntime
                     : LinkProblemCodes.MemberUnsupported;
                 problems.Add(new LinkProblem("error", code, h.Error, i));
             }
-            if (!m.AllTables && m.Tables.Count == 0)
+            var scope = m.EffectiveScope;
+            if (!LinkScopes.IsValid(scope))
+                problems.Add(new LinkProblem("error", LinkProblemCodes.ScopeInvalid,
+                    $"'{m.Scope}' is not a scope of {m.Alias} (tables, schema, database or connection).", i));
+            else if (m.Kind == LinkMemberKinds.Files && scope != LinkScopes.Tables)
+                problems.Add(new LinkProblem("error", LinkProblemCodes.ScopeInvalid, $"{m.Alias}: files are mounted one by one (scope tables).", i));
+            else if (m.IsWide && h.Error is null)
+            {
+                var levels = MemberScopes.Levels(h.ProviderId, scope);
+                if (levels.Count > 0 && h.Fetcher is not IScopedSourceFetcher)
+                    problems.Add(new LinkProblem("error", LinkProblemCodes.ScopeInvalid, CannotSpan(h).Message, i));
+                else if (MemberScopes.Narrowed(h.ProviderId, scope, h.ProviderName ?? h.ProviderId ?? "", m.Alias) is { } narrowed)
+                    problems.Add(new LinkProblem("warning", LinkProblemCodes.ScopeNarrowed, narrowed, i));
+            }
+            if (scope == LinkScopes.Tables && m.Tables.Count == 0)
                 problems.Add(new LinkProblem("error", LinkProblemCodes.NoTables, $"The member '{m.Alias}' mounts no table.", i));
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in m.Tables)
@@ -287,7 +309,7 @@ public sealed class LinkRuntime : ILinkRuntime
                 {
                     var member = definition.FindMember(end.Alias);
                     if (member is null) return $"'{end.Alias}' is not a member";
-                    if (!member.AllTables && !member.Tables.Any(t => string.Equals(t.LinkName, end.Table, StringComparison.OrdinalIgnoreCase)))
+                    if (member.EffectiveScope == LinkScopes.Tables && !member.Tables.Any(t => string.Equals(t.LinkName, end.Table, StringComparison.OrdinalIgnoreCase)))
                         return $"{end} is not mounted";
                 }
                 return null;
@@ -312,7 +334,7 @@ public sealed class LinkRuntime : ILinkRuntime
                     problems.Add(new LinkProblem("warning", LinkProblemCodes.MemberUnreachable, $"{schema.Alias}: {schema.Error}", i));
                 foreach (var w in schema.Warnings)
                     problems.Add(new LinkProblem("warning", LinkProblemCodes.TableMissing, w, i));
-                if (reachable && h.Member.AllTables && schema.Tables.Count == 0)
+                if (reachable && h.Member.EffectiveScope == LinkScopes.Schema && schema.Tables.Count == 0)
                     problems.Add(new LinkProblem("warning", LinkProblemCodes.NoTables, $"{schema.Alias}: the schema has no tables or views.", i));
             }
             // Relation columns exist (probed only).
@@ -344,8 +366,10 @@ public sealed class LinkRuntime : ILinkRuntime
     /// <summary>Analysis + accepted requests of one statement over a context's link (no I/O beyond the catalog).</summary>
     internal async Task<PlannedFetches> PlanFetchesAsync(FederationContext context, string sql, bool allColumns, long? maxRowsOverride, CancellationToken ct)
     {
-        var catalog = await CatalogAsync(context.LinkId, false, ct).ConfigureAwait(false);
         var def = Definition(context.LinkId);
+        var resolved = await ResolveSqlCoreAsync(context.LinkId, def, await CatalogAsync(context.LinkId, false, ct).ConfigureAwait(false), sql, ct).ConfigureAwait(false);
+        var catalog = resolved.Catalog;
+        var statement = sql = resolved.Sql;
         var limits = maxRowsOverride is null ? context.Limits : context.Limits with { MaxRowsPerSource = Math.Max(1, maxRowsOverride.Value) };
         // EXPLAIN [ANALYZE] select ...: analysed as the inner query (push-down applies); a plain EXPLAIN reads a sample only.
         var sampled = false;
@@ -359,7 +383,7 @@ public sealed class LinkRuntime : ILinkRuntime
             }
         }
         var ast = await context.Engine.SerializeSqlAsync(sql, ct).ConfigureAwait(false);
-        var planned = BuildFetches(def, catalog, sql, ast, limits, allColumns, context.Id, context.EngineWarning);
+        var planned = BuildFetches(def, catalog, sql, ast, limits, allColumns, context.Id, context.EngineWarning) with { Sql = statement };
         return sampled ? planned with { Sampled = true } : planned;
     }
 
@@ -430,7 +454,8 @@ public sealed class LinkRuntime : ILinkRuntime
                 MaxRows = maxRows,
                 Timeout = limits.FetchTimeout,
             };
-            var accepted = h.Fetcher.Accept(h.Context, proposed);
+            var context = FetchContext(h, t.Source);
+            var accepted = h.Fetcher.Accept(context, proposed);
             if (accepted.Limit is null && proposed.Limit is not null) accepted = accepted with { MaxRows = limits.MaxRowsPerSource };
             if (h.ProviderId == "cassandra" && accepted.Predicates.Count < proposed.Predicates.Count)
                 warnings.Add(new PlanWarning(PlanWarningCodes.FullScan,
@@ -441,7 +466,7 @@ public sealed class LinkRuntime : ILinkRuntime
                 TypeMap.EngineType(sc, out var widened);
                 if (widened is not null) warnings.Add(new PlanWarning(PlanWarningCodes.DecimalWidened, $"{t.Table}.{widened}", t.Table));
             }
-            fetches.Add(new PlannedFetch(t.Table, h.Member.ConnectionId, h.ProviderId ?? "", h.ProviderName, h.Fetcher, h.Context, accepted));
+            fetches.Add(new PlannedFetch(t.Table, h.Member.ConnectionId, h.ProviderId ?? "", h.ProviderName, h.Fetcher, context, accepted));
         }
         return new PlannedFetches(analysis.Parsed, fetches, warnings, null);
     }
@@ -461,7 +486,9 @@ public sealed class LinkRuntime : ILinkRuntime
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         var def = Definition(linkId);
-        var catalog = await CatalogAsync(linkId, false, ct).ConfigureAwait(false);
+        var resolved = await ResolveSqlCoreAsync(linkId, def, await CatalogAsync(linkId, false, ct).ConfigureAwait(false), sql, ct).ConfigureAwait(false);
+        var catalog = resolved.Catalog;
+        sql = resolved.Sql;
         var probe = _factory.Probe();
         var engineName = def.Options.Engine is { Length: > 0 } forced ? forced.ToLowerInvariant() : probe.Engine;
         if (ExplainSql.TrySplit(sql, out var explained, out _)) sql = explained;
@@ -500,16 +527,16 @@ public sealed class LinkRuntime : ILinkRuntime
         var context = shared ?? await OpenContextAsync(linkId, def, Ids.New("q"), register: false, options.MaxRowsPerSource, ct).ConfigureAwait(false);
         try
         {
-            var plan = await context.PrepareAsync(sql, false, options.MaxRowsPerSource, options.Progress, null, ct).ConfigureAwait(false);
+            var (plan, statement) = await context.PrepareStatementAsync(sql, false, options.MaxRowsPerSource, options.Progress, null, ct).ConfigureAwait(false);
             DbDataReader reader;
             try
             {
-                reader = await context.Internals.ExecuteIsolatedReaderAsync(sql, parameters, ct).ConfigureAwait(false);
+                reader = await context.Internals.ExecuteIsolatedReaderAsync(statement, parameters, ct).ConfigureAwait(false);
             }
             catch (Exception e) when (context.Internals.IsMissingColumnError(e))
             {
-                plan = await context.PrepareAsync(sql, true, options.MaxRowsPerSource, options.Progress, null, ct).ConfigureAwait(false);
-                reader = await context.Internals.ExecuteIsolatedReaderAsync(sql, parameters, ct).ConfigureAwait(false);
+                (plan, statement) = await context.PrepareStatementAsync(sql, true, options.MaxRowsPerSource, options.Progress, null, ct).ConfigureAwait(false);
+                reader = await context.Internals.ExecuteIsolatedReaderAsync(statement, parameters, ct).ConfigureAwait(false);
             }
             var columns = ResultValues.Describe(reader);
             return new LinkQuery(reader, columns, plan, shared is null ? context : null);

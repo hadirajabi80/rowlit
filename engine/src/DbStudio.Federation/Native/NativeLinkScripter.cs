@@ -10,8 +10,20 @@ namespace DbStudio.Federation.Native;
 /// <param name="ProviderId">Member provider id (sqlserver, postgresql, mysql, mariadb, oracle, clickhouse, …).</param>
 /// <param name="Profile">The member connection (no secrets: only host, port, database, user are read).</param>
 /// <param name="Tables">Mounted tables with their source columns (null when the catalog could not load).</param>
+/// <param name="Scope">The member's <see cref="LinkScopes"/> token.</param>
+/// <param name="Containers">
+/// Wide scopes: the remote (database, schema) pairs the member spans, as far as they could be listed (database null where
+/// the provider has none). Null for tables / schema members or when the lists could not load.
+/// </param>
 public sealed record NativeLinkSource(string Alias, string ProviderId, ConnectionProfile Profile, string? Database, string? Schema, bool AllTables,
-    IReadOnlyList<MountedTable> Mounted, IReadOnlyList<SourceTable>? Tables);
+    IReadOnlyList<MountedTable> Mounted, IReadOnlyList<SourceTable>? Tables, string Scope = LinkScopes.Tables,
+    IReadOnlyList<NativeContainer>? Containers = null)
+{
+    public bool IsWide => LinkScopes.IsWide(Scope);
+}
+
+/// <summary>One remote schema of a wide member (<paramref name="Database"/> null where the provider has no database level).</summary>
+public sealed record NativeContainer(string? Database, string Schema);
 
 /// <summary>
 /// Scripts that make a target server reach a link member natively (plan-links 1, "Native links"): SQL Server linked
@@ -171,7 +183,8 @@ public static class NativeLinkScripter
             case "sqlserver":
             {
                 var (_, _, dataSource) = s.SqlServerHost();
-                s.Line($"EXEC master.dbo.sp_addlinkedserver @server = {NSq(name)}, @srvproduct = N'', @provider = N'MSOLEDBSQL', @datasrc = {NSq(dataSource)}{(s.Database is { } db ? $", @catalog = {NSq(db)}" : "")};");
+                var catalogDb = m.Scope == LinkScopes.Connection ? null : s.Database;
+                s.Line($"EXEC master.dbo.sp_addlinkedserver @server = {NSq(name)}, @srvproduct = N'', @provider = N'MSOLEDBSQL', @datasrc = {NSq(dataSource)}{(catalogDb is { } db ? $", @catalog = {NSq(db)}" : "")};");
                 s.Note("Uses the Microsoft OLE DB Driver for SQL Server (MSOLEDBSQL) on the target server; older servers can use SQLNCLI11.");
                 break;
             }
@@ -211,6 +224,10 @@ public static class NativeLinkScripter
             }
         }
         s.Line($"-- Remove: EXEC master.dbo.sp_dropserver @server = {NSq(name)}, @droplogins = 'droplogins';");
+        if (m.IsWide)
+            s.Note(m.ProviderId == "sqlserver"
+                ? $"A linked server reaches every database and schema the remote login can read: {Br(name)}.[database].[schema].[table] (the member mounts {(m.Scope == LinkScopes.Connection ? "the whole connection" : $"every schema of {s.Database ?? "its database"}")})."
+                : "Through ODBC the linked server reaches what the remote login can read; OPENQUERY runs the remote SQL with its own schema-qualified names.");
     }
 
     // ---------------------------------------------------------------- PostgreSQL foreign data wrappers
@@ -256,6 +273,11 @@ public static class NativeLinkScripter
                 break;
             }
         }
+        if (m.IsWide)
+        {
+            FdwWide(s, name, wrapper, serverOptions, mappingOptions, remoteSchema);
+            return;
+        }
         s.Line($"-- Foreign server {name} → {m.ProviderId} member '{m.Alias}' ({m.Profile.Name})");
         s.Line("-- Replace the placeholders before running.");
         s.Line($"CREATE EXTENSION IF NOT EXISTS {wrapper};");
@@ -272,6 +294,54 @@ public static class NativeLinkScripter
         s.Line("-- Examples");
         foreach (var t in s.TableNames.Take(5)) s.Line($"SELECT * FROM {localSchema}.{Tn(t)} LIMIT 100;");
         s.Line($"-- Remove: DROP SCHEMA {localSchema} CASCADE; DROP SERVER {server} CASCADE;");
+    }
+
+    /// <summary>Most databases / schemas a script for a wide member spells out (the rest is left to the user).</summary>
+    internal const int MaxWideContainers = 25;
+
+    /// <summary>
+    /// A whole database / connection over FDW: IMPORT FOREIGN SCHEMA once per remote schema, into local schemas
+    /// <c>name_schema</c>; postgres_fdw and tds_fdw reach one database per foreign server, so a whole connection gets one
+    /// server per database (<c>name_database</c>, schemas <c>name_database_schema</c>).
+    /// </summary>
+    private static void FdwWide(ScriptBuilder s, string name, string wrapper, string serverOptions, string mappingOptions, string fallbackSchema)
+    {
+        var m = s.Member;
+        var perDatabase = m.ProviderId is "postgresql" or "sqlserver";
+        var containers = (m.Containers ?? []).ToList();
+        if (containers.Count == 0) containers.Add(new NativeContainer(perDatabase ? s.Database : null, fallbackSchema));
+        var shown = containers.Take(MaxWideContainers).ToList();
+        s.Line($"-- Foreign server(s) {name} → {m.ProviderId} member '{m.Alias}' ({m.Profile.Name}), {(m.Scope == LinkScopes.Connection ? "whole connection" : "whole database")}");
+        s.Line("-- Replace the placeholders before running.");
+        s.Line($"CREATE EXTENSION IF NOT EXISTS {wrapper};");
+        var groups = shown.GroupBy(c => perDatabase && m.Scope == LinkScopes.Connection ? c.Database ?? "" : "").ToList();
+        foreach (var g in groups)
+        {
+            var serverName = g.Key.Length == 0 ? name.ToLowerInvariant() : LinkRules.Slugify(name + "_" + g.Key);
+            var server = LinkSql.QuoteIdent(serverName);
+            var options = g.Key.Length == 0 ? serverOptions
+                : m.ProviderId == "postgresql" ? serverOptions.Replace($"dbname {Sq(s.Database ?? "postgres")}", $"dbname {Sq(g.Key)}", StringComparison.Ordinal)
+                : serverOptions.Replace($"database {Sq(s.Database ?? "master")}", $"database {Sq(g.Key)}", StringComparison.Ordinal);
+            s.Line();
+            s.Line($"CREATE SERVER {server} FOREIGN DATA WRAPPER {wrapper} OPTIONS ({options});");
+            s.Line($"CREATE USER MAPPING FOR CURRENT_USER SERVER {server} OPTIONS ({mappingOptions});");
+            foreach (var c in g)
+            {
+                var remote = m.ProviderId == "oracle" ? c.Schema.ToUpperInvariant() : c.Schema;
+                var local = LinkSql.QuoteIdent(LinkRules.Slugify(serverName + "_" + c.Schema));
+                s.Line($"CREATE SCHEMA IF NOT EXISTS {local};");
+                s.Line($"IMPORT FOREIGN SCHEMA {Dq(remote)} FROM SERVER {server} INTO {local};");
+            }
+        }
+        if (containers.Count > shown.Count)
+            s.Line($"-- … and {Inv(containers.Count - shown.Count)} more schema(s): repeat CREATE SCHEMA + IMPORT FOREIGN SCHEMA for each.");
+        s.Line();
+        s.Line($"-- Remove: DROP SCHEMA … CASCADE; DROP SERVER {LinkSql.QuoteIdent(name.ToLowerInvariant())} CASCADE;");
+        s.Note(perDatabase
+            ? $"{wrapper} reaches one database per foreign server: a whole connection gets one server per database; each remote schema is imported into its own local schema."
+            : $"Each remote {(m.ProviderId is "mysql" or "mariadb" ? "database" : "schema")} is imported into its own local schema.");
+        if (m.Containers is null) s.Note("The member's schemas could not be listed: the script imports only the default one; add the others the same way.");
+        s.Note("IMPORT FOREIGN SCHEMA copies the table definitions once: re-run it for tables created later.");
     }
 
     // ---------------------------------------------------------------- Oracle database link
@@ -302,6 +372,10 @@ public static class NativeLinkScripter
             foreach (var t in s.TableNames.Take(5)) s.Line($"SELECT * FROM {Dq(t)}@{Dq(link)};");
         }
         s.Line($"-- Remove: DROP DATABASE LINK {Dq(link)};");
+        if (m.IsWide)
+            s.Note(m.ProviderId == "oracle"
+                ? $"A database link reaches every schema the remote user can read: SELECT … FROM schema.table@{link}."
+                : "Through the gateway the link reaches what the ODBC login can read; qualify remote tables the way the gateway exposes them.");
     }
 
     // ---------------------------------------------------------------- MySQL / MariaDB FEDERATED
@@ -341,6 +415,8 @@ public static class NativeLinkScripter
             s.Line();
         }
         if (names.Count == 0) s.Line("-- (the member mounts no explicit tables: add one CREATE TABLE … ENGINE = FEDERATED per remote table)");
+        if (m.IsWide)
+            s.Note("FEDERATED maps one remote table per local table: the script covers the tables of the member's default database; a whole database or connection needs one CREATE TABLE per remote table.");
         s.Note(targetProviderId == "mariadb"
             ? "MariaDB: FEDERATEDX must be loaded (INSTALL SONAME 'ha_federatedx'); the column list must match the remote table."
             : "MySQL: the FEDERATED engine is disabled by default; start the server with --federated (or federated=ON in my.cnf). The column list must match the remote table.");
@@ -355,7 +431,20 @@ public static class NativeLinkScripter
         var hostPort = $"{s.Host}:{Inv(s.Port)}";
         s.Line($"-- Database {name} → {m.ProviderId} member '{m.Alias}' ({m.Profile.Name}), read live through the {(m.ProviderId == "postgresql" ? "PostgreSQL" : "MySQL")} database engine");
         s.Line("-- Replace the placeholders before running.");
-        if (m.ProviderId == "postgresql")
+        if (m.IsWide && m.Containers is { Count: > 0 } containers)
+        {
+            var shown = containers.Take(MaxWideContainers).ToList();
+            foreach (var c in shown)
+            {
+                var local = Bt(name + "_" + (c.Database is { } d && m.Scope == LinkScopes.Connection ? d + "_" : "") + c.Schema);
+                s.Line(m.ProviderId == "postgresql"
+                    ? $"CREATE DATABASE IF NOT EXISTS {local} ENGINE = PostgreSQL({Sq(hostPort)}, {Sq(c.Database ?? s.Database ?? "postgres")}, {Sq(s.User)}, {Sq(s.Password)}, {Sq(c.Schema)});"
+                    : $"CREATE DATABASE IF NOT EXISTS {local} ENGINE = MySQL({Sq(hostPort)}, {Sq(c.Schema)}, {Sq(s.User)}, {Sq(s.Password)});");
+            }
+            if (containers.Count > shown.Count) s.Line($"-- … and {Inv(containers.Count - shown.Count)} more: one CREATE DATABASE each.");
+            s.Note($"A ClickHouse {(m.ProviderId == "postgresql" ? "PostgreSQL" : "MySQL")} database engine maps one remote {(m.ProviderId == "postgresql" ? "schema" : "database")}: the script creates one ClickHouse database per remote one.");
+        }
+        else if (m.ProviderId == "postgresql")
         {
             var schema = s.RemoteSchema("public");
             s.Line($"CREATE DATABASE IF NOT EXISTS {Bt(name)} ENGINE = PostgreSQL({Sq(hostPort)}, {Sq(s.Database ?? "postgres")}, {Sq(s.User)}, {Sq(s.Password)}, {Sq(schema)});");

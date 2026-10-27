@@ -66,9 +66,31 @@ internal static class MemberClients
 /// arrays) → JSON text. Fetch = aggregate <c>$match</c> (pushable predicates on single-typed fields) → <c>$project</c> →
 /// <c>$limit</c>; nested documents and arrays arrive as relaxed Extended JSON, ObjectIds as hex strings, dates in UTC.
 /// </summary>
-public sealed partial class MongoFetcher : ISourceFetcher
+public sealed partial class MongoFetcher : ISourceFetcher, IScopedSourceFetcher
 {
     public const int DefaultSampleSize = 1000;
+
+    private static readonly HashSet<string> SystemDatabases = new(StringComparer.Ordinal) { "admin", "local", "config" };
+
+    // A MongoDB database is the member's schema level (LinkMember.Schema): a whole connection spans the databases.
+    public Task<(string? Database, string? Schema)> DefaultsAsync(SourceContext context, CancellationToken ct) =>
+        MemberClients.WithClientAsync<MongoClientHandle, (string?, string?)>(context, client =>
+            Task.FromResult<(string?, string?)>((null, context.Member.Schema is { Length: > 0 } s ? s : client.DefaultDatabase)), ct);
+
+    public Task<IReadOnlyList<string>> ListDatabasesAsync(SourceContext context, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+
+    public Task<IReadOnlyList<string>> ListSchemasAsync(SourceContext context, string? database, CancellationToken ct) =>
+        MemberClients.WithClientAsync<MongoClientHandle, IReadOnlyList<string>>(context, async client =>
+        {
+            IReadOnlyList<BsonDocument> list;
+            try { list = await client.Gateway.ListDatabasesAsync(false, ct).ConfigureAwait(false); }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                // a user without listDatabases on the cluster still sees the databases it is authorized for
+                list = await client.Gateway.ListDatabasesAsync(true, ct).ConfigureAwait(false);
+            }
+            return list.Select(d => d.GetValue("name", "").AsString).Where(n => n.Length > 0 && !SystemDatabases.Contains(n)).Order(StringComparer.Ordinal).ToList();
+        }, ct);
 
     private static string Database(SourceContext context, MongoClientHandle client) =>
         context.Member.Schema is { Length: > 0 } s ? s

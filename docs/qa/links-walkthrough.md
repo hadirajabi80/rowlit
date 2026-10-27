@@ -78,6 +78,37 @@ and MongoDB (`mg`, db shop). Engine on a throw-away `DBSTUDIO_DATA_DIR`. Shop da
 | 36 | Materialize the join of step 29 to PostgreSQL / SQL Server / MySQL / MariaDB / Oracle / ClickHouse as `qa_mat_x`: Create, Create again (refused), Append (type the name in lower case also on Oracle), Replace | Six rows each time; decimals keep their scale (numeric(38,2), not (38,10)); the table is dropped afterwards. |
 | 37 | Native link, target PostgreSQL, member `ms` (SQL Server, tables `Customers`, `Orders`) | `LIMIT TO ("Customers", "Orders")` and examples `ms."Customers"` (quoted: PostgreSQL folds unquoted names); password only as `<password>`. |
 
+## F. Whole-database links (scopes)
+
+A member now has a scope: **Tables** (explicit list), **Whole schema** (the former "mount all tables"), **Whole database**
+(every schema of one database) or **Whole connection** (every database). Wide members are read lazily: the catalog holds only
+the default schema's tables; other schemas load when a query, the builder or IntelliSense names them. Names in SQL:
+
+| Scope | SQL Server / PostgreSQL / Snowflake | Oracle, SQLite (main + attached) | MySQL / MariaDB / ClickHouse / MongoDB / Cassandra | Elasticsearch |
+|---|---|---|---|---|
+| Whole database | `alias.schema.table`, default schema also `alias.table` | `alias.schema.table` | = Whole schema (`alias.table`; Mongo: every collection) | every index (`alias.index`) |
+| Whole connection | `alias.database.schema.table`, default database `alias.schema.table`, default schema `alias.table` | = Whole database | `alias.database.table` | every index |
+
+The engine table of a nested name is one quoted name (`crm."sales.orders"`); both spellings work in a console. A table written
+`crm.sales.orders` in FROM without an alias gets the alias `orders`, so `orders.amount` works as on the source. Version 1 links
+open unchanged (allTables becomes Whole schema). Files members have no scope.
+
+| # | Keys | Expected | Command id |
+|---|---|---|---|
+| 38 | Explorer → **Prod SQL** → database `shop` → right-click → **Link database…** | Dialog: pick a link (adds a member `prod_sql`, scope Whole database) or *New link…* (editor opens with it). Again on the same link: "already covered", how to query it, nothing saved. On a schema node: **Link schema…** (scope Whole schema; on MySQL-like servers the schema node gives Whole database). MongoDB database node: Link database…. | `links.linkDatabase` / `links.linkSchema` |
+| 39 | Link editor → a member → *Mount* selector | Tables / Whole schema / Whole database / Whole connection. Whole database shows only the database picker and "Query as alias.schema.table…"; Whole connection shows no pickers; only Tables / Whole schema show the table list. Files members have no selector. Saving writes `scope` + `allTables`, version 2. | `links.edit` |
+| 40 | Link `Wide` = `ms` Whole connection on SQL Server + `pg` Whole database `shop` on PostgreSQL; console: `select c.name, count(distinct o.id) from ms.shop.dbo.Customers c join pg.public.orders o on o.customer_id = c.id group by 1 order by 1` | Alice 2, Bob 1, Chie 1, Dora 1. Messages `ms.Customers: 5 rows…` (default database + schema → two-part engine name) and `pg.orders: 6 rows…`. | `run.statement` |
+| 41 | `select o.id from pg.sales.orders o where o.total > 100` (a non-default schema) | Only that schema is read (catalog unchanged until then); the plan shows `pg.sales.orders` with `"total" > 100` and the projection pushed. | `links.plan` |
+| 42 | `select orders.total from pg.sales.orders` and `select crm.dbo.customers.id from crm.dbo.customers` | Both run (implicit alias `orders`; the default schema spelled out). A schema that does not exist: DuckDB's "does not exist" error naming it. | — |
+| 43 | Builder → table list of a wide member | Default tables first, then databases → schemas → tables loaded on expand (spinner, error + Retry); *Search in alias…* reads matching containers; at most 500 rows per container. Adding `sales.orders` puts a card `orders`; the SQL panel writes `pg.sales.orders AS orders`. Edit SQL (Advanced) → Back to builder keeps the card. | `links.builder` |
+| 44 | Console: `select * from pg.` / `pg.sales.` / `ms.Staging.` / `ms.Staging.dbo.` + Ctrl+Space; `from pg.sales.orders o where o.` | Schemas (and default tables); that schema's tables; Staging's schemas; its tables ("Loading…" first, then the list); the columns of orders. | — |
+| 45 | Native link, target PostgreSQL, member `pg` (Whole database) / `ms` (Whole connection) | One `IMPORT FOREIGN SCHEMA` per remote schema into `pg_<schema>`; for SQL Server one tds_fdw server per database (`ms_<db>`), at most 25 schemas spelled out. Target SQL Server: no `@catalog` for a whole connection, and the note "reaches every database and schema…". MySQL FEDERATED: note that it maps one table at a time (default database only). | `links.nativeLink` |
+| 46 | `delete from pg.sales.orders` | READ_ONLY, as for any link statement. | — |
+
+Limits: a schema or table whose own name contains a dot is not supported in the multi-part spellings (use the engine spelling
+`alias."schema.table"`); renames (`as`) apply to the default schema's tables only; IntelliSense shows nested tables' columns
+only after a qualifier; native scripts list at most 25 schemas.
+
 ## Pass criteria
 
 - Steps 3–5: completion works with no network (the link catalog is loaded once; `crm.` is instant).

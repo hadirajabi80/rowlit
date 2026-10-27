@@ -1,0 +1,45 @@
+{
+  "name": "Whole-database members: a table of a non-default schema (path sales/orders) and one of another database (path Staging/dbo/Order Lines) are written in their natural multi-part form, each part quoted only when needed; a default-schema table stays alias.table",
+  "catalog": {
+    "pg.sales.orders": [
+      { "name": "id", "kind": "int", "type": "BIGINT" },
+      { "name": "customer_id", "kind": "int", "type": "BIGINT" }
+    ],
+    "pg.customers": [
+      { "name": "id", "kind": "int", "type": "BIGINT" }
+    ],
+    "ms.Staging.dbo.Order Lines": [
+      { "name": "order_id", "kind": "int", "type": "BIGINT" }
+    ]
+  },
+  "paths": {
+    "pg.sales.orders": ["sales", "orders"],
+    "ms.Staging.dbo.Order Lines": ["Staging", "dbo", "Order Lines"]
+  },
+  "model": {
+    "version": 1,
+    "tables": [
+      { "id": "t1", "alias": "pg", "table": "sales.orders", "as": "orders", "x": 40, "y": 40, "collapsed": false },
+      { "id": "t2", "alias": "pg", "table": "customers", "as": "customers", "x": 360, "y": 40, "collapsed": false },
+      { "id": "t3", "alias": "ms", "table": "Staging.dbo.Order Lines", "as": "lines", "x": 360, "y": 240, "collapsed": false }
+    ],
+    "joins": [
+      { "id": "j1", "type": "inner", "left": "t1", "right": "t2", "on": [ { "leftColumn": "customer_id", "rightColumn": "id" } ] },
+      { "id": "j2", "type": "left", "left": "t1", "right": "t3", "on": [ { "leftColumn": "id", "rightColumn": "order_id" } ] }
+    ],
+    "columns": [
+      { "id": "c1", "tableId": "t1", "column": "id", "expr": null, "alias": null, "agg": null, "output": true }
+    ],
+    "filter": null,
+    "groupBy": [],
+    "autoGroup": true,
+    "having": null,
+    "sort": [],
+    "limit": null,
+    "offset": null,
+    "distinct": false
+  },
+  "sql": "SELECT orders.id\nFROM pg.sales.orders AS orders\nINNER JOIN pg.customers AS customers ON orders.customer_id = customers.id\nLEFT JOIN ms.Staging.dbo.\"Order Lines\" AS lines ON orders.id = lines.order_id",
+  "params": [],
+  "warnings": []
+}

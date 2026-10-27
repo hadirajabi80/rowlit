@@ -18,8 +18,55 @@ namespace DbStudio.Federation.Fetchers;
 /// <see cref="FetchRequest.MaxRows"/> rows plus one to detect truncation. Cancellation cancels the driver command.
 /// Stateless and thread-safe.
 /// </summary>
-public sealed class RelationalFetcher : ISourceFetcher
+public sealed class RelationalFetcher : ISourceFetcher, IScopedSourceFetcher
 {
+    /// <summary>Databases a wide member never spans (system databases).</summary>
+    private static readonly HashSet<string> SystemDatabases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "master", "tempdb", "model", "msdb", "distribution", "template0", "template1", "rdsadmin", "azure_maintenance", "azure_sys",
+        "SNOWFLAKE", "SNOWFLAKE_SAMPLE_DATA",
+    };
+
+    /// <summary>Schemas a wide member never spans (catalogs, SQL Server role schemas).</summary>
+    private static readonly HashSet<string> SystemSchemas = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "information_schema", "pg_catalog", "pg_toast", "sys", "guest", "mysql", "performance_schema", "system", "temp",
+        "db_owner", "db_accessadmin", "db_securityadmin", "db_ddladmin", "db_backupoperator", "db_datareader", "db_datawriter",
+        "db_denydatareader", "db_denydatawriter", "INFORMATION_SCHEMA",
+    };
+
+    internal static bool IsSystemSchema(string name) =>
+        SystemSchemas.Contains(name) || name.StartsWith("pg_temp_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("pg_toast_temp_", StringComparison.OrdinalIgnoreCase);
+
+    public async Task<(string? Database, string? Schema)> DefaultsAsync(SourceContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var provider = ProviderOf(context);
+        await using var reader = await provider.OpenCatalogReaderAsync(ProfileOf(context), context.Password, ct).ConfigureAwait(false);
+        string? database = null;
+        if (DialectInfo.HasDatabases(provider.Dialect))
+            database = string.IsNullOrWhiteSpace(context.Member.Database) ? await reader.GetCurrentDatabaseAsync(ct).ConfigureAwait(false) : context.Member.Database;
+        var schema = await reader.GetDefaultSchemaAsync(database, ct).ConfigureAwait(false);
+        return (database, string.IsNullOrEmpty(schema) ? null : schema);
+    }
+
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(SourceContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var provider = ProviderOf(context);
+        if (!DialectInfo.HasDatabases(provider.Dialect)) return [];
+        await using var reader = await provider.OpenCatalogReaderAsync(ProfileOf(context), context.Password, ct).ConfigureAwait(false);
+        return (await reader.ListDatabasesAsync(ct).ConfigureAwait(false)).Where(d => !SystemDatabases.Contains(d)).ToList();
+    }
+
+    public async Task<IReadOnlyList<string>> ListSchemasAsync(SourceContext context, string? database, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var provider = ProviderOf(context);
+        await using var reader = await provider.OpenCatalogReaderAsync(ProfileOf(context), context.Password, ct).ConfigureAwait(false);
+        return (await reader.ListSchemasAsync(database, ct).ConfigureAwait(false)).Select(s => s.Name).Where(n => !IsSystemSchema(n)).ToList();
+    }
+
     /// <summary>Provider ids this fetcher is registered for.</summary>
     public static readonly IReadOnlyList<string> ProviderIds =
         ["sqlserver", "oracle", "postgresql", "mysql", "mariadb", "sqlite", "clickhouse", "snowflake", "cassandra"];

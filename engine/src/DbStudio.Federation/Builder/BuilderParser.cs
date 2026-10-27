@@ -54,6 +54,7 @@ public sealed partial class BuilderParser
     {
         ArgumentNullException.ThrowIfNull(sql);
         if (string.IsNullOrWhiteSpace(sql)) return new ParseResult(null, "The SQL is empty.");
+        sql = catalog.ToEngineNames(sql); // crm.sales.orders → crm."sales.orders" (wide members' tables the catalog knows)
         var ast = await serialize(sql, ct).ConfigureAwait(false);
         if (!ast.Supported) return new ParseResult(null, "This build cannot parse SQL (no DuckDB).");
         if (!ast.Ok || ast.Json is null) return new ParseResult(null, "The SQL does not parse: " + (ast.Error ?? "syntax error"));

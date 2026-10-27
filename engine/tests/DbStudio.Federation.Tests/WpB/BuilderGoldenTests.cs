@@ -31,7 +31,8 @@ public sealed class BuilderGoldenTests
             catalog[key] = cols!.AsArray().Select(c => new BuilderCatalogColumn((string)c!["name"]!, (string)c["kind"]!, (string?)c["type"])).ToList();
         var model = root["model"].Deserialize<BuilderModel>(CoreJson.Options)!;
         var warnings = root["warnings"]?.AsArray().Select(w => w is JsonObject o ? (string)o["code"]! : (string)w!).ToList() ?? [];
-        return new Golden(file, (string)root["name"]!, new BuilderCatalog(catalog), model, (string)root["sql"]!, root["params"]!.AsArray(), warnings);
+        var paths = root["paths"]?.AsObject().ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value!.AsArray().Select(x => (string)x!).ToList());
+        return new Golden(file, (string)root["name"]!, new BuilderCatalog(catalog, paths), model, (string)root["sql"]!, root["params"]!.AsArray(), warnings);
     }
 
     public static TheoryData<string> Files()
@@ -76,7 +77,8 @@ public sealed class BuilderGoldenTests
         Assert.True(parsed.Model is not null, $"{file}: {parsed.Reason}\n{inlined}");
         var second = BuilderCompiler.Compile(parsed.Model!, g.Catalog, FixedNow);
         // Same statement: DuckDB flattens nested ANDs, so "a AND (b AND c)" and "a AND b AND c" are the same tree.
-        Assert.Equal(AstShape(first.Sql), AstShape(second.Sql));
+        // four-part names (wide members) only parse in their engine spelling
+        Assert.Equal(AstShape(g.Catalog.ToEngineNames(first.Sql)), AstShape(g.Catalog.ToEngineNames(second.Sql)));
         Assert.True(JsonNode.DeepEquals(ParamsJson(first.Params), ParamsJson(second.Params)),
             $"params: {ParamsJson(first.Params).ToJsonString()} vs {ParamsJson(second.Params).ToJsonString()}");
     }

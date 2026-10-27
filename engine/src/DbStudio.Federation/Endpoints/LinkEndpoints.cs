@@ -32,7 +32,7 @@ public static class LinkEndpoints
         {
             if (req?.Model is null) throw EngineException.Validation("model is required.", new { field = "model" });
             runtime.Definition(cid);
-            var catalog = BuilderCatalog.From(await runtime.CatalogAsync(cid, false, ct).ConfigureAwait(false));
+            var catalog = BuilderCatalog.From(await WithModelTablesAsync(runtime, cid, req.Model, ct).ConfigureAwait(false));
             var result = BuilderCompiler.Compile(req.Model, catalog);
             if (req.Plan) result = result with { Plan = await runtime.PlanAsync(cid, result.Sql, result.Params, ct).ConfigureAwait(false) };
             return Json(result);
@@ -43,16 +43,36 @@ public static class LinkEndpoints
             if (req?.Sql is null) throw EngineException.Validation("sql is required.", new { field = "sql" });
             runtime.Definition(cid);
             BuilderCatalog catalog;
-            // Without the catalog, alias.table.column and as.column references still resolve.
-            try { catalog = BuilderCatalog.From(await runtime.CatalogAsync(cid, false, ct).ConfigureAwait(false)); }
+            var sql = req.Sql;
+            // Without the catalog, alias.table.column and as.column references still resolve. Wide members' multi-part
+            // names (crm.sales.orders) are resolved first: the model names the engine table ("sales.orders").
+            try
+            {
+                var resolved = await runtime.ResolveSqlAsync(cid, sql, ct).ConfigureAwait(false);
+                sql = resolved.Sql;
+                catalog = BuilderCatalog.From(resolved.Catalog);
+            }
             catch (EngineException e) when (e.Status is 501 or 503) { catalog = BuilderCatalog.Empty; }
-            return Json(await BuilderParser.ParseAsync(req.Sql, catalog, runtime.SerializeSqlAsync, ct).ConfigureAwait(false));
+            return Json(await BuilderParser.ParseAsync(sql, catalog, runtime.SerializeSqlAsync, ct).ConfigureAwait(false));
         });
 
         links.MapPost("/{cid}/plan", async (string cid, PlanRequest? req, ILinkRuntime runtime, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req?.Sql)) throw EngineException.Validation("sql is required.", new { field = "sql" });
             return Json(await runtime.PlanAsync(cid, req.Sql, req.Params, ct).ConfigureAwait(false));
+        });
+
+        // ---- wide members (lazy levels and tables)
+        links.MapPost("/{cid}/browse", async (string cid, LinkBrowseRequest? req, ILinkRuntime runtime, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req?.Alias)) throw EngineException.Validation("alias is required.", new { field = "alias" });
+            return Json(await runtime.BrowseAsync(cid, req, ct).ConfigureAwait(false));
+        });
+
+        links.MapPost("/{cid}/resolve", async (string cid, LinkResolveRequest? req, ILinkRuntime runtime, CancellationToken ct) =>
+        {
+            if (req?.Tables is null) throw EngineException.Validation("tables is required.", new { field = "tables" });
+            return Json(await runtime.ResolveTablesAsync(cid, req.Tables, ct).ConfigureAwait(false));
         });
 
         // ---- linked views
@@ -112,7 +132,9 @@ public static class LinkEndpoints
                 tables = catalog.Schemas.FirstOrDefault(s => string.Equals(s.Alias, member.Alias, StringComparison.OrdinalIgnoreCase)) is { Error: null } s ? s.Tables : null;
             }
             catch (EngineException) { /* scripts without column lists */ }
-            var source = new NativeLinkSource(member.Alias, memberProfile.ProviderId, memberProfile, member.Database, member.Schema, member.AllTables, member.Tables, tables);
+            var containers = member.IsWide ? await WideContainersAsync(runtime, cid, member.Alias, ct).ConfigureAwait(false) : null;
+            var source = new NativeLinkSource(member.Alias, memberProfile.ProviderId, memberProfile, member.Database, member.Schema, member.AllTables, member.Tables, tables,
+                member.EffectiveScope, containers);
             var result = NativeLinkScripter.Script(targetProvider.Dialect, targetProvider.Id, source, req.Kind, req.Name);
             if (target.ReadOnly)
                 result = result with { Notes = [.. result.Notes, $"The connection '{target.Name}' is read-only: run the script from a writable connection to the same server."] };
@@ -132,4 +154,46 @@ public static class LinkEndpoints
     }
 
     private static IResult Json<T>(T value) => Results.Json(value, CoreJson.Options);
+
+    /// <summary>The remote schemas a wide member spans (at most <see cref="NativeLinkScripter.MaxWideContainers"/> + 1 listed), null when they cannot be listed.</summary>
+    private static async Task<IReadOnlyList<NativeContainer>?> WideContainersAsync(ILinkRuntime runtime, string cid, string alias, CancellationToken ct)
+    {
+        try
+        {
+            var top = await runtime.BrowseAsync(cid, new LinkBrowseRequest(alias), ct).ConfigureAwait(false);
+            if (top.Level is null) return [];
+            if (top.Level == "schema") return top.Children.Select(c => new NativeContainer(null, c.Name)).ToList();
+            var list = new List<NativeContainer>();
+            foreach (var db in top.Children.OrderByDescending(c => c.IsDefault))
+            {
+                if (list.Count > NativeLinkScripter.MaxWideContainers) break;
+                var schemas = await runtime.BrowseAsync(cid, new LinkBrowseRequest(alias, [db.Name]), ct).ConfigureAwait(false);
+                list.AddRange(schemas.Children.Select(c => new NativeContainer(db.Name, c.Name)));
+            }
+            return list;
+        }
+        catch (EngineException) { return null; }
+    }
+
+    /// <summary>The link catalog plus the tables of wide members the model uses outside their default schema.</summary>
+    internal static async Task<LinkCatalog> WithModelTablesAsync(ILinkRuntime runtime, string cid, BuilderModel model, CancellationToken ct)
+    {
+        var catalog = await runtime.CatalogAsync(cid, false, ct).ConfigureAwait(false);
+        var missing = model.Tables
+            .Where(t => !string.IsNullOrEmpty(t.Alias) && t.Table?.Contains('.') == true)
+            .Where(t => catalog.Schemas.FirstOrDefault(s => string.Equals(s.Alias, t.Alias, StringComparison.OrdinalIgnoreCase)) is { } s
+                        && s.Scope is LinkScopes.Database or LinkScopes.Connection
+                        && !s.Tables.Any(x => string.Equals(x.LinkName, t.Table, StringComparison.OrdinalIgnoreCase)))
+            .Select(t => new LinkTableRef(t.Alias, t.Table!)).Distinct().ToList();
+        if (missing.Count == 0) return catalog;
+        var found = await runtime.ResolveTablesAsync(cid, missing, ct).ConfigureAwait(false);
+        return catalog with
+        {
+            Schemas = catalog.Schemas.Select(s =>
+            {
+                var more = found.Tables.Where(f => string.Equals(f.Alias, s.Alias, StringComparison.OrdinalIgnoreCase)).Select(f => f.Table).ToList();
+                return more.Count == 0 ? s : s with { Tables = [.. s.Tables, .. more] };
+            }).ToList(),
+        };
+    }
 }

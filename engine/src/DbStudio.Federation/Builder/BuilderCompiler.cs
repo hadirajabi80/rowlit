@@ -8,9 +8,54 @@ namespace DbStudio.Federation.Builder;
 public sealed record BuilderCatalogColumn(string Name, string Kind, string? Type = null);
 
 /// <summary>Columns of the mounted tables keyed <c>"alias.table"</c> (case-insensitive); kinds drive the filter SQL.</summary>
-public sealed class BuilderCatalog(IReadOnlyDictionary<string, IReadOnlyList<BuilderCatalogColumn>> tables)
+/// <param name="paths">
+/// Tables of wide members (<see cref="SourceTable.Path"/>) keyed like the columns: they are written in their natural form
+/// (<c>crm.sales.orders</c>, every part through <see cref="LinkSql.QuoteIdent"/>), every other table <c>alias.table</c>
+/// (UI twin: compile.ts tableSql; goldens carry them as an optional "paths" object).
+/// </param>
+public sealed class BuilderCatalog(IReadOnlyDictionary<string, IReadOnlyList<BuilderCatalogColumn>> tables,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? paths = null)
 {
     private readonly Dictionary<string, IReadOnlyList<BuilderCatalogColumn>> _tables = new(tables, StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<string>> _paths = paths is null ? new(StringComparer.OrdinalIgnoreCase) : new(paths, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="sql"/> with the natural names of the catalog's wide-member tables (<c>crm.sales.orders</c>) written
+    /// as their engine tables (<c>crm."sales.orders"</c>), so DuckDB parses four-part names too. Pure: only the paths the
+    /// catalog knows are touched (the runtime's LinkNames rewrite covers everything else).
+    /// </summary>
+    public string ToEngineNames(string sql)
+    {
+        if (_paths.Count == 0) return sql;
+        var byAlias = _paths.GroupBy(kv => kv.Key[..kv.Key.IndexOf('.')], StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(kv => (Table: kv.Key[(kv.Key.IndexOf('.') + 1)..], Path: kv.Value)).ToList(), StringComparer.OrdinalIgnoreCase);
+        var tokens = DbStudio.Core.Sql.SqlTokenizer.Tokenize(sql, DbStudio.Core.Models.Dialect.DuckDb);
+        static string Name(DbStudio.Core.Sql.SqlToken t) => t.Kind == DbStudio.Core.Sql.SqlTokenKind.QuotedIdentifier && t.Value.Length >= 2 && t.Value[0] == '"'
+            ? t.Value[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : t.Value;
+        var sb = new StringBuilder();
+        var at = 0;
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            if (!tokens[i].IsIdentifier || (i > 0 && tokens[i - 1].IsPunct('.')) || !byAlias.TryGetValue(Name(tokens[i]), out var tables)) continue;
+            var parts = new List<int> { i };
+            for (var j = i; j + 2 < tokens.Count && tokens[j + 1].IsPunct('.') && tokens[j + 2].IsIdentifier; j += 2) parts.Add(j + 2);
+            var names = parts.Skip(1).Select(p => Name(tokens[p])).ToList();
+            var hit = tables.Where(x => x.Path.Count <= names.Count && x.Path.Select((p, k) => string.Equals(p, names[k], StringComparison.OrdinalIgnoreCase)).All(b => b))
+                .OrderByDescending(x => x.Path.Count).FirstOrDefault();
+            if (hit.Path is null) continue;
+            var last = tokens[parts[hit.Path.Count]];
+            sb.Append(sql, at, tokens[i].Start - at).Append(sql, tokens[i].Start, tokens[i].End - tokens[i].Start).Append('.').Append(LinkSql.QuoteIdent(hit.Table));
+            at = last.End;
+            i = parts[hit.Path.Count];
+        }
+        return at == 0 ? sql : sb.Append(sql, at, sql.Length - at).ToString();
+    }
+
+    /// <summary>The table's name in FROM / JOIN.</summary>
+    public string TableSql(string alias, string table) =>
+        _paths.TryGetValue(alias + "." + table, out var path) && path.Count > 0
+            ? string.Join(".", new[] { alias }.Concat(path).Select(LinkSql.QuoteIdent))
+            : LinkSql.Qualified(alias, table);
 
     public static BuilderCatalog Empty { get; } = new(new Dictionary<string, IReadOnlyList<BuilderCatalogColumn>>());
 
@@ -45,10 +90,14 @@ public sealed class BuilderCatalog(IReadOnlyDictionary<string, IReadOnlyList<Bui
     public static BuilderCatalog From(LinkCatalog catalog)
     {
         var d = new Dictionary<string, IReadOnlyList<BuilderCatalogColumn>>(StringComparer.OrdinalIgnoreCase);
+        var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var s in catalog.Schemas)
             foreach (var t in s.Tables)
+            {
                 d[s.Alias + "." + t.LinkName] = t.Columns.Select(c => new BuilderCatalogColumn(c.Name, c.Kind, c.SourceType)).ToList();
-        return new BuilderCatalog(d);
+                if (t.Path is { Count: > 0 } p) paths[s.Alias + "." + t.LinkName] = p;
+            }
+        return new BuilderCatalog(d, paths);
     }
 }
 
@@ -128,7 +177,7 @@ public static class BuilderCompiler
 
         // ---- FROM / JOIN
         var first = model.Tables[0];
-        sb.Append("\nFROM ").Append(LinkSql.Qualified(first.Alias, first.Table)).Append(" AS ").Append(LinkSql.QuoteIdent(first.As));
+        sb.Append("\nFROM ").Append(catalog.TableSql(first.Alias, first.Table)).Append(" AS ").Append(LinkSql.QuoteIdent(first.As));
         var attached = new HashSet<string>(StringComparer.Ordinal) { first.Id };
         foreach (var j in model.Joins)
         {
@@ -140,7 +189,7 @@ public static class BuilderCompiler
                 throw EngineException.Validation($"Join '{j.Id}' starts from table '{left.Id}', which is not in the FROM clause yet.", new { field = "joins" });
             if (!attached.Add(right.Id))
                 throw EngineException.Validation($"Join '{j.Id}' attaches table '{right.Id}' a second time.", new { field = "joins" });
-            sb.Append('\n').Append(type.ToUpperInvariant()).Append(" JOIN ").Append(LinkSql.Qualified(right.Alias, right.Table))
+            sb.Append('\n').Append(type.ToUpperInvariant()).Append(" JOIN ").Append(catalog.TableSql(right.Alias, right.Table))
                 .Append(" AS ").Append(LinkSql.QuoteIdent(right.As));
             if (type == BuilderJoinTypes.Cross) continue;
             if (j.On.Count == 0)
@@ -168,7 +217,7 @@ public static class BuilderCompiler
         {
             if (attached.Contains(t.Id)) continue;
             attached.Add(t.Id);
-            sb.Append("\nCROSS JOIN ").Append(LinkSql.Qualified(t.Alias, t.Table)).Append(" AS ").Append(LinkSql.QuoteIdent(t.As));
+            sb.Append("\nCROSS JOIN ").Append(catalog.TableSql(t.Alias, t.Table)).Append(" AS ").Append(LinkSql.QuoteIdent(t.As));
             warnings.Add(new PlanWarning(PlanWarningCodes.Cartesian, $"No join reaches {t.As}: every row pairs with every row.", new LinkTableRef(t.Alias, t.Table)));
         }
 

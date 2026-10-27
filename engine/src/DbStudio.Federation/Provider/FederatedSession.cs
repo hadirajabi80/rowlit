@@ -58,8 +58,10 @@ internal sealed class FederatedSession : AdoSessionBase, IDbSession
     {
         if (command is DuckDBCommand duck) duck.UseStreamingMode = true;
         var sql = context.Batch.Sql;
-        await _context.PrepareAsync(sql, false, null, null, Message, ct).ConfigureAwait(false);
+        var (_, statement) = await _context.PrepareStatementAsync(sql, false, null, null, Message, ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
+        // crm.sales.orders → crm."sales.orders" (wide members); the batch text is unchanged otherwise
+        if (!ReferenceEquals(statement, sql) && statement != sql) command.CommandText = statement;
         try
         {
             return await RunAsync(command, ct).ConfigureAwait(false);
