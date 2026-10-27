@@ -1740,6 +1740,10 @@ body.resizing-row .splitter-horizontal {
   padding-top: 8vh;
   background: var(--bg-overlay);
 }
+/* A confirmation raised from another modal (Settings, the shortcut sheet, Find...) stacks above it. */
+.overlay.overlay-above {
+  z-index: 950;
+}
 .dialog {
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 48px);

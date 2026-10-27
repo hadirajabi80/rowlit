@@ -3,6 +3,8 @@
 // the overflow toolbar fit (styles-03), the explorer chip scope (logic-10) and the tab strip (features-r1-05).
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { lazy, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setPlatformForTests } from '../../commands/keys';
@@ -105,6 +107,21 @@ describe('ConfirmDialog (design-02)', () => {
     expect(run).toBeEnabled();
     await user.click(run);
     expect(result).toEqual({ ok: true, ack: true });
+  });
+
+  it('stacks above other modals: a confirmation from Settings or the shortcut sheet must not open behind them', async () => {
+    // Every modal backdrop is z-index 900 and the later one in the DOM wins, so the confirmation (rendered before the
+    // sheet) needs its own layer. "Reset all shortcuts?" was invisible behind the Keyboard shortcuts sheet.
+    render(<ConfirmDialog />);
+    act(() => {
+      void useUi.getState().askConfirm({ title: 'Reset all shortcuts?', message: 'x', confirmLabel: 'Reset' });
+    });
+    const dialog = await screen.findByRole('dialog', { name: 'Reset all shortcuts?' });
+    const backdrop = dialog.parentElement!;
+    expect(backdrop).toHaveClass('overlay', 'overlay-above');
+    const css = readFileSync(resolve(__dirname, '../../theme/app.css'), 'utf8');
+    const z = (sel: string) => Number(new RegExp(`${sel.replace(/\./g, '\\.')}\\s*\\{[^}]*z-index:\\s*(\\d+)`).exec(css)?.[1]);
+    expect(z('.overlay.overlay-above')).toBeGreaterThan(z('.overlay'));
   });
 
   it('a required acknowledgement that was not ticked never confirms', async () => {

@@ -10,6 +10,11 @@ interface DialogProps {
   /** Pixels, or any CSS width (e.g. `min(760px, calc(100vw - 32px))` for a dialog that follows the window). */
   width?: number | string;
   className?: string;
+  /**
+   * Extra class of the backdrop. `overlay-above` stacks the dialog over other modals (a confirmation raised from
+   * Settings or the shortcut sheet must not open behind them: they are later in the DOM and share z-index 900).
+   */
+  overlayClassName?: string;
   /** Enter in a single-line field triggers this. */
   onSubmit?: () => void;
   ariaLabel?: string;
@@ -41,7 +46,7 @@ export function escapeOwnedByEditor(e: { target: EventTarget | null; defaultPrev
  * Modal dialog: role=dialog + aria-modal, focus trapped, Esc closes (unless a Monaco editor in the dialog uses it to
  * close its suggest/find widget), initial focus on the first input.
  */
-export function Dialog({ title, onClose, children, footer, width = 520, className, onSubmit, ariaLabel }: DialogProps) {
+export function Dialog({ title, onClose, children, footer, width = 520, className, overlayClassName, onSubmit, ariaLabel }: DialogProps) {
   const ref = useRef<HTMLDivElement>(null);
   useRestoreFocus(true, ref);
   useEffect(() => {
@@ -49,7 +54,7 @@ export function Dialog({ title, onClose, children, footer, width = 520, classNam
     focusFirst(ref.current, ['[data-autofocus]', FIRST_FIELD, 'button.btn-primary']);
   }, []);
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`overlay${overlayClassName ? ` ${overlayClassName}` : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={ref}
         className={`dialog ${className ?? ''}`}
