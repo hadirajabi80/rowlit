@@ -87,6 +87,22 @@ public sealed class KafkaIntegrationTests
     }
 
     [SkippableFact]
+    public async Task Looking_up_a_topic_that_does_not_exist_never_creates_it()
+    {
+        // The broker has auto.create.topics.enable=true and librdkafka's producer/admin default allow.auto.create.topics=true:
+        // every GET/browse/purge/produce on a mistyped name used to create the topic with the broker's default partitions.
+        await using var h = await OpenAsync();
+        var topic = $"it-missing-{Guid.NewGuid():N}";
+        var topics = new TopicService();
+        await Assert.ThrowsAsync<DbStudio.Core.Services.EngineException>(() => topics.DetailAsync(h, topic, default));
+        await Assert.ThrowsAsync<DbStudio.Core.Services.EngineException>(() => topics.PurgeAsync(h, topic, null, default));
+        await Assert.ThrowsAsync<DbStudio.Core.Services.EngineException>(() => new ProduceService().ProduceAsync(h, topic,
+            new KafkaProduceRequest([new KafkaProduceMessage("k", "v", null, null)], "string", "string", null, null, null), default));
+        await Task.Delay(1500);
+        Assert.DoesNotContain(await topics.ListAsync(h, true, default), t => t.Name == topic);
+    }
+
+    [SkippableFact]
     public async Task Cluster_overview_on_kraft()
     {
         await using var h = await OpenAsync();

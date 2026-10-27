@@ -41,7 +41,7 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
   const [messages, setMessages] = useState<KafkaMessage[]>([]);
   const [mode, setMode] = useState<Mode>('idle');
   const [progress, setProgress] = useState<string | null>(null);
-  const [result, setResult] = useState<KafkaFetchResult | null>(null);
+  const [result, setResult] = useState<(KafkaFetchResult & { search: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -77,6 +77,7 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
     setDropped(0);
     setMode('fetching');
     setProgress('Starting…');
+    const searched = browse.search;
     const buffer: KafkaMessage[] = [];
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
@@ -99,7 +100,7 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
         fetchRef.current = null;
         setMode('idle');
         setProgress(null);
-        setResult(r);
+        setResult(r && { ...r, search: searched });
         if (err && err !== 'cancelled') setError(err);
       },
     });
@@ -125,16 +126,20 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
     setPaused(false);
     setFollow(true);
     setMode('tail');
+    let received = 0;
     try {
       tailRef.current = await startTail(cid, {
         topic, partitions: browse.partitions, from: 'latest', keyFormat: browse.keyFormat, valueFormat: browse.valueFormat, filter: browse.search || null,
       }, {
-        onMessages: (items) => setMessages((m) => {
-          const next = m.concat(items);
-          if (next.length <= TAIL_CAP) return next;
-          setDropped((d) => d + next.length - TAIL_CAP);
-          return next.slice(next.length - TAIL_CAP);
-        }),
+        onMessages: (items) => {
+          // counted outside the state updater (updaters must stay pure: StrictMode runs them twice)
+          received += items.length;
+          if (received > TAIL_CAP) setDropped((d) => Math.max(d, received - TAIL_CAP));
+          setMessages((m) => {
+            const next = m.concat(items);
+            return next.length <= TAIL_CAP ? next : next.slice(next.length - TAIL_CAP);
+          });
+        },
         onState: (state, reason, engineDropped) => {
           if (engineDropped) setDropped((d) => Math.max(d, engineDropped));
           if (state === 'paused') setPaused(true);
@@ -247,8 +252,11 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
           ))}
         </div>
         {browse.start.kind === 'latest' && (
-          <input className="input kafka-num" aria-label="Latest count" inputMode="numeric" value={browse.start.count}
-            onChange={(e) => setBrowse({ start: { kind: 'latest', count: Number(e.target.value.replace(/\D/g, '')) || 1 } })} />
+          <>
+            <input className="input kafka-num" aria-label="Latest count" title="Newest messages read from each partition; the limit below caps the total shown" inputMode="numeric"
+              value={browse.start.count} onChange={(e) => setBrowse({ start: { kind: 'latest', count: Math.min(5000, Number(e.target.value.replace(/\D/g, '')) || 1) } })} />
+            <span className="tb-label">per partition</span>
+          </>
         )}
         {browse.start.kind === 'offset' && (
           <input className="input kafka-num" aria-label="Start offset" inputMode="numeric" value={browse.start.offset}
@@ -286,7 +294,7 @@ export function MessageBrowser({ tab, cid, topic, partitions, theme, visible }: 
         {mode === 'fetching' && <span>Fetching… {progress}</span>}
         {mode === 'idle' && result && (
           <span>
-            {formatCount(result.fetched)} message{result.fetched === 1 ? '' : 's'}{browse.search ? ` matching “${browse.search}”` : ''} · {formatCount(result.scanned)} scanned
+            {formatCount(result.fetched)} message{result.fetched === 1 ? '' : 's'}{result.search ? ` matching “${result.search}”` : ''} · {formatCount(result.scanned)} scanned
             {result.timedOut ? ' · stopped at the timeout' : ''}{result.truncated ? ' · more available (raise the limit or narrow the start)' : ''}
           </span>
         )}
@@ -350,7 +358,8 @@ function MessageDetail({ cid, topic, message: m, pretty, setPretty, readOnly, br
     const fmt = (f: string) => (f === 'json' || f === 'hex' || f === 'avro' || f === 'protobuf' || f === 'jsonschema' ? f : 'string') as 'string';
     openProduce(cid, topic, {
       key: m.key.text === null ? '' : decodedText(m.key),
-      value: m.value.json !== undefined ? JSON.stringify(m.value.json, null, 2) : decodedText(m.value),
+      value: m.value.text === null ? '' : prettyText(m.value, true),
+      tombstone: m.value.text === null,
       headers: m.headers.map((h) => ({ key: h.key, value: decodedText(h.value) })),
       keyFormat: fmt(m.key.format),
       valueFormat: m.value.json !== undefined && !m.value.schemaSubject ? 'json' : fmt(m.value.format),
@@ -366,9 +375,10 @@ function MessageDetail({ cid, topic, message: m, pretty, setPretty, readOnly, br
           <span className="muted">{m.value.format}{m.value.schemaId ? ` · schema ${m.value.schemaId}${m.value.schemaSubject ? ` (${m.value.schemaSubject})` : ''}` : ''} · {m.size.toLocaleString('en-US')} B</span>
           <span className="flex-1" />
           <label className="check"><input type="checkbox" checked={pretty} onChange={(e) => setPretty(e.target.checked)} /> Pretty</label>
-          {isTruncated(m.value) && <button type="button" className="btn btn-xs" onClick={onLoadFull}>Load full</button>}
+          {(isTruncated(m.value) || isTruncated(m.key)) && <button type="button" className="btn btn-xs" onClick={onLoadFull}>Load full</button>}
           <button type="button" className="btn btn-xs" onClick={() => copy(text, 'value')}>Copy</button>
-          <button type="button" className="btn btn-xs" disabled={readOnly} onClick={produceSimilar}>Produce similar</button>
+          <button type="button" className="btn btn-xs" disabled={readOnly || isTruncated(m.value) || isTruncated(m.key)} onClick={produceSimilar}
+            title={isTruncated(m.value) || isTruncated(m.key) ? 'Load the full message first: only its first 32 KB are loaded' : undefined}>Produce similar</button>
         </div>
         {m.value.error && <div className="kafka-decode-error-line" role="note">{m.value.error}</div>}
         <pre className="kafka-pre" dir="auto" tabIndex={0}>{text}</pre>

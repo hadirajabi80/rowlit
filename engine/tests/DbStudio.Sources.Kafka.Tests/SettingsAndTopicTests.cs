@@ -38,6 +38,8 @@ public sealed class SettingsTests
         var c = s.ToClientConfig();
         Assert.Equal("plaintext", c["security.protocol"]);
         Assert.False(c.ContainsKey("sasl.mechanism"));
+        // librdkafka's producer/admin default creates a topic on any metadata request for it (browsing a typo, produce to a wrong name)
+        Assert.Equal("false", c["allow.auto.create.topics"]);
     }
 
     [Fact]

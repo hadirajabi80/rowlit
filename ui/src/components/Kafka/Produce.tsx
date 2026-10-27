@@ -27,10 +27,11 @@ const isSchema = (f: KafkaProduceFormat) => f === 'avro' || f === 'protobuf' || 
 export function buildProduceRequest(d: ProduceDraft): KafkaProduceRequest | string {
   const n = Math.floor(d.repeat);
   if (!Number.isFinite(n) || n < 1 || n > MAX_REPEAT) return `Repeat must be between 1 and ${MAX_REPEAT}.`;
-  if (isSchema(d.valueFormat) && !d.subject.trim()) return 'Choose the Schema Registry subject of the value.';
+  const tomb = d.tombstone === true;
+  if (!tomb && isSchema(d.valueFormat) && !d.subject.trim()) return 'Choose the Schema Registry subject of the value.';
   if (isSchema(d.keyFormat) && !d.keySubject.trim()) return 'Choose the Schema Registry subject of the key.';
   if (d.headers.some((h) => !h.key.trim())) return 'Every header needs a key.';
-  if (d.valueFormat === 'json' || isSchema(d.valueFormat)) {
+  if (!tomb && (d.valueFormat === 'json' || isSchema(d.valueFormat))) {
     try {
       JSON.parse(substitute(d.value, 1));
     } catch (e) {
@@ -43,14 +44,14 @@ export function buildProduceRequest(d: ProduceDraft): KafkaProduceRequest | stri
   for (let i = 1; i <= n; i++) {
     messages.push({
       key: d.key === '' ? null : substitute(d.key, i),
-      value: substitute(d.value, i),
+      value: tomb ? null : substitute(d.value, i),
       headers: d.headers.map((h) => ({ key: h.key, value: substitute(h.value, i) })),
       partition: d.partition,
     });
   }
   return {
-    messages, keyFormat: d.keyFormat, valueFormat: d.valueFormat, compression: d.compression,
-    schema: isSchema(d.valueFormat) ? { subject: d.subject.trim(), version } : null,
+    messages, keyFormat: d.keyFormat, valueFormat: tomb ? 'string' : d.valueFormat, compression: d.compression,
+    schema: !tomb && isSchema(d.valueFormat) ? { subject: d.subject.trim(), version } : null,
     keySchema: isSchema(d.keyFormat) ? { subject: d.keySubject.trim(), version: 'latest' } : null,
   };
 }
@@ -76,6 +77,7 @@ export function ProduceView({ tab, theme }: { tab: ViewTab; theme: EffectiveThem
   const subjectOptions = useMemo(() => (subjects?.data ?? []).map((s) => ({ value: s.subject, label: s.subject, hint: s.schemaType })), [subjects?.data]);
 
   const send = async () => {
+    if (busy) return;
     const req = buildProduceRequest(d);
     if (typeof req === 'string') return setError(req);
     setBusy(true);
@@ -124,8 +126,15 @@ export function ProduceView({ tab, theme }: { tab: ViewTab; theme: EffectiveThem
             )}
           </div>
           <span className="form-label">Value</span>
-          <ValueEditor value={d.value} onChange={(v) => set({ value: v })} language={d.valueFormat === 'string' || d.valueFormat === 'hex' ? 'text' : 'json'}
-            ariaLabel="Value" theme={theme} onSubmit={() => void send()} />
+          <div className="kafka-value-field">
+            <label className="check">
+              <input type="checkbox" checked={d.tombstone === true} onChange={(e) => set({ tombstone: e.target.checked })} /> Null value (tombstone)
+            </label>
+            {d.tombstone === true
+              ? <div className="muted">A message with a key and no value: on a compacted topic it deletes the key.</div>
+              : <ValueEditor value={d.value} onChange={(v) => set({ value: v })} language={d.valueFormat === 'string' || d.valueFormat === 'hex' ? 'text' : 'json'}
+                ariaLabel="Value" theme={theme} onSubmit={() => void send()} />}
+          </div>
           <span className="form-label">Headers</span>
           <div className="kafka-headers-edit">
             {d.headers.map((h, i) => (
