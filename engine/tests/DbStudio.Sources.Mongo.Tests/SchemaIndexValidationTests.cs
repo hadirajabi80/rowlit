@@ -142,6 +142,8 @@ public sealed class IndexesTests
         fake.Index("shop", "orders", new BsonDocument { { "key", new BsonDocument("createdAt", 1) }, { "name", "ttl" }, { "expireAfterSeconds", 3600 }, { "partialFilterExpression", new BsonDocument("status", "paid") } });
         var list = await _svc.ListAsync(T.Handle(fake), "shop", "orders", CancellationToken.None);
         Assert.Equal(["_id_", "status_1_createdAt_-1", "ttl"], list.Select(i => i.Name));
+        Assert.True(list[0].Unique); // the _id index is unique although its spec has no "unique"
+        Assert.False(list[1].Unique);
         var compound = list[1];
         Assert.Equal(["status", "createdAt"], compound.Key.Select(k => k.Field));
         Assert.Equal([1, -1], compound.Key.Select(k => k.Type.GetValue<int>()));

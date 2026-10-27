@@ -82,6 +82,45 @@ describe('documents view', () => {
     await waitFor(() => expect(screen.getByText(/^1–20 of/)).toBeInTheDocument());
   });
 
+  it('lets the numeric options be emptied while typing (no "15" after clearing "1")', async () => {
+    renderCollection();
+    await waitDocs();
+    fireEvent.click(screen.getByRole('button', { name: /Options/ }));
+    const limit = screen.getByLabelText('Limit') as HTMLInputElement;
+    fireEvent.change(limit, { target: { value: '' } });
+    expect(limit.value).toBe('');
+    fireEvent.change(limit, { target: { value: '5' } });
+    expect(limit.value).toBe('5');
+    fireEvent.change(limit, { target: { value: '99999' } });
+    expect(limit.value).toBe('1000'); // clamped to the engine's maximum as soon as it is typed
+    fireEvent.change(limit, { target: { value: '' } });
+    fireEvent.blur(limit);
+    expect(limit.value).toBe('1000'); // an empty field settles back to the committed value
+  });
+
+  it('a new filter starts on the first page (a leftover skip would show an empty page)', async () => {
+    const { id } = renderCollection();
+    await waitDocs();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => expect(screen.getByText(/^21–40 of/)).toBeInTheDocument());
+    const filter = screen.getByRole('textbox', { name: 'Filter' });
+    fireEvent.change(filter, { target: { value: '{ status: "cancelled" }' } });
+    fireEvent.keyDown(filter, { key: 'Enter' });
+    await waitFor(() => expect(tabStateOf(id).query).toMatchObject({ filter: '{ status: "cancelled" }', skip: 0 }));
+    await waitFor(() => expect(screen.getByText('(filtered)')).toBeInTheDocument());
+    expect(cards().length).toBeGreaterThan(0);
+  });
+
+  it('an explicit skip past the end says so and offers the first page', async () => {
+    renderCollection('orders', 'documents', { query: { filter: '', projection: '', sort: '', collation: '', skip: 5000, limit: 20, maxTimeMs: 30000 } });
+    expect(await screen.findByText(/skip 5,000 is past the 240 matching documents/)).toBeInTheDocument();
+    expect(screen.queryByText(/^0–5,000 of/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the first page' }));
+    await waitDocs(20);
+    expect(screen.getByText(/^1–20 of/)).toBeInTheDocument();
+  });
+
   it('marks an estimated count', async () => {
     renderCollection('orders', 'documents', { query: { filter: '{ $where: "true" }', projection: '', sort: '', collation: '', skip: 0, limit: 20, maxTimeMs: 30000 } });
     expect(await screen.findByText('estimated')).toBeInTheDocument();
@@ -141,6 +180,18 @@ describe('document writes', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Document' }), { target: { value: '[{ sku: "X1" }, { sku: "X2" }]' } });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Insert' }));
     await waitFor(() => expect(screen.getByText(/^1–14 of/)).toBeInTheDocument());
+  });
+
+  it('a failing array insert keeps the dialog on the missing documents (a retry cannot insert twice)', async () => {
+    renderCollection('products');
+    await waitDocs();
+    fireEvent.click(screen.getByRole('button', { name: /Insert/ }));
+    const editor = await screen.findByRole('textbox', { name: 'Document' });
+    fireEvent.change(editor, { target: { value: '[{ _id: "P1" }, { _id: "P2" }, { _id: "P1" }, { _id: "P3" }]' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Insert' }));
+    expect(await screen.findByText(/2 of 4 documents were inserted; document 3 failed/)).toBeInTheDocument();
+    expect((screen.getByRole('textbox', { name: 'Document' }) as HTMLTextAreaElement).value).toMatch(/^\[\s*\{ _id: "P1" \},\s*\{ _id: "P3" \}\s*\]$/);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('edits a document (replace by _id) keeping its types', async () => {

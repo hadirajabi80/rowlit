@@ -1,7 +1,7 @@
 // "Export to code" (docs/PLAN-M2.md 6.4): a find query or an aggregation pipeline as mongosh, Node.js driver, C#
 // driver (BsonDocument pipeline + PipelineDefinition), Python (pymongo) and Java driver code. Works on parsed
 // BsonValue trees so every BSON type is written with the target driver's own constructor.
-import { formatDouble, isoDate, toShell, uuidOf, type BsonValue } from '../../mongo/bson';
+import { formatDouble, isoDate, regexLiteralBody, toShell, uuidOf, type BsonValue } from '../../mongo/bson';
 
 export type CodeLanguage = 'shell' | 'node' | 'csharp' | 'python' | 'java';
 
@@ -82,7 +82,11 @@ function nodeEmitter(): Emitter {
         uses.add('Binary');
         return `new Binary(Buffer.from(${jsString(v.v)}, 'base64'), ${parseInt(v.sub, 16)})`;
       }
-      case 'regex': return `/${v.pattern.replace(/\//g, '\\/')}/${v.flags}`;
+      case 'regex':
+        // JS literals only know the flags i m s u (and g y d); Mongo's "x" needs the driver's BSONRegExp. An empty
+        // pattern "//" would be a comment.
+        if (/[^imsu]/.test(v.flags)) { uses.add('BSONRegExp'); return `new BSONRegExp(${jsString(v.pattern)}, ${jsString(v.flags)})`; }
+        return v.pattern === '' ? `new RegExp('', ${jsString(v.flags)})` : `/${regexLiteralBody(v.pattern)}/${v.flags}`;
       case 'timestamp': uses.add('Timestamp'); return `new Timestamp({ t: ${v.ts}, i: ${v.inc} })`;
       case 'minKey': uses.add('MinKey'); return 'new MinKey()';
       case 'maxKey': uses.add('MaxKey'); return 'new MaxKey()';

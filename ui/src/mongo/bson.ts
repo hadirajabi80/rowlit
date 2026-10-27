@@ -73,7 +73,9 @@ export class EjsonError extends Error {}
 export function parseEjson(text: string): BsonValue {
   let j: unknown;
   try {
-    j = JSON.parse(text);
+    // A JS object puts integer-like keys ("2", "10") first: documents with such field names keep their order through
+    // the order-preserving parser (field order matters to MongoDB and must survive edit + replace).
+    j = ORDER_SENSITIVE.test(text) ? parseJsonOrdered(text) : JSON.parse(text);
   } catch (e) {
     throw new EjsonError(`Invalid Extended JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -84,6 +86,104 @@ export function parseEjson(text: string): BsonValue {
 export function parseEjsonDoc(text: string): BsonDoc {
   const v = parseEjson(text);
   return v.t === 'object' ? v : B.doc([['value', v]]);
+}
+
+/** An object whose key order a plain JS object cannot keep (integer-like keys, or a `__proto__` key). */
+class OrderedObject {
+  readonly entries: [string, unknown][];
+  constructor(entries: [string, unknown][]) {
+    this.entries = entries;
+  }
+}
+
+const INDEX_KEY = /^(0|[1-9]\d{0,9})$/;
+const ORDER_SENSITIVE = /"(?:0|[1-9]\d{0,9}|__proto__)"\s*:/;
+
+/** JSON.parse that keeps the key order of objects with integer-like keys (those come back as `OrderedObject`). */
+function parseJsonOrdered(text: string): unknown {
+  let i = 0;
+  const fail = (msg: string): never => {
+    throw new SyntaxError(`${msg} at position ${i}`);
+  };
+  const ws = () => {
+    while (i < text.length && (text[i] === ' ' || text[i] === '\t' || text[i] === '\r' || text[i] === '\n')) i++;
+  };
+  // eslint-disable-next-line no-control-regex -- JSON strings exclude the control characters
+  const STR = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
+  const NUM = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  const str = (): string => {
+    STR.lastIndex = i;
+    const m = STR.exec(text);
+    if (!m) return fail('Bad string');
+    i += m[0].length;
+    return JSON.parse(m[0]) as string;
+  };
+  const value = (): unknown => {
+    ws();
+    const c = text[i];
+    if (c === '{') {
+      i++;
+      const entries: [string, unknown][] = [];
+      ws();
+      if (text[i] === '}') i++;
+      else {
+        for (;;) {
+          ws();
+          const k = str();
+          ws();
+          if (text[i] !== ':') fail("Expected ':'");
+          i++;
+          entries.push([k, value()]);
+          ws();
+          if (text[i] === ',') {
+            i++;
+            continue;
+          }
+          if (text[i] === '}') {
+            i++;
+            break;
+          }
+          fail("Expected ',' or '}'");
+        }
+      }
+      return entries.some(([k]) => INDEX_KEY.test(k) || k === '__proto__') ? new OrderedObject(entries) : Object.fromEntries(entries);
+    }
+    if (c === '[') {
+      i++;
+      const out: unknown[] = [];
+      ws();
+      if (text[i] === ']') {
+        i++;
+        return out;
+      }
+      for (;;) {
+        out.push(value());
+        ws();
+        if (text[i] === ',') {
+          i++;
+          continue;
+        }
+        if (text[i] === ']') {
+          i++;
+          return out;
+        }
+        fail("Expected ',' or ']'");
+      }
+    }
+    if (c === '"') return str();
+    if (text.startsWith('true', i)) return (i += 4, true);
+    if (text.startsWith('false', i)) return (i += 5, false);
+    if (text.startsWith('null', i)) return (i += 4, null);
+    NUM.lastIndex = i;
+    const m = NUM.exec(text);
+    if (!m) return fail('Unexpected token');
+    i += m[0].length;
+    return Number(m[0]);
+  };
+  const v = value();
+  ws();
+  if (i < text.length) fail('Unexpected trailing text');
+  return v;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -125,6 +225,17 @@ function parseDouble(s: string): number {
   return Number(s);
 }
 
+/** A JSON number, or a canonical number wrapper (`{ $numberInt: "3" }`), as a JS number; null for anything else. */
+function plainNumber(x: unknown): number | null {
+  if (typeof x === 'number') return x;
+  if (isObj(x)) {
+    for (const k of ['$numberInt', '$numberLong', '$numberDouble']) {
+      if (only(x, k) && typeof x[k] === 'string') return parseDouble(x[k] as string);
+    }
+  }
+  return null;
+}
+
 /** Converts parsed JSON (canonical or relaxed EJSON) into a BsonValue. */
 export function fromEjson(j: unknown): BsonValue {
   if (j === null) return { t: 'null' };
@@ -132,14 +243,15 @@ export function fromEjson(j: unknown): BsonValue {
   if (typeof j === 'number') return Number.isInteger(j) ? numberValue(j) : { t: 'double', v: j };
   if (typeof j === 'string') return { t: 'string', v: j };
   if (Array.isArray(j)) return { t: 'array', v: j.map(fromEjson) };
+  if (j instanceof OrderedObject) return { t: 'object', v: j.entries.map(([k, v]) => [k, fromEjson(v)] as BsonEntry) };
   if (!isObj(j)) return { t: 'string', v: String(j) };
   const o = j;
   if (only(o, '$oid') && typeof o.$oid === 'string') return { t: 'objectId', v: o.$oid };
   if (only(o, '$date')) {
     const d = o.$date;
     if (typeof d === 'string') return { t: 'date', v: Date.parse(d) };
-    if (typeof d === 'number') return { t: 'date', v: d };
-    if (isObj(d) && typeof d.$numberLong === 'string') return { t: 'date', v: Number(d.$numberLong) };
+    const n = plainNumber(d);
+    if (n !== null) return { t: 'date', v: n };
   }
   if (only(o, '$numberInt') && typeof o.$numberInt === 'string') return { t: 'int', v: Number(o.$numberInt) };
   if (only(o, '$numberLong') && typeof o.$numberLong === 'string') return { t: 'long', v: o.$numberLong };
@@ -155,7 +267,11 @@ export function fromEjson(j: unknown): BsonValue {
     const r = o.$regularExpression;
     return { t: 'regex', pattern: String(r.pattern ?? ''), flags: String(r.options ?? '') };
   }
-  if (only(o, '$timestamp') && isObj(o.$timestamp)) return { t: 'timestamp', ts: Number(o.$timestamp.t), inc: Number(o.$timestamp.i) };
+  if (only(o, '$timestamp') && isObj(o.$timestamp)) {
+    const ts = plainNumber(o.$timestamp.t);
+    const inc = plainNumber(o.$timestamp.i);
+    if (ts !== null && inc !== null) return { t: 'timestamp', ts, inc };
+  }
   if (only(o, '$minKey')) return { t: 'minKey' };
   if (only(o, '$maxKey')) return { t: 'maxKey' };
   if (only(o, '$undefined')) return { t: 'undefined' };
@@ -210,15 +326,29 @@ export function toEjsonJson(v: BsonValue, mode: 'canonical' | 'relaxed' = 'canon
     case 'array': return v.v.map((x) => toEjsonJson(x, mode));
     case 'object': {
       const o: Record<string, unknown> = {};
-      for (const [k, x] of v.v) o[k] = toEjsonJson(x, mode);
+      for (const [k, x] of v.v) Object.defineProperty(o, k, { value: toEjsonJson(x, mode), enumerable: true, writable: true, configurable: true });
       return o;
     }
     case 'trunc': return { $trunc: v.preview, len: v.len };
   }
 }
 
-export function toEjsonText(v: BsonValue, mode: 'canonical' | 'relaxed' = 'relaxed', indent: number | undefined = 2): string {
-  return JSON.stringify(toEjsonJson(v, mode), null, indent);
+/** Extended JSON text, `JSON.stringify` layout, with the documents' field order kept (also for integer-like keys). */
+export function toEjsonText(v: BsonValue, mode: 'canonical' | 'relaxed' = 'relaxed', spaces = 2): string {
+  const indent = spaces > 0 ? spaces : undefined; // 0: one compact line
+  const pad = (n: number) => (indent === undefined ? '' : `\n${' '.repeat(indent * n)}`);
+  const colon = indent === undefined ? ':' : ': ';
+  const go = (x: BsonValue, level: number): string => {
+    if (x.t === 'array') {
+      return x.v.length === 0 ? '[]' : `[${x.v.map((e) => pad(level + 1) + go(e, level + 1)).join(',')}${pad(level)}]`;
+    }
+    if (x.t === 'object') {
+      return x.v.length === 0 ? '{}' : `{${x.v.map(([k, e]) => pad(level + 1) + JSON.stringify(k) + colon + go(e, level + 1)).join(',')}${pad(level)}}`;
+    }
+    const leaf = JSON.stringify(toEjsonJson(x, mode), null, indent);
+    return indent === undefined ? leaf : leaf.replace(/\n/g, `\n${' '.repeat(indent * level)}`);
+  };
+  return go(v, 0);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -248,8 +378,32 @@ export function isoDate(ms: number): string | null {
   return y >= 0 && y <= 9999 ? d.toISOString() : null;
 }
 
-function escapeRegexBody(p: string): string {
-  return p.replace(/(^|[^\\])\//g, '$1\\/').replace(/\n/g, '\\n');
+/** Positions of `/` that would end a regex literal early (not escaped, not inside a character class). */
+function bareSlashes(p: string): number[] {
+  const out: number[] = [];
+  let inClass = false;
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '\\') i++;
+    else if (c === '[') inClass = true;
+    else if (c === ']') inClass = false;
+    else if (c === '/' && !inClass) out.push(i);
+  }
+  return out;
+}
+
+/** The pattern as the body of a `/…/flags` literal in JavaScript-like code: bare slashes and line breaks escaped. */
+export function regexLiteralBody(p: string): string {
+  const bare = new Set(bareSlashes(p));
+  let out = '';
+  for (let i = 0; i < p.length; i++) out += bare.has(i) ? '\\/' : p[i];
+  return out.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+/** The pattern when `/pattern/flags` re-parses to exactly this pattern text (else null: use `RegExp("…")`). */
+function exactRegexLiteral(p: string): string | null {
+  if (p === '' || /[\n\r\u2028\u2029]/.test(p) || bareSlashes(p).length > 0) return null;
+  return p;
 }
 
 /** Hex string of a UUID binary (subtype 4, 16 bytes), formatted 8-4-4-4-12; null otherwise. */
@@ -280,7 +434,11 @@ export function scalarShell(v: BsonValue): string {
       const u = uuidOf(v);
       return u ? `UUID("${u}")` : `BinData(${parseInt(v.sub, 16)}, "${v.v}")`;
     }
-    case 'regex': return `/${escapeRegexBody(v.pattern)}/${v.flags}`;
+    case 'regex': {
+      // A bare "/" in the stored pattern cannot sit in a literal without becoming "\/" (a different pattern text).
+      const exact = exactRegexLiteral(v.pattern);
+      return exact !== null ? `/${exact}/${v.flags}` : `RegExp(${JSON.stringify(v.pattern)}, ${JSON.stringify(v.flags)})`;
+    }
     case 'timestamp': return `Timestamp(${v.ts}, ${v.inc})`;
     case 'minKey': return 'MinKey';
     case 'maxKey': return 'MaxKey';

@@ -74,7 +74,7 @@ public sealed class IndexesService
         long? ttl = spec.TryGetValue("expireAfterSeconds", out var e) && BsonKit.IsNumber(e) ? (long)BsonKit.ToDouble(e) : null;
         long? size = sizes is not null && sizes.TryGetValue(name, out var sz) && BsonKit.IsNumber(sz) ? (long)BsonKit.ToDouble(sz) : null;
         return new MongoIndexInfo(name, key,
-            spec.TryGetValue("unique", out var u) && u.ToBoolean(),
+            name == "_id_" || (spec.TryGetValue("unique", out var u) && u.ToBoolean()), // the _id index is unique though its spec does not say so
             spec.TryGetValue("sparse", out var sp) && sp.ToBoolean(),
             ttl,
             spec.TryGetValue("partialFilterExpression", out var pf) ? Ejson.Canonical(pf) : null,

@@ -10,7 +10,7 @@ import { useTabs, type ViewTab } from '../../../store/tabs';
 import { useExplorer } from '../../Explorer/explorerStore';
 import { registerMongoCommands } from '../commands';
 import { splitPipeline } from '../CollectionDialogs';
-import { collectionKey, tabState } from '../open';
+import { collectionKey, openCollection, tabState } from '../open';
 import { loadCollections, loadDatabases, useMongo } from '../store';
 import { formatBytes, formatCount, mongoTree } from '../tree';
 import { CID, setupMongo } from './helpers';
@@ -141,7 +141,23 @@ describe('commands', () => {
     await waitFor(async () => expect((await api.mongo.collections(CID, 'shop')).map((c) => c.name)).toContain('clients'));
   });
 
+  it('an open workspace follows the renamed collection', async () => {
+    const id = openCollection(CID, 'shop', 'customers', 'indexes');
+    runCommand('mongo.renameCollection', target(['shop', 'customers']));
+    const dlg = await screen.findByRole('dialog', { name: 'Rename shop.customers' });
+    fireEvent.change(within(dlg).getByLabelText('New name'), { target: { value: 'clients' } });
+    fireEvent.click(within(dlg).getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect((useTabs.getState().tabs.find((t) => t.id === id) as ViewTab).title).toBe('shop.clients'));
+    const tab = useTabs.getState().tabs.find((t) => t.id === id) as ViewTab;
+    expect(tab.key).toBe(collectionKey(CID, 'shop', 'clients'));
+    expect(tabState(tab)).toMatchObject({ db: 'shop', coll: 'clients', sub: 'indexes' });
+    // opening the new name activates the same tab instead of a duplicate
+    expect(openCollection(CID, 'shop', 'clients')).toBe(id);
+  });
+
   it('splits view pipelines into stage texts', () => {
     expect(splitPipeline('[ { $match: { a: [1, 2] } }, { $project: { "x,y": 1 } } ]')).toEqual(['{ $match: { a: [1, 2] } }', '{ $project: { "x,y": 1 } }']);
+    // braces, brackets and quotes inside a regular expression or a comment are not structure
+    expect(splitPipeline('[ { $match: { s: /[}],\'(/i } }, // note: } , {\n { $limit: 5 } ]')).toEqual(['{ $match: { s: /[}],\'(/i } }', '{ $limit: 5 }']);
   });
 });

@@ -64,7 +64,8 @@ describe('parseShell', () => {
   });
   it('parses regex literals and RegExp()', () => {
     expect(at('{name: /^al/i}', 'name')).toEqual({ t: 'regex', pattern: '^al', flags: 'i' });
-    expect(at('{p: /a\\/b/}', 'p')).toEqual({ t: 'regex', pattern: 'a/b', flags: '' });
+    // the pattern text is kept as written (the engine and mongosh keep the escaped slash too)
+    expect(at('{p: /a\\/b/}', 'p')).toEqual({ t: 'regex', pattern: 'a\\/b', flags: '' });
     expect(at('{p: RegExp("x", "mi")}', 'p')).toEqual({ t: 'regex', pattern: 'x', flags: 'im' });
     expect(at('{p: [/a/, /b/]}', 'p.1')).toEqual({ t: 'regex', pattern: 'b', flags: '' });
   });

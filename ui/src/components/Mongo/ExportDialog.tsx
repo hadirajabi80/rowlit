@@ -64,9 +64,11 @@ export function ExportDialog({ cid, db, coll, query, onClose }: { cid: string; d
   };
 
   const running = job.state.status === 'running';
+  // an empty column pick would make the engine export every column
+  const noColumns = format === 'csv' && !!picked && !fields.some((f) => picked.has(f.path));
   return (
     <Dialog title={`Export ${db}.${coll}`} ariaLabel="Export documents" onClose={onClose} width={600}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={running} onClick={() => void run()}><Download size={14} aria-hidden /> Export</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={running || noColumns} title={noColumns ? 'Pick at least one column' : undefined} onClick={() => void run()}><Download size={14} aria-hidden /> Export</button></>}>
       <div className="form-grid">
         <span className="form-label">Documents</span>
         <div className="mg-radios" role="radiogroup" aria-label="Documents">

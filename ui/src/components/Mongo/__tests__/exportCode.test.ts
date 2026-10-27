@@ -47,6 +47,16 @@ describe('exportCode', () => {
     expect(exportCode('java', AGG)).toContain('new Document("$sort", new Document("qty", -1))');
   });
 
+  it('writes regular expressions as valid JavaScript (escaped slashes stay single, x flag and empty pattern)', () => {
+    const find = (pattern: string, flags = '') => exportCode('node', { kind: 'find', db: 'd', coll: 'c', filter: { t: 'object', v: [['r', { t: 'regex', pattern, flags }]] } }, { boilerplate: false });
+    expect(find('a/b')).toContain('r: /a\\/b/');
+    expect(find('a\\/b')).toContain('r: /a\\/b/'); // already escaped: not "a\\\\/b", which would end the literal
+    expect(find('[/]x', 'i')).toContain('r: /[/]x/i');
+    expect(find('')).toContain("r: new RegExp('', '')"); // "//" would be a comment
+    expect(find('a', 'x')).toContain("new BSONRegExp('a', 'x')"); // "x" is not a JavaScript flag
+    expect(exportCode('node', { kind: 'find', db: 'd', coll: 'c', filter: { t: 'object', v: [['r', { t: 'regex', pattern: 'a', flags: 'x' }]] } })).toMatch(/import \{ MongoClient, BSONRegExp \}/);
+  });
+
   it('can leave out the boilerplate', () => {
     const body = exportCode('node', FIND, { boilerplate: false });
     expect(body).not.toContain('MongoClient');
