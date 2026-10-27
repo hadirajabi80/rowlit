@@ -126,6 +126,43 @@ public sealed class ChFakeServerTests
     }
 
     [Fact]
+    public async Task Catalog_GivesADictionaryItsKeyColumns_SoTheDataTabSortsByThem()
+    {
+        var fake = new FakeClickHouse
+        {
+            Route = (r, _) => Task.FromResult<HttpResponseMessage?>(
+                r.Query.Contains("system.dictionaries", StringComparison.Ordinal)
+                    ? FakeClickHouse.Rows(r, ["name", "keys"], [["product_dict", "[\"id\"]"]])
+                : r.Query.Contains("FROM system.tables", StringComparison.Ordinal)
+                    ? FakeClickHouse.Rows(r, ["name", "engine", "comment", "primary_key", "sorting_key", "partition_key", "sampling_key", "engine_full"],
+                        [["product_dict", "Dictionary", "", "", "", "", "", ""], ["orders", "MergeTree", "", "id", "id", "", "", ""]])
+                : r.Query.Contains("FROM system.columns", StringComparison.Ordinal)
+                    ? FakeClickHouse.Rows(r, ["table", "name", "type", "default_kind", "default_expression", "comment", "is_in_primary_key", "is_in_sorting_key", "position"],
+                        [["product_dict", "id", "UInt64", "", "", "", "0", "0", "1"], ["product_dict", "name", "String", "", "", "", "0", "0", "2"],
+                         ["orders", "id", "UInt64", "", "", "", "1", "1", "1"]])
+                : null),
+        };
+        var provider = new ClickHouseProvider { Handler = fake };
+        await using var reader = await provider.OpenCatalogReaderAsync(FakeClickHouse.Profile(), "pw", CancellationToken.None);
+        var schema = await reader.LoadSchemaAsync(null, "shop", CancellationToken.None);
+        var dict = Assert.Single(schema.Objects, o => o.Name == "product_dict");
+        Assert.Equal("type", dict.Type);
+        Assert.Equal(["id"], dict.PrimaryKey);
+        Assert.True(dict.Columns[0].IsPk);
+        Assert.Equal(["id"], Assert.Single(schema.Objects, o => o.Name == "orders").PrimaryKey);
+    }
+
+    [Fact]
+    public void DictionaryKey_ReadsTheJsonNames_AndKeepsOnlyKnownColumns()
+    {
+        Assert.Equal(["id", "region"], ChCatalogReader.ParseJsonNames("[\"id\",\"region\"]"));
+        Assert.Empty(ChCatalogReader.ParseJsonNames(""));
+        Assert.Empty(ChCatalogReader.ParseJsonNames("not json"));
+        Assert.Equal(["id"], ChCatalogReader.DictionaryKey(["id", "gone", "id"], new[] { "id", "name" }));
+        Assert.Empty(ChCatalogReader.DictionaryKey(null, new[] { "id" }));
+    }
+
+    [Fact]
     public async Task ManualMode_IsNotSupported()
     {
         var (_, _, session) = await OpenAsync();

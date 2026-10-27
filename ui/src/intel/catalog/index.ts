@@ -63,7 +63,11 @@ export class ObjectEntry {
   private colMap: Map<string, ColumnDef> | null = null;
   private readonly fold: (s: string) => string;
 
-  constructor(schema: string, obj: CatalogObject, fold: (s: string) => string, builtin = false, database: string | null = null) {
+  /** ClickHouse dictionaries (catalog type `type`) are queryable like tables. */
+  private readonly dictionaries: boolean;
+
+  constructor(schema: string, obj: CatalogObject, fold: (s: string) => string, builtin = false, database: string | null = null, dictionaries = false) {
+    this.dictionaries = dictionaries;
     this.database = database;
     this.schema = schema;
     this.name = obj.n;
@@ -75,7 +79,7 @@ export class ObjectEntry {
 
   get qualifiedName(): string { return `${this.schema}.${this.name}`; }
   get isTabular(): boolean {
-    return this.type === 'table' || this.type === 'view' || this.type === 'mview' || this.type === 'tablefunc';
+    return this.type === 'table' || this.type === 'view' || this.type === 'mview' || this.type === 'tablefunc' || (this.dictionaries && this.type === 'type');
   }
 
   columns(): ColumnDef[] {
@@ -265,7 +269,7 @@ export class CatalogIndex {
     const byName = new Map<string, ObjectEntry[]>();
     const objects: ObjectEntry[] = new Array(sc.objects.length);
     for (let i = 0; i < sc.objects.length; i++) {
-      const e = new ObjectEntry(sc.name, sc.objects[i], this.foldColumn, builtin, builtin ? null : this.database);
+      const e = new ObjectEntry(sc.name, sc.objects[i], this.foldColumn, builtin, builtin ? null : this.database, this.spec.id === 'clickhouse');
       objects[i] = e;
       const k = this.keyOfCatalog(e.name);
       const arr = byName.get(k);

@@ -49,6 +49,11 @@ public static class ChCatalogQueries
         WHERE database = {db:String} AND name = {t:String}
         """;
 
+    /// <summary>The key columns of the dictionaries of a database, as a JSON array text.</summary>
+    public const string DictionaryKeys = """
+        SELECT name, toJSONString(`key.names`) FROM system.dictionaries WHERE database = {db:String}
+        """;
+
     public const string SkippingIndices = """
         SELECT name, type_full, expr, granularity
         FROM system.data_skipping_indices
@@ -143,6 +148,9 @@ public sealed class ChCatalogReader : ICatalogReader
             ct, ("db", schema)).ConfigureAwait(false))
             .GroupBy(c => c.Table, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
+        var dictionaryKeys = tables.Any(t => t.Engine == "Dictionary")
+            ? await ReadDictionaryKeysAsync(schema, ct).ConfigureAwait(false)
+            : new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var objects = new List<CatalogObject>(tables.Count);
         foreach (var t in tables)
         {
@@ -150,7 +158,7 @@ public sealed class ChCatalogReader : ICatalogReader
             var cols = columns.GetValueOrDefault(t.Name) ?? [];
             var pk = type == ObjectTypes.Table
                 ? KeyColumns(t.PrimaryKey is { Length: > 0 } ? t.PrimaryKey : t.SortingKey, cols.Select(c => c.Name).ToList())
-                : [];
+                : type == ObjectTypes.Type ? DictionaryKey(dictionaryKeys.GetValueOrDefault(t.Name), cols.Select(c => c.Name).ToList()) : [];
             objects.Add(new CatalogObject
             {
                 Type = type,
@@ -178,6 +186,51 @@ public sealed class ChCatalogReader : ICatalogReader
         return new SchemaCatalog(null, schema, objects);
     }
 
+    /// <summary>
+    /// Key attributes of the dictionaries of <paramref name="db"/> (system.dictionaries "key.names"), by dictionary name. The
+    /// data tab sorts by them instead of by every column. Empty when the server does not expose them (no access, old versions).
+    /// </summary>
+    private async Task<Dictionary<string, List<string>>> ReadDictionaryKeysAsync(string db, CancellationToken ct)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var (name, json) in await ChDb.QueryAsync(Conn, ChCatalogQueries.DictionaryKeys, r => (ChDb.S(r, 0), ChDb.Str(r, 1)), ct, ("db", db)).ConfigureAwait(false))
+            {
+                var keys = ParseJsonNames(json);
+                if (keys.Count > 0) result[name] = keys;
+            }
+        }
+        catch (ClickHouseServerException)
+        {
+            // key.names missing or system.dictionaries not readable: dictionaries are listed without a key
+        }
+        return result;
+    }
+
+    /// <summary>The names of a JSON array text (<c>["id","region"]</c>); empty for anything else.</summary>
+    public static List<string> ParseJsonNames(string? json)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(json)) return list;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return list;
+            foreach (var e in doc.RootElement.EnumerateArray())
+                if (e.ValueKind == System.Text.Json.JsonValueKind.String && e.GetString() is { Length: > 0 } s) list.Add(s);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // not JSON: no key
+        }
+        return list;
+    }
+
+    /// <summary>The dictionary's key attributes that are columns of it, in key order.</summary>
+    public static List<string> DictionaryKey(List<string>? keys, ICollection<string> columns) =>
+        (keys ?? []).Where(k => columns.Contains(k)).Distinct(StringComparer.Ordinal).ToList();
+
     /// <summary>Engine as comment prefix: "MergeTree · customer orders", dictionaries "Dictionary".</summary>
     public static string? CommentOf(string? engine, string? comment)
     {
@@ -202,12 +255,14 @@ public sealed class ChCatalogReader : ICatalogReader
         var cols = await ReadColumnsAsync(db, obj.Name, ct).ConfigureAwait(false);
         var names = cols.Select(c => c.Name).ToList();
         var pk = KeyColumns(info.PrimaryKey is { Length: > 0 } ? info.PrimaryKey : info.SortingKey, names);
+        if (pk.Count == 0 && ObjectType(info.Engine) == ObjectTypes.Type)
+            pk = DictionaryKey((await ReadDictionaryKeysAsync(db, ct).ConfigureAwait(false)).GetValueOrDefault(obj.Name), names);
         var columns = cols.Select((c, i) => new ColumnDetail(c.Name, c.Type, ChTypes.IsNullable(c.Type),
             c.DefaultKind is "DEFAULT" or "MATERIALIZED" or "ALIAS" or "EPHEMERAL" && !string.IsNullOrEmpty(c.DefaultExpr) ? c.DefaultExpr : null,
             pk.Contains(c.Name), false, c.DefaultKind is "MATERIALIZED" or "ALIAS", c.Comment, i + 1)).ToList();
 
         var indexes = new List<IndexDetail>();
-        if (pk.Count > 0) indexes.Add(new IndexDetail("PRIMARY KEY", false, pk, "primary key (sparse)", IsPrimaryKey: true));
+        if (pk.Count > 0) indexes.Add(new IndexDetail("PRIMARY KEY", false, pk, ObjectType(info.Engine) == ObjectTypes.Type ? "dictionary key" : "primary key (sparse)", IsPrimaryKey: true));
         if (ObjectType(info.Engine) == ObjectTypes.Table)
         {
             try

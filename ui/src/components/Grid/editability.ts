@@ -18,6 +18,7 @@ export interface Editability {
   updateLocked?: Set<number>;
 }
 
+const DICTIONARY_READ_ONLY = 'Dictionary: read-only';
 const NOT = (reason: string): Editability => ({ editable: false, reason, target: null, editableColumns: new Set(), keyOrdinals: [] });
 
 /** The columns whose value can be set on a new row (`isInsert`) or changed on an existing row. */
@@ -45,7 +46,8 @@ export function findTable(
   const schemas = schema
     ? (exactSchema.length ? exactSchema : snapshot.schemas.filter((s) => s.name.toLowerCase() === schema.toLowerCase()))
     : [...snapshot.schemas].sort((a, b) => rank(a.name) - rank(b.name));
-  const isTable = (o: CatalogObject) => o.t === 'table' || o.t === 'view';
+  // ClickHouse dictionaries (catalog type `type`, with columns) open in the data tab like a view: queryable, never editable
+  const isTable = (o: CatalogObject) => o.t === 'table' || o.t === 'view' || (o.t === 'type' && !!o.c?.length);
   for (const s of schemas) {
     const obj = s.objects.find((o) => isTable(o) && o.n === name) ?? s.objects.find((o) => isTable(o) && o.n.toLowerCase() === low);
     if (obj) return { schema: s.name, obj };
@@ -60,6 +62,7 @@ export function tableEditability(
 ): Editability {
   if (conn?.readOnly) return NOT('Read-only connection');
   const found = findTable(snapshot, schema, name, currentSchema);
+  if (found?.obj.t === 'type') return NOT(DICTIONARY_READ_ONLY);
   const pk = found?.obj.pk?.length ? found.obj.pk : columns.filter((c) => c.isKey).map((c) => c.name);
   const t = { schema: found?.schema ?? schema, name: found?.obj.n ?? name };
   // Oracle / SQLite table without a primary key: the hidden ROWID / rowid column the data tab reads identifies the rows.
@@ -87,6 +90,7 @@ export function resultEditability(
   if (tables.size > 1) return NOT('Results of a JOIN are not editable');
   const [{ schema, table }] = [...tables.values()];
   const found = findTable(opts.snapshot, schema, table, opts.currentSchema);
+  if (found?.obj.t === 'type') return NOT(DICTIONARY_READ_ONLY);
   const pk = found?.obj.pk?.length ? found.obj.pk : columns.filter((c) => c.isKey && c.table).map((c) => c.name);
   const t = { schema: found?.schema ?? schema, name: found?.obj.n ?? table };
   // Oracle `SELECT t.*, ROWID FROM t` (the PL/SQL Developer idiom) edits a table without a primary key by ROWID.

@@ -246,6 +246,7 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
     h('explorer.drop'),
   ],
   'explorer.object': [
+    n('data.open'), n('explorer.selectTop'), 'separator', // ClickHouse dictionaries (hidden for other objects)
     c('explorer.openDdl'), c('explorer.copyDdl'), c('designer.edit', true), c('objects.dependencies', true), 'separator',
     c('connections.openConsole'), c('explorer.copyName'), c('explorer.copyQualifiedName'), 'separator',
     c('connections.refreshCatalog'), 'separator',
