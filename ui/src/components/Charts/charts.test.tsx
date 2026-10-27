@@ -274,7 +274,7 @@ describe('export', () => {
     const write = vi.fn().mockResolvedValue(undefined);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { write, writeText }, configurable: true });
-    vi.stubGlobal('ClipboardItem', class { constructor(public items: Record<string, Blob>) {} });
+    vi.stubGlobal('ClipboardItem', class { items: Record<string, Blob>; constructor(items: Record<string, Blob>) { this.items = items; } });
     const svg = styled();
     await copyChart(svg);
     expect(write).toHaveBeenCalledTimes(1);
