@@ -37,7 +37,8 @@ internal sealed class DuckDbParamBinder : ParamBinderBase
             throw EngineException.Validation($"Parameter '{p.BareName}': linked databases have no OUT parameters.", new { field = "params", name = p.BareName });
         if (p.Kind == ParamKinds.RefCursor)
             throw EngineException.Validation($"Parameter '{p.BareName}': linked databases have no REF CURSOR parameters.", new { field = "params", name = p.BareName });
-        var value = ParamValues.ToClr(p) ?? DBNull.Value;
+        // An exact big number goes as its text: DuckDB casts the value to the type it infers for the parameter.
+        var value = ParamValues.ToClr(p) switch { null => DBNull.Value, ExactDecimal exact => exact.Text, var v => v };
         return placeholderName is null ? new DuckDBParameter { Value = value } : new DuckDBParameter(placeholderName, value);
     }
 }

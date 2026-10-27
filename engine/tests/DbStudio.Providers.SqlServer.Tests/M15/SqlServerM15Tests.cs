@@ -406,6 +406,22 @@ public sealed class SqlServerParamBinderTests
     }
 
     [Fact]
+    public void Bind_DecimalBeyondSystemDecimal_IsASqlDecimal()
+    {
+        using var cmd = new SqlCommand("SELECT @a, @b");
+        SqlServerParamBinder.Instance.Bind(cmd,
+            [P("a", "decimal", "1234567890123456789012345678.1234567890"), P("b", "int", "99999999999999999999")], new ParamBindCursor());
+        var a = (SqlParameter)cmd.Parameters["@a"];
+        Assert.Equal((SqlDbType.Decimal, (byte)38, (byte)10), (a.SqlDbType, a.Precision, a.Scale));
+        Assert.Equal("1234567890123456789012345678.1234567890", ((System.Data.SqlTypes.SqlDecimal)a.Value).ToString());
+        Assert.Equal("99999999999999999999", ((System.Data.SqlTypes.SqlDecimal)cmd.Parameters["@b"].Value).ToString());
+        using var tooLong = new SqlCommand("SELECT @a");
+        Assert.Throws<EngineException>(() => SqlServerParamBinder.Instance.Bind(tooLong, [P("a", "decimal", "1" + new string('0', 40))], new ParamBindCursor()));
+        Assert.Equal("DECLARE @a decimal(38, 10), @b decimal(38, 0); ",
+            SqlServerPlanReader.DeclareParams([P("a", "decimal", "1234567890123456789012345678.1234567890"), P("b", "int", "99999999999999999999")]));
+    }
+
+    [Fact]
     public void OutputParams_AndPositionalAreHandled()
     {
         using var cmd = new SqlCommand("EXEC dbo.GetTotal @id = @id, @total = @total OUTPUT; SELECT ?");

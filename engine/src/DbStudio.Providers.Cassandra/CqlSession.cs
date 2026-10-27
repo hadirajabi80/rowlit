@@ -631,27 +631,40 @@ public sealed class CqlSession : IDbSession
 
         var prepared = await PrepareAsync(positional).ConfigureAwait(false);
         var vars = prepared.Variables.Columns;
-        if (vars.Length == values.Count && vars.Any(v => CqlValues.IsComplex(v.TypeCode, v.TypeInfo)))
+        var bound = new object?[values.Count];
+        var asLiteral = new bool[values.Count];
+        for (var i = 0; i < values.Count; i++)
         {
-            // Collections, tuples, UDTs and vectors are written as literals (the driver needs CLR mappings to bind them).
+            if (i >= vars.Length) bound[i] = ParamValues.ToClr(values[i]);
+            else if (CqlValues.IsComplex(vars[i].TypeCode, vars[i].TypeInfo)) asLiteral[i] = true;
+            else
+            {
+                bound[i] = CqlValues.ToBind(ParamValues.ToClr(values[i]), vars[i].TypeCode, vars[i].TypeInfo);
+                asLiteral[i] = bound[i] is ExactDecimal;
+            }
+        }
+        if (vars.Length == values.Count && asLiteral.Any(x => x))
+        {
+            // Collections, tuples, UDTs and vectors are written as literals (the driver needs CLR mappings to bind them),
+            // and so are decimals with more digits than System.Decimal (the only CLR type the driver writes a decimal from).
             var markers = CqlText.Placeholders(CqlText.Tokenize(positional));
             var sb = new StringBuilder(positional.Length);
             var last = 0;
-            var remaining = new List<(QueryParam P, CqlColumn V)>();
+            var remaining = new List<object?>();
             for (var i = 0; i < markers.Count; i++)
             {
                 sb.Append(positional, last, markers[i].Start - last);
-                if (CqlValues.IsComplex(vars[i].TypeCode, vars[i].TypeInfo)) sb.Append(CqlValues.Literal(ParamValues.ToClr(values[i]), vars[i].TypeCode, vars[i].TypeInfo));
-                else { sb.Append('?'); remaining.Add((values[i], vars[i])); }
+                if (!asLiteral[i]) { sb.Append('?'); remaining.Add(bound[i]); }
+                else if (bound[i] is ExactDecimal exact) sb.Append(exact.Text);
+                else sb.Append(CqlValues.Literal(ParamValues.ToClr(values[i]), vars[i].TypeCode, vars[i].TypeInfo));
                 last = markers[i].End;
             }
             sb.Append(positional, last, positional.Length - last);
             var text = sb.ToString();
             if (remaining.Count == 0) return new SimpleStatement(text);
             var again = await PrepareAsync(text).ConfigureAwait(false);
-            return again.Bind(remaining.Select(r => CqlValues.ToBind(ParamValues.ToClr(r.P), r.V.TypeCode, r.V.TypeInfo)).ToArray());
+            return again.Bind(remaining.ToArray());
         }
-        var bound = values.Select((p, i) => i < vars.Length ? CqlValues.ToBind(ParamValues.ToClr(p), vars[i].TypeCode, vars[i].TypeInfo) : ParamValues.ToClr(p)).ToArray();
         return prepared.Bind(bound);
     }
 

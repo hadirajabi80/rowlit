@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Cassandra;
 using DbStudio.Core.Models;
+using DbStudio.Core.Params;
 using DbStudio.Core.Services;
 
 namespace DbStudio.Providers.Cassandra;
@@ -386,8 +387,28 @@ public static class CqlValues
                 case ColumnTypeCode.TinyInt: return Convert.ToSByte(Num(v), Inv);
                 case ColumnTypeCode.Bigint:
                 case ColumnTypeCode.Counter: return Convert.ToInt64(Num(v), Inv);
-                case ColumnTypeCode.Varint: return v is string vs ? BigInteger.Parse(vs.Trim(), NumberStyles.AllowLeadingSign, Inv) : new BigInteger(Convert.ToDecimal(Num(v), Inv));
-                case ColumnTypeCode.Decimal: return Convert.ToDecimal(Num(v), Inv);
+                case ColumnTypeCode.Varint:
+                    return v switch
+                    {
+                        ExactDecimal { IsInteger: true } big => big.ToBigInteger(),
+                        string vs => ExactDecimal.TryParse(vs, out var parsed) && parsed.IsInteger
+                            ? parsed.ToBigInteger()
+                            : throw new FormatException("not an integer"),
+                        _ => new BigInteger(Convert.ToDecimal(Num(v), Inv)),
+                    };
+                case ColumnTypeCode.Decimal:
+                    // More digits than System.Decimal holds: the exact value, written as a literal (the driver serializes
+                    // CQL decimal only from System.Decimal), see CqlSession.BuildStatementAsync.
+                    var exact = v switch
+                    {
+                        ExactDecimal x => x,
+                        string ds when !(decimal.TryParse(ds.Trim(), NumberStyles.Float, Inv, out var dm) && ExactDecimal.HoldsExactly(dm, ds.Trim()))
+                            && ExactDecimal.TryParse(ds, out var parsed) => parsed,
+                        _ => null,
+                    };
+                    if (exact is null) return Convert.ToDecimal(Num(v), Inv);
+                    if (!exact.IsFinite) throw new FormatException($"a CQL decimal has no {exact.Text}");
+                    return exact;
                 case ColumnTypeCode.Double: return Convert.ToDouble(Num(v), Inv);
                 case ColumnTypeCode.Float: return Convert.ToSingle(Num(v), Inv);
                 case ColumnTypeCode.Boolean:
@@ -505,6 +526,8 @@ public static class CqlValues
         {
             JsonValue jv when jv.GetValueKind() == JsonValueKind.String => jv.GetValue<string>(),
             JsonValue jv when jv.GetValueKind() is JsonValueKind.True or JsonValueKind.False => jv.GetValue<bool>(),
+            // varint / decimal keep the number's text: System.Decimal would round digits past the 28th.
+            JsonValue jv when jv.GetValueKind() == JsonValueKind.Number && Effective(code, info) is ColumnTypeCode.Varint or ColumnTypeCode.Decimal => jv.ToJsonString(),
             JsonValue jv when jv.GetValueKind() == JsonValueKind.Number => decimal.TryParse(jv.ToJsonString(), NumberStyles.Float, Inv, out var d) ? d : jv.ToJsonString(),
             _ => node.ToJsonString(),
         };

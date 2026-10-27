@@ -79,6 +79,19 @@ public sealed class ParamExecutionTests
     }
 
     [Fact]
+    public async Task UnnamedPlaceholderColumn_IsNamedAsWritten()
+    {
+        // docs/qa/round-sqlite.md O1: SELECT ? showed a column called @__p1 (the binder's rewrite).
+        await using var env = new EngineEnv();
+        var h = await M15.SeededSessionAsync(env);
+        var (done, events) = await M15.RunWithParamsAsync(env, h.Id, [M15.P("1", "int", 7), M15.P("2", "string", "x")], "SELECT ?, ? AS second, name FROM items WHERE id = 1");
+        Assert.Equal(ExecutionStatus.Ok, done.Status);
+        var set = Assert.Single(events.OfType<ExecResultSetEvent>());
+        Assert.Equal(["?", "second", "name"], set.Columns.Select(c => c.Name).ToList());
+        Assert.False(SqliteParamBinder.IsUnnamedPlaceholderName("@__px"));
+    }
+
+    [Fact]
     public async Task ParamsBindDmlInOneTransaction_AndOnlyReferencedOnes()
     {
         await using var env = new EngineEnv();

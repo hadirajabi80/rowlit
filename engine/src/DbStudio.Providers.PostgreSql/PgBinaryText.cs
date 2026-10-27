@@ -86,7 +86,7 @@ public static class PgBinaryText
             case 1186:
                 return PgTypes.IntervalText(new NpgsqlInterval(BinaryPrimitives.ReadInt32BigEndian(d[12..]), BinaryPrimitives.ReadInt32BigEndian(d[8..]),
                     BinaryPrimitives.ReadInt64BigEndian(d)));
-            case 1266: return TimeOfDay(BinaryPrimitives.ReadInt64BigEndian(d)) + Zone(BinaryPrimitives.ReadInt32BigEndian(d[8..]));
+            case 1266: return TimeTz(BinaryPrimitives.ReadInt64BigEndian(d), BinaryPrimitives.ReadInt32BigEndian(d[8..]));
             case 1560 or 1562: return Bits(d);
             case 1700: return Numeric(d);
             case 2950: return new Guid(d[..16], bigEndian: true).ToString("D");
@@ -187,6 +187,9 @@ public static class PgBinaryText
         var text = $"{total / 3600:00}:{total / 60 % 60:00}:{total % 60:00}";
         return frac == 0 ? text : text + "." + frac.ToString("000000", Inv).TrimEnd('0');
     }
+
+    /// <summary>A timetz as PostgreSQL prints it: "10:20:30+05", "10:20:30.5-03:30".</summary>
+    public static string TimeTz(long micros, int secondsWest) => TimeOfDay(micros) + Zone(secondsWest);
 
     /// <summary>"+05", "-03:30": the zone of a timetz value (stored as seconds WEST of UTC).</summary>
     private static string Zone(int secondsWest)

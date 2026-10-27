@@ -266,6 +266,21 @@ public sealed class PgParamBinderTests
     }
 
     [Fact]
+    public void Types_NumericBeyondSystemDecimal_IsBoundExactly()
+    {
+        // docs/qa/round-postgresql.md 15: numeric with more than 28 digits or NaN.
+        var integer = PgParamBinder.CreateParameter(P("a", "decimal", "123456789012345678901234567890123456789"));
+        Assert.Equal((NpgsqlDbType.Numeric, (object)System.Numerics.BigInteger.Parse("123456789012345678901234567890123456789")), (integer.NpgsqlDbType, integer.Value!));
+        var fraction = PgParamBinder.CreateParameter(P("a", "decimal", "0.1234567890123456789012345678901234567890"));
+        Assert.Equal((NpgsqlDbType.Unknown, (object)"0.1234567890123456789012345678901234567890"), (fraction.NpgsqlDbType, fraction.Value!));
+        var nan = PgParamBinder.CreateParameter(P("a", "decimal", "NaN"));
+        Assert.Equal((NpgsqlDbType.Unknown, (object)"NaN"), (nan.NpgsqlDbType, nan.Value!));
+        var bigInt = PgParamBinder.CreateParameter(P("a", "int", "99999999999999999999"));
+        Assert.Equal(NpgsqlDbType.Numeric, bigInt.NpgsqlDbType);
+        Assert.Equal(12.5m, PgParamBinder.CreateParameter(P("a", "decimal", "12.5")).Value);
+    }
+
+    [Fact]
     public void Types_DatesBigIntsAndRejections()
     {
         Assert.Equal(NpgsqlDbType.Bigint, PgParamBinder.CreateParameter(P("a", "int", 5_000_000_000L)).NpgsqlDbType);

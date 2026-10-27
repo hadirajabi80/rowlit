@@ -113,7 +113,8 @@ public static class PgTypes
                     return time >= TimeSpan.FromDays(1) ? PgBinaryText.Read(reader, ordinal) : ValueConverter.ToWire(time);
                 }
                 case "time with time zone" or "timetz":
-                    return reader.GetFieldValue<DateTimeOffset>(ordinal).ToString("HH:mm:ss.FFFFFFFzzz", Inv);
+                    // PostgreSQL's own form ("10:20:30+05", not "+05:00"), decoded from the wire value.
+                    return PgBinaryText.Read(reader, ordinal);
                 case "timestamp with time zone" or "timestamptz":
                 {
                     var stamp = reader.GetFieldValue<DateTimeOffset>(ordinal);

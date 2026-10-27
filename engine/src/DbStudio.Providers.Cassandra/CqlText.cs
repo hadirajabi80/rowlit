@@ -105,7 +105,8 @@ public static class CqlText
                 tokens.Add(new CqlToken(CqlTokenKind.Param, "?", start, i));
                 continue;
             }
-            if ((c == ':' || c == '@') && i + 1 < n && (char.IsLetter(text[i + 1]) || text[i + 1] == '_'))
+            if ((c == ':' || c == '@') && i + 1 < n && (char.IsLetter(text[i + 1]) || text[i + 1] == '_')
+                && !(c == ':' && IsKeyValueColon(tokens)))
             {
                 i++;
                 while (i < n && (char.IsLetterOrDigit(text[i]) || text[i] == '_')) i++;
@@ -221,6 +222,38 @@ public static class CqlText
             else col++;
         }
         return (line, col);
+    }
+
+    /// <summary>
+    /// True when a ':' read next is the separator of a map or UDT literal (<c>{'k':true}</c>, <c>{name:'x'}</c>): inside
+    /// braces, right after a key (a literal, a name, a bind marker or a closed tuple / list). A bind marker there follows
+    /// '{', ',' or the separator itself (<c>{'k': :v}</c>).
+    /// </summary>
+    private static bool IsKeyValueColon(List<CqlToken> tokens)
+    {
+        if (tokens.Count == 0) return false;
+        var prev = tokens[^1];
+        var keyLike = prev.Kind is CqlTokenKind.String or CqlTokenKind.Number or CqlTokenKind.Word or CqlTokenKind.QuotedIdent or CqlTokenKind.Param
+            || prev is { Kind: CqlTokenKind.Punct, Value: ")" or "]" or "}" };
+        if (!keyLike) return false;
+        var depth = 0;
+        for (var k = tokens.Count - 1; k >= 0; k--)
+        {
+            if (tokens[k].Kind != CqlTokenKind.Punct) continue;
+            switch (tokens[k].Value)
+            {
+                case "}" or ")" or "]": depth++; break;
+                case "(" or "[":
+                    if (depth == 0) return false; // directly inside parentheses / a list: not a map
+                    depth--;
+                    break;
+                case "{":
+                    if (depth == 0) return true;
+                    depth--;
+                    break;
+            }
+        }
+        return false;
     }
 
     /// <summary>Bind markers of a statement in order.</summary>

@@ -79,6 +79,21 @@ public sealed class MySqlSqlTextTests
     }
 
     [Fact]
+    public void Binder_BigNumbers_AreUnquotedExactLiterals()
+    {
+        // DECIMAL(65,30) and BIGINT UNSIGNED values beyond System.Decimal / long (docs/qa/round-mysql.md 9): written as
+        // an unquoted number (a quoted string would be compared with the DECIMAL column as a double).
+        const string big = "12345678901234567890123456789012345.123456789012345678901234567890";
+        var dec = MySqlParamBinder.Create(new QueryParam("d", "decimal", JsonValue.Create(big)), "d");
+        Assert.IsType<MySqlDecimal>(dec.Value);
+        Assert.Equal(big, dec.Value!.ToString());
+        Assert.Equal(MySqlDbType.NewDecimal, dec.MySqlDbType);
+        var unsigned = MySqlParamBinder.Create(new QueryParam("u", "int", JsonValue.Create("18446744073709551615")), "u");
+        Assert.Equal(System.Numerics.BigInteger.Parse("18446744073709551615"), unsigned.Value);
+        Assert.Throws<FormatException>(() => MySqlParamBinder.Create(new QueryParam("n", "decimal", JsonValue.Create("NaN")), "n"));
+    }
+
+    [Fact]
     public void Binder_RewritesNamedAndPositional_LeavesUserVariables()
     {
         using var cmd = new MySqlCommand("SELECT :id, ?, @n, @keep, :missing");
@@ -283,6 +298,17 @@ public sealed class MySqlProviderUnitTests
         Assert.Equal("1010", MySqlTypes.BitString(10, 4));
         Assert.Equal("00000001", MySqlTypes.BitString(1, 8));
         Assert.Equal("18446744073709551615", MySqlTypes.Convert(ulong.MaxValue, new ColumnInfo("u", 0, "BIGINT UNSIGNED", ColumnKinds.Int, true)));
+    }
+
+    [Fact]
+    public void ExplainRewriteNote_IsNotAConsoleMessage()
+    {
+        // docs/qa/round-mysql.md 11: EXPLAIN leaves note 1003 (the rewritten query); other notes and statements keep theirs.
+        var explain = StatementClassifier.Classify("EXPLAIN SELECT * FROM t WHERE id = 1", Dialect.MySql).Statements[0];
+        var select = StatementClassifier.Classify("SELECT 1/0", Dialect.MySql).Statements[0];
+        Assert.True(MySqlSession.IsExplainRewriteNote(explain, MessageSeverity.Info, 1003));
+        Assert.False(MySqlSession.IsExplainRewriteNote(explain, MessageSeverity.Warning, 1287));
+        Assert.False(MySqlSession.IsExplainRewriteNote(select, MessageSeverity.Info, 1003));
     }
 
     [Fact]

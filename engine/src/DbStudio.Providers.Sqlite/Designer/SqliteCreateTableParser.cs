@@ -224,18 +224,38 @@ public static class SqliteCreateTableParser
     }
 
     /// <summary>The SELECT of a stored CREATE VIEW (text after the top-level AS following the view name).</summary>
-    public static string ViewBody(string sql)
+    public static string ViewBody(string sql) => ViewParts(sql).Body;
+
+    /// <summary>
+    /// The SELECT of a stored CREATE VIEW and its column list (<c>CREATE VIEW v (a, b) AS ...</c>: "a, b"; null without one).
+    /// </summary>
+    public static (string Body, string? Columns) ViewParts(string sql)
     {
         var tokens = SqlTokenizer.Tokenize(sql, Dialect.Sqlite);
         var view = tokens.FindIndex(t => t.IsWord("VIEW"));
         var depth = 0;
+        int? listStart = null;
+        string? columns = null;
         for (var i = Math.Max(0, view + 1); i < tokens.Count; i++)
         {
-            if (tokens[i].IsPunct('(')) depth++;
-            else if (tokens[i].IsPunct(')')) depth--;
+            if (tokens[i].IsPunct('('))
+            {
+                if (depth++ == 0) listStart = i + 1 < tokens.Count ? tokens[i + 1].Start : null;
+            }
+            else if (tokens[i].IsPunct(')'))
+            {
+                if (--depth == 0 && listStart is { } s && s <= tokens[i].Start) columns = sql[s..tokens[i].Start].Trim();
+            }
             else if (depth == 0 && tokens[i].IsWord("AS") && i + 1 < tokens.Count)
-                return sql[tokens[i + 1].Start..].Trim().TrimEnd(';').Trim();
+                return (sql[tokens[i + 1].Start..].Trim().TrimEnd(';').Trim(), string.IsNullOrEmpty(columns) ? null : columns);
         }
-        return sql.Trim();
+        return (sql.Trim(), null);
     }
+
+    /// <summary>
+    /// A view body that names its columns like the view's column list (which the designer has no field for): the stored
+    /// SELECT wrapped in a CTE with that list, <c>WITH v(a, b) AS (...) SELECT * FROM v</c>, so a save keeps the names.
+    /// </summary>
+    public static string BodyWithColumns(string quotedViewName, string body, string columns) =>
+        $"WITH {quotedViewName}({columns}) AS (\n{body}\n)\nSELECT * FROM {quotedViewName}";
 }

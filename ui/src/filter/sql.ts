@@ -76,11 +76,13 @@ export interface PredicateResult {
 }
 
 /**
- * The ESCAPE clause (with its leading space). MySQL and Snowflake read a backslash as an escape inside string
- * literals, so the escape character is written '\\'; ClickHouse has no ESCAPE clause (backslash is its fixed escape).
+ * The ESCAPE clause (with its leading space). Snowflake reads a backslash as an escape inside string literals, so the
+ * escape character is written '\\'; ClickHouse has no ESCAPE clause (backslash is its fixed escape). MySQL reads '\\' as
+ * one backslash or (with sql_mode NO_BACKSLASH_ESCAPES) as two characters, which ESCAPE rejects: it escapes with '!'.
  */
 function likeEscape(d: Dialect): string {
-  if (d === 'mysql' || d === 'snowflake') return " ESCAPE '\\\\'";
+  if (d === 'mysql') return " ESCAPE '!'";
+  if (d === 'snowflake') return " ESCAPE '\\\\'";
   if (d === 'clickhouse') return '';
   return " ESCAPE '\\'";
 }
@@ -109,6 +111,7 @@ function serverOp(op: FilterCondition['op'], dialect?: Dialect): boolean {
 }
 
 function escapeLike(v: string, dialect: Dialect): string {
+  if (dialect === 'mysql') return v.replace(/[!%_]/g, (m) => `!${m}`);
   const re = dialect === 'tsql' ? /[\\%_[]/g : /[\\%_]/g;
   return v.replace(re, (m) => `\\${m}`);
 }

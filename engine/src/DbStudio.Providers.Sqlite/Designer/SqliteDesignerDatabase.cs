@@ -235,7 +235,40 @@ public sealed partial class SqliteDesignerDatabase : IDesignerDatabase
         await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await r.ReadAsync(ct).ConfigureAwait(false)) throw EngineException.NotFound($"View {sch}.{name}");
         var sql = r.IsDBNull(1) ? "" : r.GetString(1);
-        return new ViewModel(sch, r.GetString(0), SqliteCreateTableParser.ViewBody(sql), new ViewOptions(), sql);
+        var viewName = r.GetString(0);
+        var (body, columns) = SqliteCreateTableParser.ViewParts(sql);
+        // CREATE VIEW v (a, b) AS ...: the column list renames the SELECT's columns. Unless the SELECT already yields those
+        // names, the body is wrapped so that saving from the designer keeps them (docs/qa/round-sqlite.md O2).
+        if (columns is not null && !await SelectYieldsViewColumnsAsync(c, sch, viewName, body, ct).ConfigureAwait(false))
+            body = SqliteCreateTableParser.BodyWithColumns(SqliteNames.Quote(viewName), body, columns);
+        return new ViewModel(sch, viewName, body, new ViewOptions(), sql);
+    }
+
+    private static async Task<bool> SelectYieldsViewColumnsAsync(SqliteConnection c, string schema, string view, string body, CancellationToken ct)
+    {
+        try
+        {
+            var viewColumns = new List<string>();
+            await using (var info = c.CreateCommand())
+            {
+                info.CommandText = $"SELECT name FROM pragma_table_info($v, $s) ORDER BY cid";
+                info.Parameters.AddWithValue("$v", view);
+                info.Parameters.AddWithValue("$s", schema);
+                await using var ir = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await ir.ReadAsync(ct).ConfigureAwait(false)) viewColumns.Add(ir.GetString(0));
+            }
+            await using var probe = c.CreateCommand();
+            probe.CommandText = $"SELECT * FROM (\n{body}\n) LIMIT 0";
+            await using var pr = await probe.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (pr.FieldCount != viewColumns.Count) return false;
+            for (var i = 0; i < pr.FieldCount; i++)
+                if (!string.Equals(pr.GetName(i), viewColumns[i], StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+        catch (SqliteException)
+        {
+            return false;
+        }
     }
 
     [GeneratedRegex(@"^\s*PRAGMA\s+(?:\w+\.)?foreign_keys\s*=\s*(ON|OFF|1|0|TRUE|FALSE|YES|NO)\s*;?\s*$", RegexOptions.IgnoreCase)]
