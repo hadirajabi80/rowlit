@@ -117,6 +117,9 @@ public sealed record KafkaSettings
             // Do not spin on unreachable brokers for ever: back off quickly up to 5 s.
             ["reconnect.backoff.max.ms"] = "5000",
             ["log.connection.close"] = "false",
+            // A metadata request for a topic that does not exist (a typo, a tab left open on a deleted topic, produce to a
+            // wrong name) must answer "unknown topic", not create it: librdkafka's producer/admin default is true.
+            ["allow.auto.create.topics"] = "false",
         };
         if (UsesSasl)
         {

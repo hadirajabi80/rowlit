@@ -55,6 +55,8 @@ export interface ProduceDraft {
   keySubject: string;
   compression: 'none' | 'gzip' | 'snappy' | 'lz4' | 'zstd';
   repeat: number;
+  /** Produce a null value (a tombstone, which deletes the key of a compacted topic) instead of the value text. */
+  tombstone?: boolean;
 }
 
 export const DEFAULT_DRAFT: ProduceDraft = {

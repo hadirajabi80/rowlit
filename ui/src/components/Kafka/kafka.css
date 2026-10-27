@@ -558,6 +558,12 @@
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+.kafka-value-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
 .kafka-headers-edit {
   display: flex;
   flex-direction: column;

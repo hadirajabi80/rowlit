@@ -213,13 +213,13 @@ public static class AvroCodec
             case "uuid":
                 return v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g) ? g : throw Fail(path, "expected a UUID string");
             case "date":
-                if (v.ValueKind == JsonValueKind.Number) return DateTime.UnixEpoch.AddDays(v.GetInt32());
+                if (v.ValueKind == JsonValueKind.Number) return v.TryGetInt32(out var days) ? DateTime.UnixEpoch.AddDays(days) : throw Fail(path, "expected whole days since epoch");
                 return v.ValueKind == JsonValueKind.String && DateTime.TryParse(v.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var d)
                     ? DateTime.SpecifyKind(d.Date, DateTimeKind.Utc) : throw Fail(path, "expected a date (yyyy-MM-dd or days since epoch)");
             case "timestamp-millis" or "timestamp-micros" or "local-timestamp-millis" or "local-timestamp-micros":
                 if (v.ValueKind == JsonValueKind.Number)
                 {
-                    var n = v.GetInt64();
+                    if (!v.TryGetInt64(out var n)) throw Fail(path, "expected a whole epoch number");
                     return l.LogicalTypeName.EndsWith("millis", StringComparison.Ordinal)
                         ? DateTime.UnixEpoch.AddMilliseconds(n) : DateTime.UnixEpoch.AddTicks(n * 10);
                 }
@@ -227,7 +227,7 @@ public static class AvroCodec
                     ? ts.UtcDateTime : throw Fail(path, "expected an ISO timestamp or epoch number");
             case "time-millis" or "time-micros":
                 if (v.ValueKind == JsonValueKind.Number)
-                    return l.LogicalTypeName == "time-millis" ? TimeSpan.FromMilliseconds(v.GetInt64()) : TimeSpan.FromTicks(v.GetInt64() * 10);
+                    return v.TryGetInt64(out var tn) ? (l.LogicalTypeName == "time-millis" ? TimeSpan.FromMilliseconds(tn) : TimeSpan.FromTicks(tn * 10)) : throw Fail(path, "expected a whole number");
                 return v.ValueKind == JsonValueKind.String && TimeSpan.TryParse(v.GetString(), CultureInfo.InvariantCulture, out var t)
                     ? t : throw Fail(path, "expected a time (HH:mm:ss) or a number");
             case "decimal":
@@ -253,12 +253,12 @@ public static class AvroCodec
             {
                 Schema.Type.Null => v.ValueKind == JsonValueKind.Null ? null : throw Fail(path, "expected null"),
                 Schema.Type.Boolean => v.ValueKind is JsonValueKind.True or JsonValueKind.False ? v.GetBoolean() : throw Fail(path, "expected true/false"),
-                Schema.Type.Int => v.ValueKind == JsonValueKind.Number ? v.GetInt32() : throw Fail(path, "expected an int"),
-                Schema.Type.Long => v.ValueKind == JsonValueKind.Number ? v.GetInt64()
+                Schema.Type.Int => v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i32) ? i32 : throw Fail(path, "expected an int (a whole number within 32 bits)"),
+                Schema.Type.Long => v.ValueKind == JsonValueKind.Number ? (v.TryGetInt64(out var i64) ? i64 : throw Fail(path, "expected a long (a whole number within 64 bits)"))
                     : v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var l) ? l
                     : throw Fail(path, "expected a long"),
-                Schema.Type.Float => v.ValueKind == JsonValueKind.Number ? v.GetSingle() : throw Fail(path, "expected a float"),
-                Schema.Type.Double => v.ValueKind == JsonValueKind.Number ? v.GetDouble() : throw Fail(path, "expected a double"),
+                Schema.Type.Float => v.ValueKind == JsonValueKind.Number && float.IsFinite(v.GetSingle()) ? v.GetSingle() : throw Fail(path, "expected a float within range"),
+                Schema.Type.Double => v.ValueKind == JsonValueKind.Number && double.IsFinite(v.GetDouble()) ? v.GetDouble() : throw Fail(path, "expected a double within range"),
                 Schema.Type.String => v.ValueKind == JsonValueKind.String ? v.GetString() : throw Fail(path, "expected a string"),
                 Schema.Type.Bytes => Bytes(v, path),
                 _ => throw Fail(path, $"unsupported primitive {tag}"),

@@ -239,6 +239,17 @@ public sealed class CodecTests
         Assert.Contains("$.customer", missing.Message);
     }
 
+    [Theory]
+    [InlineData("""{"id":7.5,"customer":"c","total":1,"status":"NEW","tags":[],"attrs":{},"created":0}""", "$.id")]
+    [InlineData("""{"id":1,"customer":"c","total":1e400,"status":"NEW","tags":[],"attrs":{},"created":0}""", "$.total")]
+    [InlineData("""{"id":1,"customer":"c","total":1,"status":"NEW","tags":[],"attrs":{},"created":1.5}""", "$.created")]
+    public void Avro_encode_names_the_field_of_a_number_that_does_not_fit(string json, string path)
+    {
+        // used to surface "One of the identified items was in an invalid format." (raw FormatException of GetInt64) or encode Infinity
+        var ex = Assert.Throws<FormatException>(() => AvroCodec.Encode(AvroCodec.Parse(OrderAvro), Util.Json(json)));
+        Assert.StartsWith(path, ex.Message);
+    }
+
     [Fact]
     public void Avro_references_resolve_named_types()
     {

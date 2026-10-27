@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { KafkaMessage } from '../../../api/types';
 import { parseConfigLines } from '../dialogs';
-import { decodedText, formatCount, isTruncated, lagClass, preview, prettyText, sortMessages, substitute } from '../format';
+import { decodedText, formatCount, isTruncated, lagClass, preview, prettyText, reindentJson, sortMessages, substitute } from '../format';
 import { DEFAULT_DRAFT } from '../open';
 import { buildProduceRequest, MAX_REPEAT } from '../Produce';
 
@@ -41,6 +41,37 @@ describe('format', () => {
     expect(sortMessages(list, 'oldest').map((m) => m.partition)).toEqual([0, 2, 1]);
   });
 
+  it('orders a same-millisecond batch newest first by descending offset', () => {
+    const ts = '2026-01-01T00:00:01Z';
+    const list = [msg(0, 1, ts), msg(0, 2, ts), msg(0, 3, ts), msg(0, 4, '2026-01-01T00:00:02Z')];
+    expect(sortMessages(list, 'newest').map((m) => m.offset)).toEqual([4, 3, 2, 1]);
+    expect(sortMessages(list, 'oldest').map((m) => m.offset)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('compares timestamps by time, not by text (fractional digits and offsets differ in length)', () => {
+    const list = [msg(0, 1, '2026-01-01T00:00:01.5+00:00'), msg(0, 2, '2026-01-01T00:00:01.499+00:00'), msg(0, 3, '2026-01-01T00:00:01.501+00:00')];
+    expect(sortMessages(list, 'newest').map((m) => m.offset)).toEqual([3, 1, 2]);
+  });
+
+  it('pretty-prints JSON without touching number tokens', () => {
+    const raw = '{"id":9007199254740993,"price":1.10,"big":12345678901234567890,"exp":1E+2,"s":"a,b:{c}\\\"d","e":{},"l":[],"n":[1,[2],{"x":null}]}';
+    const out = prettyText({ format: 'json', text: raw, json: JSON.parse(raw) }, true);
+    expect(out).toContain('"id": 9007199254740993');
+    expect(out).toContain('"price": 1.10');
+    expect(out).toContain('"big": 12345678901234567890');
+    expect(out).toContain('"exp": 1E+2');
+    expect(out).toContain('"e": {}');
+    expect(out).toContain('"l": []');
+    expect(JSON.parse(out)).toEqual(JSON.parse(raw));
+  });
+
+  it('reindents nested JSON and refuses unbalanced text', () => {
+    expect(reindentJson('{"a":[1,{"b":true}]}')).toBe('{\n  "a": [\n    1,\n    {\n      "b": true\n    }\n  ]\n}');
+    expect(reindentJson('{"a":1')).toBeNull();
+    expect(reindentJson('{"a":1}}')).toBeNull();
+    expect(reindentJson('{"a":"open')).toBeNull();
+  });
+
   it('colours lag by the thresholds', () => {
     expect(lagClass(5, 10, 100)).toBe('kafka-lag-ok');
     expect(lagClass(10, 10, 100)).toBe('kafka-lag-warn');
@@ -64,6 +95,14 @@ describe('produce request', () => {
   it('sends an empty key as null and keeps the partition', () => {
     const r = buildProduceRequest({ ...DEFAULT_DRAFT, key: '', value: 'x', valueFormat: 'string', partition: 2 });
     expect(typeof r !== 'string' && r.messages[0]).toMatchObject({ key: null, partition: 2 });
+  });
+
+  it('produces a tombstone: null value, string format, no schema or JSON check', () => {
+    const r = buildProduceRequest({ ...DEFAULT_DRAFT, key: 'k', value: '{oops', valueFormat: 'avro', tombstone: true });
+    if (typeof r === 'string') throw new Error(r);
+    expect(r.messages[0]).toMatchObject({ key: 'k', value: null });
+    expect(r.valueFormat).toBe('string');
+    expect(r.schema).toBeNull();
   });
 
   it('validates JSON, header keys, the repeat cap and schema subjects', () => {

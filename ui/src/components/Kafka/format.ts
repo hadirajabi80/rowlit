@@ -46,9 +46,63 @@ export function preview(d: KafkaDecoded | null | undefined, max = 160): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-/** Pretty JSON when the payload parsed, else the text. */
+/**
+ * Re-indents JSON text without parsing it, so number tokens survive byte for byte (`JSON.parse` would round integers
+ * above 2^53, drop `1.10` to `1.1` and rewrite `1E+2`). Returns null when the text is not balanced JSON.
+ */
+export function reindentJson(text: string, indent = '  '): string | null {
+  const n = text.length;
+  let out = '';
+  let depth = 0;
+  let i = 0;
+  const nl = () => `\n${indent.repeat(depth)}`;
+  while (i < n) {
+    const c = text[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      i++;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      if (j >= n) return null;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else if (c === '{' || c === '[') {
+      let k = i + 1;
+      while (k < n && /\s/.test(text[k])) k++;
+      if (text[k] === (c === '{' ? '}' : ']')) {
+        out += c + text[k];
+        i = k + 1;
+      } else {
+        depth++;
+        out += c + nl();
+        i++;
+      }
+    } else if (c === '}' || c === ']') {
+      depth--;
+      if (depth < 0) return null;
+      out += nl() + c;
+      i++;
+    } else if (c === ',') {
+      out += `,${nl()}`;
+      i++;
+    } else if (c === ':') {
+      out += ': ';
+      i++;
+    } else {
+      let j = i;
+      while (j < n && !/[\s,:[\]{}"]/.test(text[j])) j++;
+      out += text.slice(i, j);
+      i = j;
+    }
+  }
+  return depth === 0 ? out : null;
+}
+
+/** Pretty JSON when the payload parsed (numbers kept exactly as the producer wrote them), else the text. */
 export function prettyText(d: KafkaDecoded, pretty: boolean): string {
   if (pretty && d.json !== undefined && !isTruncated(d)) {
+    const exact = typeof d.text === 'string' ? reindentJson(d.text) : null;
+    if (exact !== null) return exact;
     try {
       return JSON.stringify(d.json, null, 2);
     } catch {
@@ -60,10 +114,17 @@ export function prettyText(d: KafkaDecoded, pretty: boolean): string {
 
 export const messageKey = (m: Pick<KafkaMessage, 'partition' | 'offset'>) => `${m.partition}:${m.offset}`;
 
-/** Newest first by timestamp, then partition/offset (stable across merges). */
+/**
+ * Newest first by timestamp, then partition, then offset (descending when newest first, so a batch produced within one
+ * millisecond still reads newest to oldest). Stable across merges.
+ */
 export function sortMessages(list: KafkaMessage[], order: 'newest' | 'oldest'): KafkaMessage[] {
   const dir = order === 'newest' ? -1 : 1;
-  return [...list].sort((a, b) => (a.timestamp < b.timestamp ? -dir : a.timestamp > b.timestamp ? dir : a.partition - b.partition || a.offset - b.offset));
+  const at = (m: KafkaMessage) => new Date(m.timestamp).getTime();
+  return [...list].sort((a, b) => {
+    const t = at(a) - at(b);
+    return t !== 0 && !Number.isNaN(t) ? dir * t : a.partition - b.partition || dir * (a.offset - b.offset);
+  });
 }
 
 /** Lag heat class: thresholds configurable via the Groups view (warn ≥ warnAt, danger ≥ dangerAt). */

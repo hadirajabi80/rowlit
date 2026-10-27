@@ -414,7 +414,7 @@ public sealed class ProtobufSchema
                 case FieldDescriptorProto.Type.TypeDouble: Fixed(buf, 8, s2 => BinaryPrimitives.WriteDoubleLittleEndian(s2, Num(v, path))); break;
                 case FieldDescriptorProto.Type.TypeEnum:
                     int number;
-                    if (v.ValueKind == JsonValueKind.Number) number = v.GetInt32();
+                    if (v.ValueKind == JsonValueKind.Number) number = v.TryGetInt32(out var enumNumber) ? enumNumber : throw new FormatException($"{path}: expected an enum name or a whole number.");
                     else
                     {
                         var name = v.GetString();

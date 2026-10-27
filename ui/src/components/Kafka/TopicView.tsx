@@ -8,6 +8,7 @@ import type { SourceTarget } from '../../commands/types';
 import { toast } from '../../store/ui';
 import type { TabViewProps } from '../layout/tabViews';
 import { formatCount, lagClass } from './format';
+import { useLagThresholds } from './Groups';
 import { MessageBrowser } from './MessageBrowser';
 import { openGroup, openProduce, patchTab, topicTabState, TOPIC_SUBS, type TopicSub } from './open';
 import { Banner, Empty, RefreshButton, Tile, ViewHeader } from './parts';
@@ -203,6 +204,7 @@ function ConfigsPane({ cid, detail, readOnly, onSaved }: { cid: string; detail: 
 function ConsumersPane({ cid, topic }: { cid: string; topic: string }) {
   const groups = useKafka((s) => s.conns[cid]?.groups);
   const [details, setDetails] = useState<Record<string, KafkaGroupDetail | string>>({});
+  const [thresholds] = useLagThresholds();
   useEffect(() => void loadGroups(cid), [cid]);
   const consuming = useMemo(() => (groups?.data ?? []).filter((g) => g.topics.includes(topic)), [groups?.data, topic]);
   useEffect(() => {
@@ -239,7 +241,7 @@ function ConsumersPane({ cid, topic }: { cid: string; topic: string }) {
                     <td className="mono">{g.groupId}</td>
                     <td>{g.state}</td>
                     <td className="num">{g.members}</td>
-                    <td className={`num ${lagClass(lag, 1000, 10000)}`}>{typeof d === 'string' ? <span className="muted" title={d}>error</span> : lag === null ? '…' : formatCount(lag)}</td>
+                    <td className={`num ${lagClass(lag, thresholds.warn, thresholds.danger)}`}>{typeof d === 'string' ? <span className="muted" title={d}>error</span> : lag === null ? '…' : formatCount(lag)}</td>
                   </tr>
                 );
               })}
