@@ -447,7 +447,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       // by it. A SQLite table with a column of its own named rowid shadows the pseudo-column: it stays read-only.
       // Decided with page 0; later pages keep the same columns.
       if (req === 0) {
-        withRowid.current = (dialect === 'plsql' || dialect === 'sqlite') && !ownRowidColumn.current && !isView && !found?.obj.pk?.length && !rowidRefused.current;
+        // (SQLite: a key the server reports on the columns counts as a key too, so such a table is read as before.)
+        const keyed = !!found?.obj.pk?.length || (dialect === 'sqlite' && cols.some((c) => c.isKey));
+        withRowid.current = (dialect === 'plsql' || dialect === 'sqlite') && !ownRowidColumn.current && !isView && !keyed && !rowidRefused.current;
       }
       const t: TableTarget = { ...target, keyColumns: keys, ...(fallback ? { orderFallback: fallback } : {}), ...(withRowid.current ? { rowid: true } : {}) };
       let page = selectPageSql(t, dialect, { where: pred.where, sort: spec, offset, limit, serverVersion: s.serverInfo.productVersion });

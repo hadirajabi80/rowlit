@@ -40,6 +40,17 @@ multi-result scripts, triggers inside scripts, `PRAGMA`, `VACUUM`, `EXPLAIN QUER
 sample database (counts, view, triggers), import types and values (CSV with quotes, newlines, BOM, unicode, 64-bit
 integers, booleans, dates), AUTOINCREMENT counter kept over a rebuild, generated/STRICT/WITHOUT ROWID round trips.
 
+## Test results
+
+- `DBSTUDIO_IT=0 dotnet test engine/DbStudio.slnx -c Release`: all projects pass (Sqlite 110, Import 129, Core 570, ...).
+- `ui`: `npm run typecheck` clean, `npm run lint` only the existing warning classes (one more "refs during render"
+  warning in `DataTabView`, same class as the file's existing ones), `npm test` passes except the known load-flaky
+  Redis `browser.test.tsx` list test and `tokens.test.ts` Monaco hook timeout (rerun alone, see the report message).
+- `dataTabFocus.test.tsx` / `dataTabKeyless.test.tsx` expectations now include the `, rowid` the data tab reads for a
+  keyless SQLite table (their paging order is unchanged).
+- The real UI could not be driven end to end (headless Edge + Vite ran out of memory on the shared machine); the
+  engine side was verified live over REST/WebSocket and the UI side by the component tests above.
+
 ## Shared files touched
 
 `engine/src/DbStudio.Core/Designer/DesignerService.cs` (one argument), `ui/src/data/sqlgen.ts`,
