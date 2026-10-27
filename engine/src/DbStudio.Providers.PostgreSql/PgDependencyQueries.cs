@@ -12,9 +12,10 @@ public static class PgDependencyQueries
 
     /// <summary>$1 = schema, $2 = trigger name → trigger oid, table oid, function oid, table schema, table name, trigger name.</summary>
     public const string FindTrigger =
-        "SELECT t.oid, t.tgrelid, t.tgfoid, n.nspname::text, c.relname::text, t.tgname::text FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
-        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE lower(n.nspname) = lower($1) AND lower(t.tgname) = lower($2) AND NOT t.tgisinternal " +
-        "ORDER BY (t.tgname = $2) DESC LIMIT 1";
+        "SELECT t.oid, t.tgrelid, t.tgfoid, n.nspname::text, c.relname::text, " + PgCatalogQueries.TriggerDisplayName + " FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
+        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE lower(n.nspname) = lower($1) AND NOT t.tgisinternal " +
+        "AND (lower(t.tgname) = lower($2) OR lower(t.tgname || ' on ' || c.relname) = lower($2)) " +
+        "ORDER BY (t.tgname = $2 OR t.tgname || ' on ' || c.relname = $2) DESC, c.relispartition LIMIT 1";
 
     /// <summary>Relations a view's rewrite rule reads (tables, views, sequences), other than the view itself.</summary>
     public const string ViewUsesRelations =
@@ -38,13 +39,14 @@ public static class PgDependencyQueries
 
     /// <summary>Non-internal triggers on relation $1: name, function schema, function name, definition.</summary>
     public const string RelationTriggers =
-        "SELECT t.tgname::text, pn.nspname::text, p.proname::text, pg_get_triggerdef(t.oid, true), t.tgenabled::text FROM pg_trigger t " +
-        "JOIN pg_proc p ON p.oid = t.tgfoid JOIN pg_namespace pn ON pn.oid = p.pronamespace WHERE t.tgrelid = $1 AND NOT t.tgisinternal ORDER BY t.tgname";
+        "SELECT " + PgCatalogQueries.TriggerDisplayName + ", pn.nspname::text, p.proname::text, pg_get_triggerdef(t.oid, true), t.tgenabled::text FROM pg_trigger t " +
+        "JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_proc p ON p.oid = t.tgfoid JOIN pg_namespace pn ON pn.oid = p.pronamespace " +
+        "WHERE t.tgrelid = $1 AND NOT t.tgisinternal ORDER BY t.tgname";
 
     /// <summary>Triggers calling function $1: trigger name, table schema, table name.</summary>
     public const string TriggersCalling =
-        "SELECT t.tgname::text, n.nspname::text, c.relname::text FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
-        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE t.tgfoid = $1 AND NOT t.tgisinternal";
+        "SELECT " + PgCatalogQueries.TriggerDisplayName + ", n.nspname::text, c.relname::text FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
+        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE t.tgfoid = $1 AND NOT t.tgisinternal AND NOT c.relispartition";
 
     /// <summary>Relations whose column defaults use sequence $1 (serial / nextval).</summary>
     public const string SequenceUsedBy =
@@ -97,8 +99,13 @@ public static class PgDependencyQueries
     // ------------------------------------------------------------------ object list ($1 = schema name or NULL)
 
     public const string ListRelations =
-        "SELECT c.relkind::text, n.nspname::text, c.relname::text, CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END, " +
-        "CASE WHEN c.relkind IN ('r','p','m') THEN pg_total_relation_size(c.oid) END, obj_description(c.oid, 'pg_class') " +
+        // A partitioned table owns no storage: its size and row estimate are the sum over the leaf partitions.
+        "SELECT c.relkind::text, n.nspname::text, c.relname::text, " +
+        "CASE WHEN c.relkind = 'p' THEN (SELECT CASE WHEN max(x.reltuples) < 0 OR count(*) = 0 THEN NULL ELSE sum(GREATEST(x.reltuples, 0))::bigint END " +
+        " FROM pg_partition_tree(c.oid) pt JOIN pg_class x ON x.oid = pt.relid WHERE pt.isleaf) " +
+        " WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END, " +
+        "CASE WHEN c.relkind = 'p' THEN (SELECT sum(pg_total_relation_size(pt.relid))::bigint FROM pg_partition_tree(c.oid) pt WHERE pt.isleaf) " +
+        " WHEN c.relkind IN ('r','m') THEN pg_total_relation_size(c.oid) END, obj_description(c.oid, 'pg_class') " +
         "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
         "WHERE c.relkind IN ('r','p','v','m','f','S') AND NOT c.relispartition AND ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
 
@@ -112,9 +119,9 @@ public static class PgDependencyQueries
         "AND ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
 
     public const string ListTriggers =
-        "SELECT n.nspname::text, t.tgname::text, c.relname::text, obj_description(t.oid, 'pg_trigger') FROM pg_trigger t " +
+        "SELECT n.nspname::text, " + PgCatalogQueries.TriggerDisplayName + ", c.relname::text, obj_description(t.oid, 'pg_trigger') FROM pg_trigger t " +
         "JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace " +
-        "WHERE NOT t.tgisinternal AND ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
+        "WHERE NOT t.tgisinternal AND NOT c.relispartition AND ($1::text IS NULL OR n.nspname = $1::text) AND " + UserSchema;
 
     public static IReadOnlyDictionary<string, string> All { get; } = new Dictionary<string, string>
     {

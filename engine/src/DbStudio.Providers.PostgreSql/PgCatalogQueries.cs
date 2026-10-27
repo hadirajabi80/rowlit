@@ -107,9 +107,18 @@ public static class PgCatalogQueries
         "FROM pg_type t JOIN pg_attribute a ON a.attrelid = t.typrelid " +
         "WHERE t.typnamespace = $1 AND t.typtype = 'c' AND a.attnum > 0 AND NOT a.attisdropped ORDER BY t.oid, a.attnum";
 
+    /// <summary>
+    /// The name a trigger is listed under (<c>t</c> = pg_trigger, <c>c</c> = its table): PostgreSQL only requires trigger names to be
+    /// unique per table, so a name used on several tables of a schema is listed as "name on table" and resolved back by <see cref="FindTrigger"/>.
+    /// </summary>
+    public const string TriggerDisplayName =
+        "(CASE WHEN (SELECT count(*) FROM pg_trigger t2 JOIN pg_class c2 ON c2.oid = t2.tgrelid WHERE c2.relnamespace = c.relnamespace " +
+        "AND t2.tgname = t.tgname AND NOT t2.tgisinternal AND NOT c2.relispartition) > 1 THEN t.tgname::text || ' on ' || c.relname::text ELSE t.tgname::text END)";
+
+    /// <summary>Triggers of the schema's visible tables; the copies cloned onto hidden partitions are left out.</summary>
     public const string Triggers =
-        "SELECT t.oid, t.tgname::text, c.relname::text, pg_get_triggerdef(t.oid, true), obj_description(t.oid, 'pg_trigger') " +
-        "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE c.relnamespace = $1 AND NOT t.tgisinternal ORDER BY c.relname, t.tgname";
+        "SELECT t.oid, " + TriggerDisplayName + ", c.relname::text, pg_get_triggerdef(t.oid, true), obj_description(t.oid, 'pg_trigger') " +
+        "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE c.relnamespace = $1 AND NOT t.tgisinternal AND NOT c.relispartition ORDER BY c.relname, t.tgname";
 
     // ------------------------------------------------------------------ object level ($1 = schema name, $2 = object name)
 
@@ -129,8 +138,9 @@ public static class PgCatalogQueries
 
     public const string FindTrigger =
         "SELECT t.oid, t.tgfoid, c.relname::text, n.nspname::text, t.tgname::text FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid " +
-        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE lower(n.nspname) = lower($1) AND lower(t.tgname) = lower($2) AND NOT t.tgisinternal " +
-        "ORDER BY (t.tgname = $2) DESC LIMIT 1";
+        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE lower(n.nspname) = lower($1) AND NOT t.tgisinternal " +
+        "AND (lower(t.tgname) = lower($2) OR lower(t.tgname || ' on ' || c.relname) = lower($2)) " +
+        "ORDER BY (t.tgname = $2 OR t.tgname || ' on ' || c.relname = $2) DESC, c.relispartition LIMIT 1";
 
     // ------------------------------------------------------------------ details ($1 = relation oid)
 
@@ -167,8 +177,20 @@ public static class PgCatalogQueries
         "SELECT c.relname::text, n.nspname::text, c.relkind::text, c.relpersistence::text, obj_description(c.oid, 'pg_class'), " +
         "CASE WHEN c.relkind = 'p' THEN pg_get_partkeydef(c.oid) END, c.reloptions::text[], " +
         "CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END, " +
-        "CASE WHEN c.relkind IN ('v','m') THEN pg_get_viewdef(c.oid, true) END " +
+        "CASE WHEN c.relkind IN ('v','m') THEN pg_get_viewdef(c.oid, true) END, c.relispopulated, " +
+        "CASE WHEN c.relispartition THEN pg_get_expr(c.relpartbound, c.oid) END " +
         "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = $1";
+
+    /// <summary>Parents ($1 = relation oid) a table inherits from or is a partition of: schema, name.</summary>
+    public const string RelationParents =
+        "SELECT pn.nspname::text, p.relname::text FROM pg_inherits i JOIN pg_class p ON p.oid = i.inhparent " +
+        "JOIN pg_namespace pn ON pn.oid = p.relnamespace WHERE i.inhrelid = $1 ORDER BY i.inhseqno";
+
+    /// <summary>Direct partitions of partitioned table $1: schema, name, bound, own partition key (sub-partitioned).</summary>
+    public const string RelationPartitions =
+        "SELECT n.nspname::text, c.relname::text, pg_get_expr(c.relpartbound, c.oid), CASE WHEN c.relkind = 'p' THEN pg_get_partkeydef(c.oid) END " +
+        "FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_namespace n ON n.oid = c.relnamespace " +
+        "WHERE i.inhparent = $1 AND c.relispartition ORDER BY c.relname";
 
     public const string ForeignTableInfo =
         "SELECT s.srvname::text, ft.ftoptions::text[] FROM pg_foreign_table ft JOIN pg_foreign_server s ON s.oid = ft.ftserver WHERE ft.ftrelid = $1";
@@ -228,7 +250,7 @@ public static class PgCatalogQueries
         [nameof(CompositeTypeColumns)] = CompositeTypeColumns, [nameof(Triggers)] = Triggers, [nameof(FindRelation)] = FindRelation,
         [nameof(FindRoutines)] = FindRoutines, [nameof(FindType)] = FindType, [nameof(FindTrigger)] = FindTrigger,
         [nameof(RelationColumns)] = RelationColumns, [nameof(RelationIndexes)] = RelationIndexes, [nameof(RelationConstraints)] = RelationConstraints,
-        [nameof(RelationTriggers)] = RelationTriggers, [nameof(RelationInfo)] = RelationInfo, [nameof(ForeignTableInfo)] = ForeignTableInfo,
+        [nameof(RelationTriggers)] = RelationTriggers, [nameof(RelationInfo)] = RelationInfo, [nameof(RelationParents)] = RelationParents, [nameof(RelationPartitions)] = RelationPartitions, [nameof(ForeignTableInfo)] = ForeignTableInfo,
         [nameof(RoutineDetail)] = RoutineDetail, [nameof(FunctionDefinition)] = FunctionDefinition, [nameof(AggregateDefinition)] = AggregateDefinition,
         [nameof(SequenceDefinition)] = SequenceDefinition, [nameof(TypeDetail)] = TypeDetail, [nameof(DomainConstraints)] = DomainConstraints,
         [nameof(CompositeAttributes)] = CompositeAttributes, [nameof(TriggerDefinition)] = TriggerDefinition,

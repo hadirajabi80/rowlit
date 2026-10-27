@@ -25,7 +25,22 @@ public sealed record PgIndexDefinition(string Name, bool Unique, bool Primary, s
 public sealed record PgTableDefinition(string Schema, string Name, string Kind, bool Unlogged, string? Comment,
     IReadOnlyList<PgColumnDefinition> Columns, IReadOnlyList<PgConstraintDefinition> Constraints, IReadOnlyList<PgIndexDefinition> Indexes,
     IReadOnlyList<(string Name, string Definition)> Triggers, string? PartitionKey, IReadOnlyList<string>? Options,
-    string? ForeignServer, IReadOnlyList<string>? ForeignOptions, long? RowEstimate, string? ViewDefinition);
+    string? ForeignServer, IReadOnlyList<string>? ForeignOptions, long? RowEstimate, string? ViewDefinition)
+{
+    /// <summary>A materialized view that has been populated (WITH DATA); false after WITH NO DATA / TRUNCATE-like refresh state.</summary>
+    public bool Populated { get; init; } = true;
+
+    /// <summary>INHERITS parents (qualified names) of a table that is not a partition.</summary>
+    public IReadOnlyList<string> Parents { get; init; } = [];
+
+    /// <summary>The parent of a partition and its <c>FOR VALUES …</c> / <c>DEFAULT</c> bound.</summary>
+    public string? PartitionOf { get; init; }
+
+    public string? PartitionBound { get; init; }
+
+    /// <summary>Direct partitions of a partitioned table: qualified name, bound, own partition key.</summary>
+    public IReadOnlyList<(string Name, string Bound, string? PartitionKey)> Partitions { get; init; } = [];
+}
 
 public sealed record PgSequenceDefinition(string Type, long Start, long Increment, long Min, long Max, bool Cycle, long Cache, string? OwnedBy, string? Comment);
 
@@ -73,11 +88,13 @@ public sealed class PgDdlGenerator : IDdlGenerator
     public static string Generate(PgTableDefinition t)
     {
         var name = PgSqlText.Qualify(t.Schema, t.Name);
+        if (t.PartitionOf is not null) return GeneratePartition(t, name);
         var parts = t.Columns.Select(ColumnSql).ToList();
         foreach (var c in t.Constraints)
             parts.Add($"CONSTRAINT {PgSqlText.Quote(c.Name)} {c.Definition}");
         var head = t.Kind == "f" ? "CREATE FOREIGN TABLE" : t.Unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE";
         var sb = new StringBuilder($"{head} {name} (\n{string.Join(",\n", parts.Select(p => "    " + p))}\n)");
+        if (t.Parents.Count > 0) sb.Append("\nINHERITS (").Append(string.Join(", ", t.Parents)).Append(')');
         if (!string.IsNullOrWhiteSpace(t.PartitionKey)) sb.Append("\nPARTITION BY ").Append(t.PartitionKey);
         if (t.Kind == "f" && t.ForeignServer is not null)
         {
@@ -87,6 +104,23 @@ public sealed class PgDdlGenerator : IDdlGenerator
         if (t.Options is { Count: > 0 } options) sb.Append("\nWITH (").Append(string.Join(", ", options)).Append(')');
         sb.Append(";\n");
         AppendIndexesTriggersComments(sb, t, name, "TABLE");
+        foreach (var (partition, bound, key) in t.Partitions)
+        {
+            sb.Append($"CREATE TABLE {partition} PARTITION OF {name} {bound}");
+            if (!string.IsNullOrWhiteSpace(key)) sb.Append("\nPARTITION BY ").Append(key);
+            sb.Append(";\n");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>A partition: columns, constraints and indexes come from the partitioned parent, so only the bound is scripted.</summary>
+    private static string GeneratePartition(PgTableDefinition t, string name)
+    {
+        var sb = new StringBuilder($"CREATE TABLE {name} PARTITION OF {t.PartitionOf} {t.PartitionBound}");
+        if (!string.IsNullOrWhiteSpace(t.PartitionKey)) sb.Append("\nPARTITION BY ").Append(t.PartitionKey);
+        if (t.Options is { Count: > 0 } options) sb.Append("\nWITH (").Append(string.Join(", ", options)).Append(')');
+        sb.Append(";\n");
+        if (!string.IsNullOrWhiteSpace(t.Comment)) sb.Append($"COMMENT ON TABLE {name} IS {PgSqlText.Literal(t.Comment)};\n");
         return sb.ToString();
     }
 
@@ -103,7 +137,7 @@ public sealed class PgDdlGenerator : IDdlGenerator
         {
             sb.Append("CREATE MATERIALIZED VIEW ").Append(name);
             if (options.Count > 0) sb.Append(" WITH (").Append(string.Join(", ", options)).Append(')');
-            sb.Append(" AS\n").Append(body).Append("\nWITH DATA;\n");
+            sb.Append(" AS\n").Append(body).Append(t.Populated ? "\nWITH DATA;\n" : "\nWITH NO DATA;\n");
             AppendIndexesTriggersComments(sb, t, name, "MATERIALIZED VIEW");
             return sb.ToString();
         }
