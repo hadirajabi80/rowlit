@@ -64,6 +64,7 @@ function ConfirmBody({ c }: { c: ConfirmRequest }) {
       onClose={() => resolve(false)}
       width={500}
       className={c.danger ? 'confirm-danger' : undefined}
+      overlayClassName="overlay-above"
       footer={
         <>
           <button className="btn" data-autofocus={c.danger ? true : undefined} onClick={() => resolve(false)}>
