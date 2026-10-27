@@ -340,6 +340,23 @@ export async function switchConnection(tabId: string, connectionId: string | nul
   if (connectionId) void preloadCatalog(connectionId, database);
 }
 
+/**
+ * SQL Server: a `USE other` run from the editor moves the session to another database. The console follows (its database
+ * pill, the IntelliSense catalog, the database the next run asks for); without this the next run would switch the session
+ * straight back to the tab's database. `previous` is the session's database before the engine's event. Returns whether
+ * the tab changed.
+ */
+export function followSessionDatabase(sessionId: string, previous: string | null | undefined, database: string | null | undefined): boolean {
+  if (!database || !previous || previous === database) return false;
+  const tabId = useSessions.getState().tabOf(sessionId);
+  const tab = tabId ? consoleTab(tabId) : undefined;
+  if (!tab?.connectionId || getConnection(tab.connectionId)?.providerId !== 'sqlserver') return false;
+  if (effectiveDatabase(tab.connectionId, tab.database)?.toLowerCase() === database.toLowerCase()) return false;
+  useTabs.getState().setDatabase(tab.id, database);
+  void preloadCatalog(tab.connectionId, database);
+  return true;
+}
+
 export async function switchDatabase(tabId: string, database: string | null): Promise<void> {
   const tab = consoleTab(tabId);
   if (!tab) return;

@@ -234,6 +234,17 @@ export function detectContext(model: StatementModel, offset: number, spec: Diale
     }
   }
 
+  // T-SQL type position: `CAST(expr AS |`, `TRY_CAST(expr AS |`, `PARSE(expr AS |` and the first argument of `CONVERT(|`
+  if (spec.id === 'tsql' && prevToken && !atStatementStart && inFunctionCall && inFunctionCall.parts.length === 1) {
+    const fn = inFunctionCall.name.toUpperCase();
+    const castAs = prevToken.kind === 'keyword' && prevToken.upper === 'AS' && (fn === 'CAST' || fn === 'TRY_CAST' || fn === 'PARSE' || fn === 'TRY_PARSE');
+    const convertType = (fn === 'CONVERT' || fn === 'TRY_CONVERT') && inFunctionCall.argIndex === 0 && isPunct(prevToken, '(');
+    if (castAs || convertType) {
+      clause = 'cast';
+      inFunctionCall = null;
+    }
+  }
+
   const firstOnLine = cur ? isFirstOnLine(text, cur.start) : isFirstOnLine(text, offset);
 
   return {

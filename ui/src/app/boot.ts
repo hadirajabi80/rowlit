@@ -15,7 +15,7 @@ import { showObjectsTab, useSettings } from '../store/settings';
 import { useSourceClients } from '../store/sourceClients';
 import { userTabs, useTabs, type WorkspaceData } from '../store/tabs';
 import { toast, useUi } from '../store/ui';
-import { preloadCatalog } from './actions';
+import { followSessionDatabase, preloadCatalog } from './actions';
 import { bootDetachedTabs, liveDetachedTabs, wireMainWindowTabs } from './detach';
 import { MULTIRUN_VIEW, targetTabId, type MultiRunState } from './multiRun';
 import { restoreZoom } from './zoom';
@@ -119,7 +119,9 @@ export function wireSocket(): void {
     }
   });
   engineSocket.on('session.changed', (ev) => {
+    const before = useSessions.getState().sessions[ev.sessionId]?.database;
     useSessions.getState().applyChanged(ev);
+    followSessionDatabase(ev.sessionId, before, ev.database);
     // Engine-wide counts (status bar, dock badge) come from GET /sessions.
     useSessions.getState().refreshSoon(400);
   });

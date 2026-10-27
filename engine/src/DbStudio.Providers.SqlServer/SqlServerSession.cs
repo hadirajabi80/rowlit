@@ -1,3 +1,4 @@
+using System.Data;
 using System.Data.Common;
 using DbStudio.Core.Models;
 using DbStudio.Core.Params;
@@ -68,9 +69,122 @@ public sealed class SqlServerSession : AdoSessionBase
         cmd.StatementCompleted += (_, e) => OnStatementCompleted(context, e.RecordCount);
     }
 
+    private const string BrowseKey = "sqlserver.browse";
+
+    /// <summary>Base table of one result column (from sp_describe_first_result_set); null fields for computed columns.</summary>
+    internal sealed record BrowseColumn(string? Database, string? Schema, string? Table, bool Key);
+
+    /// <summary>
+    /// The sp_describe_first_result_set call that reports where the columns of a query come from. XACT_ABORT sessions skip
+    /// it (a failing describe would doom the user's transaction); in every other case a failure is swallowed.
+    /// </summary>
+    internal const string BrowseInfoSql = """
+        IF (@@OPTIONS & 16384) = 0
+        BEGIN TRY
+            EXEC sys.sp_describe_first_result_set @tsql = @t, @params = NULL, @browse_information_mode = 1;
+        END TRY
+        BEGIN CATCH
+        END CATCH
+        """;
+
+    /// <summary>
+    /// SQL Server does not report the base table of a result column with a plain SELECT, so a console result would never
+    /// be editable. A batch that is one parameterless SELECT is therefore described first (the browse information of
+    /// sp_describe_first_result_set; nothing runs and no session state changes, unlike CommandBehavior.KeyInfo, whose
+    /// SET NO_BROWSETABLE ON/OFF wrapper leaks into the session on cancel or when the text ends with a line comment).
+    /// Any failure leaves the result without table information, as before.
+    /// </summary>
+    protected override async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, BatchContext context, CancellationToken ct)
+    {
+        var statements = context.Classification.Statements;
+        // Temp tables are invisible to sp_describe_first_result_set and no edit target anyway.
+        if (statements.Count == 1 && statements[0].Category == StatementCategory.Query && context.Parameters.Bound.Count == 0
+            && !context.Batch.Sql.Contains('#'))
+        {
+            var info = await ReadBrowseInfoAsync(context.Batch.Sql, ct).ConfigureAwait(false);
+            if (info is not null) context.Items[BrowseKey] = info;
+        }
+        return await command.ExecuteReaderAsync(CommandBehavior.Default, ct).ConfigureAwait(false);
+    }
+
+    private async Task<BrowseColumn?[]?> ReadBrowseInfoAsync(string sql, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = CreateCommand(BrowseInfoSql);
+            cmd.Parameters.Add(new SqlParameter("@t", System.Data.SqlDbType.NVarChar, -1) { Value = sql });
+            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!r.HasRows) return null;
+            int hidden = r.GetOrdinal("is_hidden"), ordinal = r.GetOrdinal("column_ordinal"), db = r.GetOrdinal("source_database"),
+                schema = r.GetOrdinal("source_schema"), table = r.GetOrdinal("source_table"), key = r.GetOrdinal("is_part_of_unique_key");
+            var list = new List<BrowseColumn?>();
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!r.IsDBNull(hidden) && r.GetBoolean(hidden)) continue;
+                var index = r.GetInt32(ordinal) - 1;
+                while (list.Count <= index) list.Add(null);
+                list[index] = r.IsDBNull(table) ? null
+                    : new BrowseColumn(r.IsDBNull(db) ? null : r.GetString(db), r.IsDBNull(schema) ? null : r.GetString(schema), r.GetString(table),
+                        !r.IsDBNull(key) && r.GetBoolean(key));
+            }
+            return [.. list];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null; // best effort: the result just carries no table information
+        }
+    }
+
+    /// <summary>Fills Table/Schema/IsKey of the first result set from the browse information read before the batch ran.</summary>
+    private ColumnInfo[] ApplyBrowseInfo(ColumnInfo[] cols, BatchContext context)
+    {
+        if (context.ResultSetCount != 0 || !context.Items.TryGetValue(BrowseKey, out var o) || o is not BrowseColumn[] info) return cols;
+        var current = _conn.Database;
+        for (var i = 0; i < cols.Length && i < info.Length; i++)
+        {
+            if (info[i] is not { } b || b.Table is null) continue;
+            // Another database (three-part name): the table is not the console database's, so it is no edit target.
+            if (!string.IsNullOrEmpty(b.Database) && !string.Equals(b.Database, current, StringComparison.OrdinalIgnoreCase)) continue;
+            cols[i] = cols[i] with { Table = b.Table, Schema = b.Schema, IsKey = b.Key };
+        }
+        return cols;
+    }
+
+    /// <summary>
+    /// The driver wraps a SchemaOnly|KeyInfo command in SET FMTONLY ON; SET NO_BROWSETABLE ON; … SET NO_BROWSETABLE OFF;
+    /// SET FMTONLY OFF; on the same line as the text: a trailing <c>-- comment</c> would swallow the reset and leave the
+    /// session returning no rows. The text therefore ends with a line break.
+    /// </summary>
+    protected override string PrepareDescribeSql(string sql) => base.PrepareDescribeSql(sql) + "\n";
+
+    /// <summary>
+    /// KeyInfo (describe) makes SQL Server append the key columns of the base tables to the result as
+    /// hidden columns; <c>FieldCount</c> counts them but they are not part of the query's select list: they are cut off
+    /// here, so neither the grid nor describe sees them. A column of another database (three-part name) names a table the
+    /// console's database does not have under that name: it must not be offered as an edit target, so its
+    /// table/schema/key are dropped.
+    /// </summary>
+    internal static ColumnInfo[] ApplyBrowseMetadata(DbDataReader reader, ColumnInfo[] cols, string? currentDatabase)
+    {
+        System.Collections.ObjectModel.ReadOnlyCollection<DbColumn>? schema;
+        try { schema = reader.CanGetColumnSchema() ? reader.GetColumnSchema() : null; }
+        catch { return cols; }
+        if (schema is null) return cols;
+        var visible = 0;
+        while (visible < cols.Length && visible < schema.Count && schema[visible].IsHidden != true) visible++;
+        if (visible < cols.Length) cols = cols[..visible];
+        for (var i = 0; i < cols.Length; i++)
+        {
+            var catalog = schema[i].BaseCatalogName;
+            if (cols[i].Table is not null && !string.IsNullOrEmpty(catalog) && !string.Equals(catalog, currentDatabase, StringComparison.OrdinalIgnoreCase))
+                cols[i] = cols[i] with { Table = null, Schema = null, IsKey = false };
+        }
+        return cols;
+    }
+
     protected override ColumnInfo[] DescribeColumns(DbDataReader reader, BatchContext context)
     {
-        var cols = base.DescribeColumns(reader, context);
+        var cols = ApplyBrowseInfo(ApplyBrowseMetadata(reader, base.DescribeColumns(reader, context), _conn.Database), context);
         _resultSetOpen = true;
         _resultSetRows = 0;
         _resultSetTruncated = false;

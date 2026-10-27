@@ -22,6 +22,15 @@ public sealed class ErrorMappingTests
     }
 
     [Fact]
+    public async Task TestConnection_WithoutServer_SaysSo_WithoutTheParameterName()
+    {
+        var profile = new ConnectionProfile { Id = "c_x", Name = "x", ProviderId = "sqlserver", Props = new Dictionary<string, System.Text.Json.Nodes.JsonNode?> { ["server"] = "" } };
+        var result = await new SqlServerProvider().TestAsync(profile, null, CancellationToken.None);
+        Assert.False(result.Ok);
+        Assert.Equal("Server is required.", result.Error!.Message);
+    }
+
+    [Fact]
     public void ErrorInsideCalledProcedure_HasNoDocumentLine()
     {
         var e = new ServerError(50000, 16, 1, 42, "usp_Other", "boom");

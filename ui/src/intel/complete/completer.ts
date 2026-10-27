@@ -401,6 +401,33 @@ function statementStartItems(items: Items, c: CursorContext, env: CompleteEnv): 
 
 // ------------------------------------------------------------ clauses
 
+/** SQL Server table hints (`FROM t WITH (NOLOCK, INDEX(ix))`), the common ones first. */
+const TSQL_TABLE_HINTS = [
+  'NOLOCK', 'READUNCOMMITTED', 'READCOMMITTED', 'READCOMMITTEDLOCK', 'REPEATABLEREAD', 'SERIALIZABLE', 'SNAPSHOT', 'HOLDLOCK', 'UPDLOCK', 'XLOCK',
+  'ROWLOCK', 'PAGLOCK', 'TABLOCK', 'TABLOCKX', 'NOWAIT', 'READPAST', 'NOEXPAND', 'INDEX', 'FORCESEEK', 'FORCESCAN', 'KEEPIDENTITY', 'KEEPDEFAULTS',
+  'IGNORE_CONSTRAINTS', 'IGNORE_TRIGGERS',
+];
+
+/** The cursor is inside the parentheses of a table's `WITH (…)` hint list (after the `(` or a `,`). */
+function inTableHints(c: CursorContext): boolean {
+  if (c.qualifier || !['from', 'join', 'update', 'delete', 'into', 'using'].includes(c.clause)) return false;
+  const toks = c.statement.tokens;
+  let k = c.prevToken ? toks.indexOf(c.prevToken) : -1;
+  if (k < 0) return false;
+  const last = toks[k];
+  if (!(last.kind === 'punct' && (last.text === '(' || last.text === ','))) return false;
+  let depth = 0;
+  for (; k >= 0; k--) {
+    const t = toks[k];
+    if (t.kind === 'punct' && t.text === ')') depth++;
+    else if (t.kind === 'punct' && t.text === '(') {
+      if (depth === 0) return toks[k - 1]?.kind === 'keyword' && toks[k - 1].upper === 'WITH';
+      depth--;
+    } else if (depth === 0 && t.kind === 'keyword' && /^(SELECT|FROM|WHERE|JOIN|ON|SET)$/.test(t.upper)) return false;
+  }
+  return false;
+}
+
 function clauseItems(items: Items, c: CursorContext, env: CompleteEnv): boolean {
   const { spec, opts } = env;
   let incomplete = false;
@@ -409,6 +436,10 @@ function clauseItems(items: Items, c: CursorContext, env: CompleteEnv): boolean 
   const offerStarts = () => {
     if (c.firstOnLine && c.prefixText) for (const k of spec.startKeywords) items.add({ label: kwCase(k, opts), kind: 'keyword', group: 3 });
   };
+  if (spec.id === 'tsql' && inTableHints(c)) {
+    TSQL_TABLE_HINTS.forEach((k, i) => items.add({ label: kwCase(k, opts), kind: 'keyword', group: 9, relevance: 100 - i, detail: 'table hint' }));
+    return false;
+  }
   switch (c.clause) {
     case 'select': {
       if (c.afterOperand && !c.inFunctionCall) {
