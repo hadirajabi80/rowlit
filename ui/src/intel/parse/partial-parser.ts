@@ -536,7 +536,7 @@ class Parser {
       const sel = this.t[this.i];
       this.mark(s, 'select', sel.end);
       this.i++;
-      this.skipSelectModifiers();
+      this.skipSelectModifiers(s);
       if (this.pg && this.at('ON') && this.atP('(', 1) && this.t[this.i - 1]?.upper === 'DISTINCT') {
         // DISTINCT ON (exprs): an expression list over the query's sources, not a projection
         this.i += 2;
@@ -550,7 +550,7 @@ class Parser {
     this.parseQueryClauses(s);
   }
 
-  skipSelectModifiers(): void {
+  skipSelectModifiers(s: Scope): void {
     for (;;) {
       const u = this.u();
       if (u === 'DISTINCT' || u === 'ALL' || u === 'DISTINCTROW' || (this.ora && u === 'UNIQUE')) { this.i++; continue; }
@@ -559,6 +559,8 @@ class Parser {
         if (this.atP('(')) this.skipParens(); else if (!this.eof()) this.i++;
         if (this.at('PERCENT')) this.i++;
         if (this.at('WITH') && this.at('TIES', 1)) this.i += 2;
+        // The select list starts after the TOP clause: `SELECT TOP 10 |` completes columns, not what follows an operand.
+        this.mark(s, 'select', this.t[this.i - 1].end);
         continue;
       }
       return;

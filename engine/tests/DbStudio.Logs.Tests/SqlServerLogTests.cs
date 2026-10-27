@@ -67,6 +67,19 @@ public sealed class SqlServerLogTests
     }
 
     [Fact]
+    public async Task Agent_log_that_cannot_be_read_is_explained_not_a_raw_server_error()
+    {
+        // SQL Server on Linux has msdb.dbo.sysjobs but no Agent log: xp_readerrorlog answers "A severe error occurred".
+        var runner = new FakeSqlRunner().On("SUSER_SNAME()", Probe())
+            .OnFail("xp_readerrorlog 0, 2", "0", "A severe error occurred on the current command.  The results, if any, should be discarded.");
+        var source = new SqlServerLogSource(runner);
+        var ex = await Assert.ThrowsAsync<EngineException>(() => source.QueryAsync(Target("sqlserver"), new LogQuery(SqlServerLogSource.AgentLog), default));
+        Assert.Equal(503, ex.Status);
+        Assert.Contains("SQL Agent", ex.Message);
+        Assert.Contains("severe error", ex.Message);
+    }
+
+    [Fact]
     public async Task Azure_sql_database_has_no_error_log()
     {
         var runner = new FakeSqlRunner().On("SUSER_SNAME()", Probe(edition: 5));

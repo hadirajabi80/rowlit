@@ -119,7 +119,17 @@ public sealed class SqlServerLogSource(ISqlRunnerFactory runners) : ILogSource, 
                 if (!f.ErrorLogAllowed) throw EngineException.Privilege("Reading the error log requires the securityadmin role.", f.ErrorLogNeeds);
                 var logType = query.SourceId == AgentLog ? 2 : 1;
                 var sql = SqlServerLogSql.ReadErrorLog(query.Archive ?? 0, logType, query.Q, ToServer(fromUtc, f.Offset), ToServer(toUtc, f.Offset), fetch + 1);
-                var sets = await Run(runner, sql, f.ErrorLogNeeds, ct).ConfigureAwait(false);
+                IReadOnlyList<SqlRowSet> sets;
+                try
+                {
+                    sets = await Run(runner, sql, f.ErrorLogNeeds, ct).ConfigureAwait(false);
+                }
+                catch (SqlQueryException ex) when (logType == 2)
+                {
+                    // SQL Server on Linux (and a stopped Agent service) has the msdb jobs tables but no Agent log: the server answers
+                    // "A severe error occurred on the current command" there.
+                    throw EngineException.SourceUnavailable($"The SQL Agent log cannot be read: {ex.Message} SQL Agent may not be running on this server.");
+                }
                 var rows = sets.Count > 0 ? sets[^1] : SqlRowSet.Of([]);
                 return LogFilter.Page(SqlServerLogParser.ParseErrorLog(rows, logType, f.Offset), query, sourceHasMore: rows.Rows.Count > fetch);
             }

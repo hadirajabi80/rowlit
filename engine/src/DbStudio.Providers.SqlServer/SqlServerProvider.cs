@@ -8,7 +8,7 @@ using Microsoft.Data.SqlClient;
 namespace DbStudio.Providers.SqlServer;
 
 /// <summary>Microsoft SQL Server provider (Microsoft.Data.SqlClient, ScriptDom diagnostics).</summary>
-public sealed class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDatabaseSearchProvider
+public sealed partial class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDatabaseSearchProvider
 {
     public string Id => "sqlserver";
     public string DisplayName => "Microsoft SQL Server";
@@ -41,7 +41,10 @@ public sealed class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDa
         var sw = Stopwatch.StartNew();
         try
         {
-            await using var conn = new SqlConnection(SqlServerConnectionStrings.Build(profile, password, pooling: false));
+            // No connect retry: with the driver's default (one retry after 10 s) a mistyped database name only reports
+            // "Cannot open database" after 11 seconds, which is what "Test" is there to show at once.
+            var b = new SqlConnectionStringBuilder(SqlServerConnectionStrings.Build(profile, password, pooling: false)) { ConnectRetryCount = 0 };
+            await using var conn = new SqlConnection(b.ConnectionString);
             await conn.OpenAsync(ct).ConfigureAwait(false);
             var info = await ReadServerInfoAsync(conn, ct).ConfigureAwait(false);
             return new TestConnectionResult(true, info, sw.ElapsedMilliseconds, null);
@@ -144,6 +147,11 @@ public sealed class SqlServerProvider : IDbProvider, IObjectBrowserProvider, IDa
     {
         SqlException sql => new ErrorInfo("PROVIDER_ERROR", sql.Message, State: sql.State, ProviderCode: sql.Number,
             Detail: sql.Errors.Count > 0 ? SqlServerErrors.Header(SqlServerErrors.From(sql.Errors[0])) : null),
+        // "Server is required. (Parameter 'profile')": the parameter name is noise for the user.
+        ArgumentException arg => new ErrorInfo("PROVIDER_ERROR", ParameterSuffix().Replace(arg.Message, ""), Detail: ex.GetType().Name),
         _ => new ErrorInfo("PROVIDER_ERROR", ex.Message, Detail: ex.GetType().Name),
     };
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\s*\(Parameter '[^']*'\)\s*$")]
+    private static partial System.Text.RegularExpressions.Regex ParameterSuffix();
 }

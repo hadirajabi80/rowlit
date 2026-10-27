@@ -147,7 +147,8 @@ public sealed class SessionSqlRunnerFactory : ISqlRunnerFactory, IAsyncDisposabl
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Timer _reaper;
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(2);
-    public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(30);
+    /// <summary>How long one log/activity query may run before it is cancelled (a busy server or a huge log must not hang the view).</summary>
+    public TimeSpan QueryTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     public SessionSqlRunnerFactory(ProviderRegistry providers, ConnectionStore connections, ILogger<SessionSqlRunnerFactory>? log = null)
     {
@@ -185,7 +186,23 @@ public sealed class SessionSqlRunnerFactory : ISqlRunnerFactory, IAsyncDisposabl
         public async Task<IReadOnlyList<SqlRowSet>> QueryAsync(string sql, CancellationToken ct)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(QueryTimeout);
+            timeout.CancelAfter(owner.QueryTimeout);
+            try
+            {
+                return await QueryCoreAsync(sql, timeout, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                throw TimedOut();
+            }
+        }
+
+        private EngineException TimedOut() => EngineException.SourceUnavailable(
+            $"The server did not answer within {owner.QueryTimeout.TotalSeconds:0.##} s (it is busy, or the log is large). Narrow the time range or add a search text.",
+            new { connectionId, timeoutSeconds = owner.QueryTimeout.TotalSeconds });
+
+        private async Task<IReadOnlyList<SqlRowSet>> QueryCoreAsync(string sql, CancellationTokenSource timeout, CancellationToken ct)
+        {
             await _gate.WaitAsync(timeout.Token).ConfigureAwait(false);
             try
             {
@@ -193,9 +210,10 @@ public sealed class SessionSqlRunnerFactory : ISqlRunnerFactory, IAsyncDisposabl
                 var session = await EnsureSessionAsync(timeout.Token).ConfigureAwait(false);
                 var sink = new CollectingSink();
                 using var reg = timeout.Token.Register(session.Cancel);
+                ExecutionSummary summary;
                 try
                 {
-                    await session.ExecuteAsync(new ExecuteRequest([new SqlBatch(sql, 1, 1)], 0, true, false, "statement"), sink, timeout.Token)
+                    summary = await session.ExecuteAsync(new ExecuteRequest([new SqlBatch(sql, 1, 1)], 0, true, false, "statement"), sink, timeout.Token)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException and not EngineException)
@@ -204,6 +222,12 @@ public sealed class SessionSqlRunnerFactory : ISqlRunnerFactory, IAsyncDisposabl
                     throw EngineException.SourceUnavailable(ex.Message, new { connectionId });
                 }
                 if (sink.FirstError is { } error) throw new SqlQueryException(error);
+                // A cancelled run reports no error: without this the caller would read it as "no rows" (an empty log).
+                if (summary.Status == ExecutionStatus.Cancelled)
+                {
+                    if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
+                    throw TimedOut();
+                }
                 if (session.State is SessionState.Broken or SessionState.Closed) await DropAsync().ConfigureAwait(false);
                 return sink.Sets;
             }

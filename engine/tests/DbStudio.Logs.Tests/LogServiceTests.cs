@@ -299,6 +299,32 @@ public sealed class SessionRunnerIntegrationTests
     }
 
     [Fact]
+    public async Task A_query_that_outlives_the_timeout_is_an_error_not_an_empty_result()
+    {
+        await using var h = new LogsHarness(fakeSql: false);
+        var runners = new SessionSqlRunnerFactory(h.Services.GetRequiredService<ProviderRegistry>(), h.Services.GetRequiredService<ConnectionStore>())
+        {
+            QueryTimeout = TimeSpan.FromMilliseconds(400),
+        };
+        try
+        {
+            var runner = await runners.GetAsync(new LogTarget(h.Sqlite.Id, h.Sqlite), default);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var ex = await Assert.ThrowsAsync<EngineException>(() => runner.QueryAsync(
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000000000) SELECT COUNT(*) FROM n", default));
+            Assert.Equal(503, ex.Status);
+            Assert.Contains("did not answer", ex.Message);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"The timeout took {sw.Elapsed.TotalSeconds:F1} s.");
+            var again = await runner.QueryAsync("SELECT 1 AS one", default); // the runner recovers
+            Assert.Single(again[0].Rows);
+        }
+        finally
+        {
+            await runners.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public void Cells_and_literals()
     {
         Assert.Equal(DateTimeOffset.Parse("2026-10-18T13:00:00+02:00"), SqlCells.Time("2026-10-18T13:00:00", TimeSpan.FromHours(2)));
