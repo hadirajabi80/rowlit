@@ -8,6 +8,7 @@ import { ensureDialect, isDialectReady } from '../dialect/registry';
 import { tokenize } from '../lexer/lexer';
 import { createIntel } from '../index';
 import { complete, doc, find, fixtures, intelFor, labels } from './helpers';
+import { needsQuoting } from '../complete/format';
 import type { IntelOptions } from '../types';
 
 await ensureDialect('cql');
@@ -310,5 +311,15 @@ describe('CQL completion with the shared parser / completer changes', () => {
     // a qualifier that is no column of the table is still reported
     i.setDocument('cql-diag://3', 'SELECT nope.city FROM shop.customers WHERE id = 1');
     expect(i.softDiagnostics('cql-diag://3').map((x) => x.message)).toEqual(["Unknown alias or table 'nope'"]);
+  });
+});
+
+describe('CQL identifier quoting in completions (QA round)', () => {
+  it('quotes mixed-case and reserved column names, leaves plain lower-case ones bare', () => {
+    expect(needsQuoting('UserId', cql)).toBe(true);
+    expect(needsQuoting('use', cql)).toBe(true);
+    expect(needsQuoting('token', cql)).toBe(true);
+    expect(needsQuoting('Mixed Name', cql)).toBe(true);
+    for (const n of ['id', 'customer_id', 'order_date', 'status']) expect(needsQuoting(n, cql), n).toBe(false);
   });
 });

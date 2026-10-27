@@ -17,6 +17,7 @@ public sealed class CqlSessionSettings
         _consistency = defaults.Consistency;
         _serial = defaults.SerialConsistency;
         _pageSize = defaults.PageSize;
+        DefaultPageSize = defaults.PageSize;
     }
 
     public ConsistencyLevel Consistency { get { lock (_lock) return _consistency; } set { lock (_lock) _consistency = value; } }
@@ -33,6 +34,9 @@ public sealed class CqlSessionSettings
     }
 
     public bool Tracing { get { lock (_lock) return _tracing; } set { lock (_lock) _tracing = value; } }
+
+    /// <summary>The page size of the connection profile (what <c>PAGING ON</c> goes back to after <c>PAGING OFF</c>).</summary>
+    public int DefaultPageSize { get; }
 
     public int PageSize
     {

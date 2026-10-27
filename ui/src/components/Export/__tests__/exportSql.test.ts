@@ -11,7 +11,7 @@ const col = (name: string, kind: ColumnKind): ColumnInfo => ({
 });
 const COLS = [col('id', 'int'), col('name', 'string'), col('total', 'decimal')];
 const T: TableTarget = { schema: null, name: 'orders', keyColumns: ['id'] };
-const DIALECTS: Dialect[] = ['tsql', 'plsql', 'sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake', 'cql'];
+const DIALECTS: Dialect[] = ['tsql', 'plsql', 'sqlite', 'pgsql', 'mysql', 'clickhouse', 'snowflake'];
 
 const filter = newGroup('and', [newCondition('name', 'contains', ['Ada']), newCondition('total', 'gt', ['10'])]);
 
@@ -28,6 +28,15 @@ describe('exportSelectSql', () => {
     expect(exp).toContain(`WHERE ${pred.where}`);
     expect(exp).toMatch(/ORDER BY .*total.* DESC/);
     expect(exp).not.toMatch(/LIMIT|OFFSET|FETCH|TOP \d/);
+  });
+
+  it('cql: no ORDER BY (a plain statement cannot sort across partitions), ALLOW FILTERING after a WHERE', () => {
+    const pred = buildPredicate(filter, COLS, 'cql', { alias: null });
+    expect(pred.where).toBe('total > @fp1'); // the text search stays in the grid
+    const sort = [{ column: 'total', dir: 'desc' as const }];
+    expect(exportSelectSql(T, 'cql', { where: pred.where, sort })).toBe('SELECT *\nFROM orders\nWHERE total > @fp1\nALLOW FILTERING');
+    expect(exportSelectSql(T, 'cql', { ordered: false })).toBe('SELECT *\nFROM orders');
+    expect(exportSelectSql(T, 'cql', { sort })).toBe('SELECT *\nFROM orders');
   });
 
   it('keeps the key as the tie-breaker the grid appends, and the keyless fallback order', () => {

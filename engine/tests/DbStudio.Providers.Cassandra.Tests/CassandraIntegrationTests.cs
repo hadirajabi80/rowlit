@@ -233,6 +233,38 @@ public sealed class CassandraIntegrationTests(CassandraFixture fx)
     }
 
     [SkippableFact]
+    public async Task DataGrid_Insert_WithExplicitUsingTtl_PutsIfNotExistsBeforeUsing()
+    {
+        Require();
+        await using var s = await fx.OpenSessionAsync();
+        var t = await ScratchTableAsync(s, "it_insert_using", "id int PRIMARY KEY, val text");
+        var ok = await RunAsync(s, $"INSERT INTO {t} (id, val) VALUES (1, 'a') USING TTL 3600", label: "data");
+        Ok(ok.Sink, ok.Summary);
+        Assert.Equal(1, Assert.Single(ok.Sink.Affected).Count);
+        var (ttl, ts) = await RunAsync(s, $"SELECT TTL(val) AS t FROM {t} WHERE id = 1");
+        Ok(ttl, ts);
+        Assert.InRange(Convert.ToInt64(ttl.ResultSets[0].Rows[0][0]), 1, 3600);
+        // an existing key is still reported as a conflict
+        var dup = await RunAsync(s, $"INSERT INTO {t} (id, val) VALUES (1, 'b') USING TTL 3600", label: "data");
+        Assert.Equal(CqlErrors.AlreadyExists, dup.Sink.Errors[0].Error.Code);
+    }
+
+    [SkippableFact]
+    public async Task Paging_Off_ThenOn_GoesBackToTheProfilePageSize()
+    {
+        Require();
+        await using var s = await fx.OpenSessionAsync();
+        var cql = (CqlSession)s;
+        var profileSize = cql.Settings.DefaultPageSize;
+        var (a, _) = await RunAsync(s, "PAGING 50; PAGING OFF");
+        Assert.Equal(CqlConnectionSettings.MaxPageSize, cql.Settings.PageSize);
+        Assert.Contains(a.Messages, m => m.Text == "Page size: 50.");
+        var (b, _) = await RunAsync(s, "PAGING ON");
+        Assert.Equal(profileSize, cql.Settings.PageSize);
+        Assert.Contains(b.Messages, m => m.Text == $"Page size: {profileSize}.");
+    }
+
+    [SkippableFact]
     public async Task Params_BindAllScalarTypes_AndPositionalMarkers()
     {
         Require();

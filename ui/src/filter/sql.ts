@@ -88,8 +88,23 @@ function likeEscape(d: Dialect): string {
 /** Dialects whose LIKE is case-sensitive but which have ILIKE. */
 const hasIlike = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'clickhouse' || d === 'duckdb';
 
-/** Dialects with real boolean literals (TRUE / FALSE instead of 1 / 0). LINKS-WP0: + duckdb. */
-const hasBoolLiterals = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'duckdb';
+/** Dialects with real boolean literals (TRUE / FALSE instead of 1 / 0). LINKS-WP0: + duckdb; CQL has `= true`. */
+const hasBoolLiterals = (d: Dialect) => d === 'pgsql' || d === 'snowflake' || d === 'duckdb' || d === 'cql';
+
+/**
+ * What CQL can filter on (always with ALLOW FILTERING, which the engine adds): comparisons, boolean literals, date ranges
+ * and `= ''`. There is no lower(), `<>`, IS [NOT] NULL, NOT IN, BETWEEN, ESCAPE, and LIKE only on an SAI / SASI index; IN
+ * only on key columns: those conditions stay in the grid and narrow the loaded rows.
+ */
+const CQL_SERVER_OPS: ReadonlySet<string> = new Set([
+  'eq', 'lt', 'lte', 'gt', 'gte', 'between', 'isTrue', 'isFalse', 'isEmpty', 'before', 'after', 'onDate', 'last', 'next',
+]);
+
+/** Can the condition's operator be pushed to the server of this dialect? */
+function serverOp(op: FilterCondition['op'], dialect?: Dialect): boolean {
+  if (!OPERATOR_INFO[op]?.server) return false;
+  return dialect === 'cql' ? CQL_SERVER_OPS.has(op) : true;
+}
 
 function escapeLike(v: string, dialect: Dialect): string {
   const re = dialect === 'tsql' ? /[\\%_[]/g : /[\\%_]/g;
@@ -185,6 +200,11 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
     if (d === 'pgsql') return cs ? { left: c, wrap: (p) => p, suffix: '' } : { left: `lower(${pgText})`, wrap: (p) => `lower(${p})`, suffix: '' };
     // MySQL: a binary comparison is case-sensitive whatever the collation. The other servers have no COLLATE NOCASE.
     if (d === 'mysql' && cs) return { left: c, wrap: (p) => `BINARY ${p}`, suffix: '' };
+    if (d === 'cql') {
+      // CQL has no lower(): text compares case-sensitively
+      if (!cs && cls === 'string') ctx.warnings.push(`Cassandra compares text case-sensitively: “${col.name}” is matched exactly`);
+      return { left: c, wrap: (p) => p, suffix: '' };
+    }
     if (d !== 'sqlite') return cs ? { left: c, wrap: (p) => p, suffix: '' } : { left: `lower(${c})`, wrap: (p) => `lower(${p})`, suffix: '' };
     return { left: c, wrap: (p) => p, suffix: cs ? '' : ' COLLATE NOCASE' };
   };
@@ -240,7 +260,11 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
   // comparisons
   if (cls === 'number' || cls === 'bool') {
     const op = { eq: '=', neq: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=' }[cond.op as 'eq'];
-    if (cond.op === 'between') return `${c} BETWEEN ${numberParam(ctx, col.kind, v[0])} AND ${numberParam(ctx, col.kind, v[1])}`;
+    if (cond.op === 'between') {
+      const lo = numberParam(ctx, col.kind, v[0]);
+      const hi = numberParam(ctx, col.kind, v[1]);
+      return d === 'cql' ? compound(`${c} >= ${lo} AND ${c} <= ${hi}`) : `${c} BETWEEN ${lo} AND ${hi}`;
+    }
     return op ? `${c} ${op} ${numberParam(ctx, col.kind, v[0])}` : null;
   }
   if (cls === 'date') return dateSql(ctx, cond, c);
@@ -252,12 +276,15 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
     const p = (i: number) => ctx.pb.add(d === 'tsql' || d === 'pgsql' || d === 'duckdb' ? 'time' : 'string', t(i).slice(0, 8));
     if (cond.op === 'before') return `${left} < ${p(0)}`;
     if (cond.op === 'after') return `${left} > ${p(0)}`;
-    if (cond.op === 'between') return `${left} BETWEEN ${p(0)} AND ${p(1)}`;
+    if (cond.op === 'between') return d === 'cql' ? compound(`${left} >= ${p(0)} AND ${left} <= ${p(1)}`) : `${left} BETWEEN ${p(0)} AND ${p(1)}`;
   }
   // text comparisons
   const e = ciEq();
   const op = { eq: '=', neq: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=' }[cond.op as 'eq'];
-  if (cond.op === 'between') return `${e.left} BETWEEN ${e.wrap(strParam(String(v[0])))}${e.suffix} AND ${e.wrap(strParam(String(v[1])))}${e.suffix}`;
+  if (cond.op === 'between') {
+    if (d === 'cql') return compound(`${e.left} >= ${strParam(String(v[0]))} AND ${e.left} <= ${strParam(String(v[1]))}`);
+    return `${e.left} BETWEEN ${e.wrap(strParam(String(v[0])))}${e.suffix} AND ${e.wrap(strParam(String(v[1])))}${e.suffix}`;
+  }
   if (!op) return null;
   return `${e.left} ${op} ${e.wrap(strParam(String(v[0])))}${e.suffix}`;
 }
@@ -310,6 +337,7 @@ function dateSql(ctx: Ctx, cond: FilterCondition, c: string): Piece | null {
   const op = { eq: '=', neq: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=', before: '<', after: '>' }[cond.op as 'eq'];
   if (cond.op === 'between') {
     if (dayUpper) return compound(`${c} >= ${dateParam(ctx, vals[0])} AND ${c} < ${dateParam(ctx, addDays(vals[1], 1))}`);
+    if (d === 'cql') return compound(`${c} >= ${dateParam(ctx, vals[0])} AND ${c} <= ${dateParam(ctx, vals[1])}`);
     return atom(`${c} BETWEEN ${dateParam(ctx, vals[0])} AND ${dateParam(ctx, vals[1])}`);
   }
   return op ? atom(`${c} ${op} ${dateParam(ctx, vals[0])}`) : null;
@@ -321,15 +349,15 @@ interface Split {
 }
 
 /** Separate what SQL can express from what must stay client-side, preserving AND/OR semantics. */
-export function splitForServer(node: FilterNode | null, columns: readonly ColumnInfo[]): Split {
+export function splitForServer(node: FilterNode | null, columns: readonly ColumnInfo[], dialect?: Dialect): Split {
   if (!node) return { server: null, client: null };
   if (node.kind === 'condition') {
     if (node.enabled === false) return { server: null, client: null };
     const ci = resolveColumn(columns, node.column, node.ordinal);
     if (ci < 0 || conditionProblem(node, columns[ci].kind)) return { server: null, client: null };
-    return OPERATOR_INFO[node.op]?.server ? { server: node, client: null } : { server: null, client: node };
+    return serverOp(node.op, dialect) ? { server: node, client: null } : { server: null, client: node };
   }
-  const parts = node.items.map((i) => splitForServer(i, columns));
+  const parts = node.items.map((i) => splitForServer(i, columns, dialect));
   const servers = parts.map((p) => p.server).filter((x): x is FilterNode => x !== null);
   const clients = parts.map((p) => p.client).filter((x): x is FilterNode => x !== null);
   if (node.logic === 'and' && !node.negate) {
@@ -380,15 +408,21 @@ export function buildPredicate(
 ): PredicateResult {
   const pb = opts.builder ?? new ParamBuilder(dialect, opts.paramPrefix ?? 'fp');
   const ctx: Ctx = { dialect, columns, pb, alias: opts.alias ?? null, columnRef: opts.columnRef, now: opts.now, warnings: [], count: 0 };
-  const { server, client } = splitForServer(filter, columns);
+  const { server, client } = splitForServer(filter, columns, dialect);
   const parts: Piece[] = [];
   const main = server ? nodeSql(ctx, server, true) : null;
   if (main) parts.push(main);
-  const quick = opts.quick ? quickSql(ctx, opts.quick) : null;
+  // CQL has no LIKE without an index: the search narrows the loaded rows in the grid
+  const quick = opts.quick ? (dialect === 'cql' ? null : quickSql(ctx, opts.quick)) : null;
   if (quick) parts.push(quick);
   const where = parts.length === 0 ? null : joinPieces(parts, ' AND ').sql;
   const clientOnly: FilterGroup | null = !client ? null : client.kind === 'group' ? client : { kind: 'group', id: 'client', logic: 'and', items: [client] };
-  if (clientOnly) ctx.warnings.push('Regular expressions are applied in the grid after the server filter');
+  if (clientOnly) {
+    ctx.warnings.push(dialect === 'cql'
+      ? 'Cassandra cannot evaluate some conditions (NOT, IS NULL, LIKE, regular expressions…): they are applied in the grid to the loaded rows'
+      : 'Regular expressions are applied in the grid after the server filter');
+  }
+  if (opts.quick && dialect === 'cql') ctx.warnings.push('Cassandra cannot search text without an index: the search is applied in the grid to the loaded rows');
   return { where, params: pb.params, clientOnly, serverConditions: ctx.count, warnings: ctx.warnings };
 }
 

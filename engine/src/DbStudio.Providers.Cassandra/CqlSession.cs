@@ -267,7 +267,8 @@ public sealed class CqlSession : IDbSession
                 {
                     if (t.Count > 1)
                     {
-                        if (t[1].IsWord("ON")) { }
+                        // cqlsh: PAGING ON enables paging again with the default page size (after PAGING OFF it was "everything").
+                        if (t[1].IsWord("ON")) Settings.PageSize = Settings.DefaultPageSize;
                         else if (t[1].IsWord("OFF")) Settings.PageSize = CqlConnectionSettings.MaxPageSize;
                         else if (t[1].Kind == CqlTokenKind.Number && int.TryParse(t[1].Value, NumberStyles.None, Inv, out var n) && n > 0) Settings.PageSize = n;
                         else throw ShellError(batch, st, "Usage: PAGING ON | OFF | <page size>");
@@ -280,7 +281,7 @@ public sealed class CqlSession : IDbSession
                 return;
             case "COPY":
                 throw new EngineException(400, ErrorCodes.NotSupported,
-                    "COPY is a cqlsh client command, not CQL. Use Export on a result or table, or Import, instead.");
+                    "COPY is a cqlsh client command, not CQL. Use Export on a result or table to write a file (importing files into Cassandra is not supported yet; use INSERT statements or BEGIN BATCH).");
             case "SOURCE" or "CAPTURE" or "LOGIN" or "EXIT" or "QUIT" or "HELP" or "EXPAND" or "CLEAR" or "CLS" or "DEBUG":
                 await Info(run, index, $"{st.Head} is a cqlsh client command; Rowlit ignores it.").ConfigureAwait(false);
                 return;
@@ -900,7 +901,12 @@ public sealed class CqlSession : IDbSession
         var hasIf = CqlText.FindWord(t, 0, "IF") >= 0;
         var hasUsing = CqlText.FindWord(t, 0, "USING") >= 0;
         var lwt = !hasIf && meta is { IsCounter: false };
-        if (lwt) cql += " IF NOT EXISTS";
+        if (lwt)
+        {
+            // Grammar: … VALUES (…) [IF NOT EXISTS] [USING TTL n]: the condition goes before an explicit USING.
+            var usingAt = hasUsing ? CqlText.FindWord(t, 0, "USING") : -1;
+            cql = usingAt > 0 ? cql[..(t[usingAt].Start - st.Start)] + "IF NOT EXISTS " + cql[(t[usingAt].Start - st.Start)..] : cql + " IF NOT EXISTS";
+        }
         if (!hasUsing && Settings.InsertTtl is { } ttl) cql += " USING TTL " + ttl.ToString(Inv);
         var o = await ExecuteAsync(run, index, cql, new StreamOptions(0, Quiet: true)).ConfigureAwait(false);
         if (o.Applied is false)

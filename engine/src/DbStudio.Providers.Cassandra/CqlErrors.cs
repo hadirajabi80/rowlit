@@ -50,7 +50,9 @@ public static partial class CqlErrors
             case NoHostAvailableException nh:
                 detail = nh.Errors.Count == 0 ? null
                     : string.Join("; ", nh.Errors.Select(e => $"{e.Key}: {e.Value.Message}"));
-                message = detail is null ? "No Cassandra node could be reached." : $"No Cassandra node could be reached ({detail}).";
+                message = detail is null
+                    ? "No Cassandra node could be reached (no contact point could be resolved, or no node is in the local datacenter). Check the host names and the local datacenter."
+                    : $"No Cassandra node could be reached ({detail}).";
                 break;
             case OperationTimedOutException:
                 message = $"The request timed out on the client: {ex.Message} (raise the connection's request timeout for long statements).";

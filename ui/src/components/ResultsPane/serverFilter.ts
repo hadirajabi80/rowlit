@@ -70,6 +70,8 @@ export interface ServerAvailability {
 }
 
 export function serverFilterAvailability(exec: ExecutionState, columns: readonly ColumnInfo[], dialect: Dialect): ServerAvailability {
+  // the filter is applied by wrapping the statement as a subquery: CQL has none
+  if (dialect === 'cql') return { available: false, reason: 'Cassandra has no subqueries: add the condition to the statement’s WHERE (ALLOW FILTERING), or filter the loaded rows in the grid' };
   const orig = originalBatch(exec);
   if (!orig || exec.resultSets.length !== 1) return { available: false, reason: 'Server filtering needs a single SELECT (not a script or procedure)' };
   const a = analyzeSelect(orig.sql, dialect);

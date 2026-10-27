@@ -145,7 +145,13 @@ public sealed class CqlClusterPool : IAsyncDisposable, IDisposable
             b = b.WithPort(port);
             if (s.Ssl) b = b.WithSSL(SslOptions(s));
         }
-        if (s.User is not null) b = b.WithCredentials(s.User, password ?? "");
+        if (s.User is not null)
+        {
+            // The driver rejects an empty password with "Value cannot be null (Parameter 'password')".
+            if (string.IsNullOrEmpty(password))
+                throw new ArgumentException($"A password is required for the user '{s.User}'. Enter it in the connection settings, or clear the user for a cluster without authentication.");
+            b = b.WithCredentials(s.User, password);
+        }
         if (s.LocalDc is not null) b = b.WithLoadBalancingPolicy(new DefaultLoadBalancingPolicy(s.LocalDc));
         return b.Build();
     }
