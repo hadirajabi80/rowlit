@@ -158,7 +158,7 @@ export function tokenize(text: string, keepComments = false): Token[] {
         }
         let flags = '';
         while (j < n && /[a-z]/i.test(text[j])) flags += text[j++];
-        out.push({ kind: 'regex', value: body.replace(/\\\//g, '/'), flags, start: i, end: j, open: !closed });
+        out.push({ kind: 'regex', value: body, flags, start: i, end: j, open: !closed });
         i = j;
         continue;
       }

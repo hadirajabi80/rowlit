@@ -13,7 +13,7 @@ import { toast } from '../../store/ui';
 import { useExplorer } from '../Explorer/explorerStore';
 import { registerTabView, type TabViewProps } from '../layout/tabViews';
 import { showMongoDialog } from './dialogHost';
-import { MONGO_VIEW, MONGO_VIEW_ALIASES, openCollection, tabState, type MongoSub } from './open';
+import { collectionKey, MONGO_VIEW, MONGO_VIEW_ALIASES, openCollection, tabState, type MongoSub } from './open';
 import { forgetConnection, loadCollections, loadDatabases, refreshConnection, useMongo } from './store';
 import { ensureMongoLoaded, mongoTree, type CollectionMeta } from './tree';
 import { mongoTreeIcon } from './treeIcons';
@@ -82,6 +82,16 @@ async function newCollection(args?: unknown) {
   }));
 }
 
+/** An open workspace of a renamed collection follows the new name (it would otherwise keep querying a missing one). */
+export function retargetTab(t: CollTarget, newName: string): void {
+  const tabs = useTabs.getState();
+  const tab = tabs.tabs.find((x): x is ViewTab => x.kind === 'view' && x.view === MONGO_VIEW && x.key === collectionKey(t.cid, t.db, t.coll));
+  if (!tab) return;
+  tabs.updateView(tab.id, {
+    title: `${t.db}.${newName}`, key: collectionKey(t.cid, t.db, newName), state: { ...(tab.state as object), coll: newName },
+  });
+}
+
 async function renameCollection(args?: unknown) {
   const t = collTarget(args);
   if (!t) return;
@@ -90,6 +100,7 @@ async function renameCollection(args?: unknown) {
     cid: t.cid, db: t.db, coll: t.coll, onClose: close,
     onRenamed: (name: string) => {
       toast('success', `Renamed to ${t.db}.${name}`);
+      retargetTab(t, name);
       void loadCollections(t.cid, t.db, true);
     },
   }));

@@ -467,8 +467,10 @@ public sealed partial class ImportExportService
             if (!_plan.TypeInference || cells.Count == 0) return ("string", false);
             if (cells.All(c => c.Equals("true", StringComparison.OrdinalIgnoreCase) || c.Equals("false", StringComparison.OrdinalIgnoreCase)))
                 return ("boolean", false);
-            if (integerOnly) return ("number", true);
-            if (cells.All(IsNumber)) return ("number", false);
+            // Inference is stricter than conversion: "007", "+155…" and integers beyond Int64 are identifiers, not numbers
+            // (a zip code or phone number must not lose its leading zeros); choose "number" by hand to convert them anyway.
+            if (cells.All(IsPlainInteger)) return ("number", true);
+            if (cells.All(IsPlainNumber)) return ("number", false);
             if (cells.All(c => IsoDate().IsMatch(c) && ShellJson.TryParseIsoDate(c, out _))) return ("date", false);
             if (cells.All(c => c.Length == 24 && c.All(Uri.IsHexDigit))) return ("objectId", false);
             return ("string", false);
@@ -478,6 +480,30 @@ public sealed partial class ImportExportService
 
         private static bool IsNumber(string s) =>
             NumberText().IsMatch(s.Trim()) && double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+
+        /// <summary>An integer written the canonical way (no leading zeros or plus sign) that fits Int64.</summary>
+        private static bool IsPlainInteger(string s)
+        {
+            s = s.Trim();
+            return PlainInteger().IsMatch(s) && long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out _);
+        }
+
+        /// <summary>A canonical decimal/exponent number; integer-looking text that does not fit Int64 stays text.</summary>
+        private static bool IsPlainNumber(string s)
+        {
+            s = s.Trim();
+            return PlainNumber().IsMatch(s) && !(PlainDigits().IsMatch(s) && !IsPlainInteger(s))
+                && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+        }
+
+        [GeneratedRegex(@"^-?(0|[1-9]\d*)$")]
+        private static partial Regex PlainInteger();
+
+        [GeneratedRegex(@"^-?\d+$")]
+        private static partial Regex PlainDigits();
+
+        [GeneratedRegex(@"^-?((0|[1-9]\d*)(\.\d+)?|\.\d+)([eE][+-]?\d+)?$")]
+        private static partial Regex PlainNumber();
 
         [GeneratedRegex(@"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")]
         private static partial Regex NumberText();

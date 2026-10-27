@@ -2,7 +2,7 @@
 // limit. Every field is a shell-JSON editor with completion (fields from `POST …/fields`, operators, sampled values).
 // Enter runs the query, Reset clears it; the applied query is highlighted until the text differs again.
 import { ChevronDown, ChevronRight, Gauge, History, Play, RotateCcw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MongoFieldPath } from '../../api/types';
 import { checkShell } from '../../mongo/shellJson';
 import type { EffectiveTheme } from '../../theme/useTheme';
@@ -92,14 +92,37 @@ export function QueryBar({ draft, applied, onDraft, onFind, onReset, onExplain, 
           <span className="mg-qlabel">Collation</span>
           <div className="mg-qfield"><MongoEditor singleLine mode="collation" fields={fields} theme={theme} value={draft.collation} onChange={(v) => set({ collation: v })} onSubmit={find} placeholder={'{ locale: "en", strength: 2 }'} ariaLabel="Collation" invalid={!!errors.collation} /></div>
           <label className="mg-qlabel" htmlFor="mg-q-skip">Skip</label>
-          <input id="mg-q-skip" className="input sm mg-qnum" inputMode="numeric" value={draft.skip} onChange={(e) => set({ skip: Math.max(0, Number(e.target.value.replace(/\D/g, '')) || 0) })} onKeyDown={(e) => e.key === 'Enter' && find()} />
+          <NumInput id="mg-q-skip" value={draft.skip} min={0} max={2_000_000_000} onChange={(skip) => set({ skip })} onEnter={find} />
           <label className="mg-qlabel" htmlFor="mg-q-limit">Limit</label>
-          <input id="mg-q-limit" className="input sm mg-qnum" inputMode="numeric" value={draft.limit} onChange={(e) => set({ limit: Math.min(1000, Math.max(1, Number(e.target.value.replace(/\D/g, '')) || 1)) })} onKeyDown={(e) => e.key === 'Enter' && find()} />
+          <NumInput id="mg-q-limit" value={draft.limit} min={1} max={1000} onChange={(limit) => set({ limit })} onEnter={find} />
           <label className="mg-qlabel" htmlFor="mg-q-maxtime" title="maxTimeMS">Max time (ms)</label>
-          <input id="mg-q-maxtime" className="input sm mg-qnum" inputMode="numeric" value={draft.maxTimeMs} onChange={(e) => set({ maxTimeMs: Math.max(0, Number(e.target.value.replace(/\D/g, '')) || 0) })} onKeyDown={(e) => e.key === 'Enter' && find()} />
+          <NumInput id="mg-q-maxtime" value={draft.maxTimeMs} min={0} max={3_600_000} onChange={(maxTimeMs) => set({ maxTimeMs })} onEnter={find} />
         </div>
       )}
       {firstError && <div className="mg-qerror" role="alert">{firstError[0]}: {firstError[1]}</div>}
     </div>
+  );
+}
+
+/**
+ * A numeric field that can be emptied while typing (clamping "" to the minimum would turn the next digit into "15");
+ * the value commits as soon as the text is a number, and the text settles to the committed value on blur.
+ */
+export function NumInput({ id, value, min, max, onChange, onEnter }: {
+  id: string; value: number; min: number; max: number; onChange: (n: number) => void; onEnter: () => void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    setText((t) => (t !== '' && Number(t) === value ? t : String(value)));
+  }, [value]);
+  return (
+    <input id={id} className="input sm mg-qnum" inputMode="numeric" value={text}
+      onChange={(e) => {
+        const digits = e.target.value.replace(/\D/g, '');
+        setText(digits);
+        if (digits !== '') onChange(Math.min(max, Math.max(min, Number(digits))));
+      }}
+      onBlur={() => setText(String(value))}
+      onKeyDown={(e) => e.key === 'Enter' && onEnter()} />
   );
 }

@@ -91,7 +91,11 @@ export function DocumentsView({ tabId, cid, db, coll, state, patch, theme, visib
     return () => ctl.abort();
   }, [cid, db, coll, applied, seq]);
 
-  const run = useCallback((q: QueryState) => {
+  const run = useCallback((input: QueryState) => {
+    // A different filter / sort / collation starts on the first page (a leftover skip would show an empty page 3 of 1).
+    const changed = input.filter.trim() !== applied.filter.trim() || input.sort.trim() !== applied.sort.trim() || input.collation.trim() !== applied.collation.trim();
+    const q = changed && input.skip === applied.skip && input.skip !== 0 ? { ...input, skip: 0 } : input;
+    if (q !== input) setDraft((d) => ({ ...d, skip: 0 }));
     remember(histKey, q);
     if (JSON.stringify(q) === JSON.stringify(applied)) setSeq((n) => n + 1);
     else patch({ query: q });
@@ -179,7 +183,7 @@ export function DocumentsView({ tabId, cid, db, coll, state, patch, theme, visib
 
   const docs = result?.docs ?? [];
   const from = docs.length ? applied.skip + 1 : 0;
-  const to = applied.skip + docs.length;
+  const to = docs.length ? applied.skip + docs.length : 0;
   const total = result?.count ?? 0;
 
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -253,14 +257,16 @@ export function DocumentsView({ tabId, cid, db, coll, state, patch, theme, visib
           )}
         </span>
         <button className="icon-btn sm" aria-label="Previous page" disabled={applied.skip === 0 || loading} onClick={() => page(-1)}><ChevronLeft size={16} /></button>
-        <button className="icon-btn sm" aria-label="Next page" disabled={!result || to >= total || loading} onClick={() => page(1)}><ChevronRight size={16} /></button>
+        <button className="icon-btn sm" aria-label="Next page" disabled={!result || docs.length === 0 || to >= total || loading} onClick={() => page(1)}><ChevronRight size={16} /></button>
         <button className="icon-btn sm" aria-label="Refresh" title="Refresh" onClick={refresh}><RefreshCw size={14} className={loading ? 'spin' : undefined} /></button>
       </div>
       <div className="mg-docs-body" tabIndex={-1} onKeyDown={onListKey}>
         {error && <div className="mg-error" role="alert"><strong>Query failed.</strong> {error}</div>}
         {!error && result && !docs.length && (
           <div className="mg-empty">
-            <p>{applied.filter.trim() ? 'No documents match this filter.' : 'This collection has no documents.'}</p>
+            <p>{applied.skip > 0 && total > 0 ? `Nothing on this page: skip ${applied.skip.toLocaleString()} is past the ${plural(total, 'matching document')}.`
+              : applied.filter.trim() ? 'No documents match this filter.' : 'This collection has no documents.'}</p>
+            {applied.skip > 0 && total > 0 && <button className="btn" onClick={() => { setDraft((d) => ({ ...d, skip: 0 })); patch({ query: { ...applied, skip: 0 } }); }}>Back to the first page</button>}
             {canWrite && !applied.filter.trim() && <button className="btn" onClick={() => void openEditor('insert')}><Plus size={14} aria-hidden /> Insert a document</button>}
           </div>
         )}

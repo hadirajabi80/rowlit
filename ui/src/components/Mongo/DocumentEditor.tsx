@@ -75,7 +75,21 @@ export function DocumentEditor({ mode, cid, db, coll, doc, fields, theme, onClos
         }
         onSaved(1);
       } else if (v.t === 'array') {
-        for (const d of v.v) await api.mongo.insert(cid, db, coll, { doc: toShell(d) });
+        let done = 0;
+        try {
+          for (const d of v.v) {
+            await api.mongo.insert(cid, db, coll, { doc: toShell(d) });
+            done++;
+          }
+        } catch (e) {
+          if (done > 0) {
+            // Keep the dialog open on the documents that are still missing, so a retry cannot insert the first ones twice.
+            onSaved(done);
+            setText(toShell({ t: 'array', v: v.v.slice(done) }, { inline: 60 }));
+            throw new Error(`${done} of ${v.v.length} documents were inserted; document ${done + 1} failed: ${errorText(e)}`);
+          }
+          throw e;
+        }
         onSaved(v.v.length);
       } else {
         await api.mongo.insert(cid, db, coll, { doc: text });

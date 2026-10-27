@@ -48,6 +48,25 @@ public sealed class CsvTests
     }
 
     [Fact]
+    public void Inference_keeps_identifiers_as_text()
+    {
+        // zip codes, phone numbers and card-like integers lose their leading zeros / precision when "detected" as numbers
+        var csv = "zip,phone,huge,plain,decimal\n" +
+                  "00123,+15551234,12345678901234567890,10,0.5\n" +
+                  "02134,+15559876,12345678901234567891,0,-1.25\n";
+        var preview = ImportExportService.Preview(Plan(csv));
+        Assert.Equal([("zip", "string"), ("phone", "string"), ("huge", "string"), ("plain", "number"), ("decimal", "number")],
+            preview.Columns!.Select(c => (c.Name, c.InferredType)));
+        var d = BsonDocument.Parse(preview.Docs[0]);
+        Assert.Equal("00123", d["zip"].AsString);
+        Assert.Equal("+15551234", d["phone"].AsString);
+        Assert.Equal("12345678901234567890", d["huge"].AsString);
+        // choosing "number" by hand still converts
+        var forced = ImportExportService.Preview(Plan(csv, types: new() { ["zip"] = "number" }));
+        Assert.Equal(123, BsonDocument.Parse(forced.Docs[0])["zip"].AsInt32);
+    }
+
+    [Fact]
     public void Overrides_no_header_delimiters_and_empty_cells()
     {
         var p = ImportExportService.Preview(Plan("007;x\n008;", header: false, delimiter: ";", types: new() { ["field1"] = "string" }));

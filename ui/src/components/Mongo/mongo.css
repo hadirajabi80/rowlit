@@ -31,9 +31,16 @@
 
 /* ---- query bar */
 .mg-qbar { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-sunken); flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
-.mg-qrow { display: flex; align-items: flex-start; gap: var(--space-2); }
+/* At the minimum window width (800 px) the filter row wraps instead of pushing Find out of the pane. */
+.mg-qrow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); }
 .mg-qrow > .btn, .mg-qrow > .icon-btn, .mg-qhist { flex-shrink: 0; }
 .mg-qrow-opts { display: grid; grid-template-columns: auto minmax(160px, 1fr) auto minmax(140px, 1fr) auto minmax(140px, 1fr) auto 70px auto 70px auto 90px; align-items: center; }
+@media (max-width: 1320px) {
+  .mg-qrow-opts { grid-template-columns: auto minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr); }
+}
+@media (max-width: 960px) {
+  .mg-qrow-opts { grid-template-columns: auto minmax(90px, 1fr) auto minmax(90px, 1fr); }
+}
 .mg-qlabel { color: var(--fg-muted); font-size: var(--text-sm); font-weight: var(--weight-strong); line-height: 28px; white-space: nowrap; }
 .mg-qfield { flex: 1; min-width: 0; border: 1px solid var(--border-control); border-radius: var(--radius); background: var(--bg-input); overflow: hidden; }
 .mg-qfield:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }

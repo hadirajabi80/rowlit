@@ -4,7 +4,8 @@ import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/client';
 import type { MongoCreateCollectionRequest } from '../../api/types';
-import { checkShell } from '../../mongo/shellJson';
+import { toShell } from '../../mongo/bson';
+import { checkShell, parseShellArray } from '../../mongo/shellJson';
 import { Dialog } from '../common/Dialog';
 import { Select } from '../common/Select';
 import { errorText } from './util';
@@ -107,33 +108,12 @@ export function NewCollectionDialog({ cid, db, collections, onClose, onCreated }
   );
 }
 
-/** Splits `[ {...}, {...} ]` text into one text per stage (top-level commas), for the engine's pipeline strings. */
+/**
+ * Splits `[ {...}, {...} ]` text into one text per stage, for the engine's pipeline strings. The text is parsed (not
+ * cut at commas), so braces, quotes and commas inside regular expressions, strings and comments cannot confuse it.
+ */
 export function splitPipeline(text: string): string[] {
-  const t = text.trim().replace(/^\[/, '').replace(/\]$/, '');
-  const out: string[] = [];
-  let depth = 0;
-  let cur = '';
-  let quote: string | null = null;
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i];
-    if (quote) {
-      cur += c;
-      if (c === '\\') { cur += t[++i] ?? ''; continue; }
-      if (c === quote) quote = null;
-      continue;
-    }
-    if (c === '"' || c === "'") quote = c;
-    if ('{[('.includes(c)) depth++;
-    if ('}])'.includes(c)) depth--;
-    if (c === ',' && depth === 0) {
-      if (cur.trim()) out.push(cur.trim());
-      cur = '';
-      continue;
-    }
-    cur += c;
-  }
-  if (cur.trim()) out.push(cur.trim());
-  return out;
+  return parseShellArray(text).map((stage) => toShell(stage, { inline: 60 }));
 }
 
 export function RenameCollectionDialog({ cid, db, coll, onClose, onRenamed }: {

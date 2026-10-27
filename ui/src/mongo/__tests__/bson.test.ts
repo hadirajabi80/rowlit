@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   B, base64Length, bsonEquals, formatDouble, fromEjson, getPath, hasTrunc, numberValue, objectIdTime, parseEjson, parseEjsonDoc,
-  previewText, scalarShell, setField, toEjsonJson, toEjsonText, toShell, uuidOf, withoutField, type BsonValue,
+  previewText, regexLiteralBody, scalarShell, setField, toEjsonJson, toEjsonText, toShell, uuidOf, withoutField, type BsonValue,
 } from '../bson';
 import { parseShell } from '../shellJson';
 
@@ -98,7 +98,11 @@ describe('shell text', () => {
     expect(scalarShell(B.long('12'))).toBe('NumberLong("12")');
     expect(scalarShell(B.decimal('1.50'))).toBe('NumberDecimal("1.50")');
     expect(scalarShell(B.date(0))).toBe('ISODate("1970-01-01T00:00:00.000Z")');
-    expect(scalarShell({ t: 'regex', pattern: 'a/b', flags: 'i' })).toBe('/a\\/b/i');
+    // a bare "/" cannot sit in a literal without becoming "\/" (another pattern text): exact RegExp() form
+    expect(scalarShell({ t: 'regex', pattern: 'a/b', flags: 'i' })).toBe('RegExp("a/b", "i")');
+    expect(scalarShell({ t: 'regex', pattern: 'a\\/b', flags: 'i' })).toBe('/a\\/b/i');
+    expect(scalarShell({ t: 'regex', pattern: '[/]x', flags: '' })).toBe('/[/]x/');
+    expect(scalarShell({ t: 'regex', pattern: '', flags: '' })).toBe('RegExp("", "")');
     expect(scalarShell(B.bin('AQID', '00'))).toBe('BinData(0, "AQID")');
     expect(scalarShell({ t: 'timestamp', ts: 1, inc: 2 })).toBe('Timestamp(1, 2)');
   });
@@ -142,5 +146,58 @@ describe('helpers', () => {
   it('writes relaxed EJSON text', () => {
     const v: BsonValue = B.doc([['n', B.int(1)], ['d', B.date(0)], ['l', B.long('5')]]);
     expect(JSON.parse(toEjsonText(v, 'relaxed'))).toEqual({ n: 1, d: { $date: '1970-01-01T00:00:00.000Z' }, l: 5 });
+  });
+});
+
+describe('field order (QA round: MongoDB)', () => {
+  // A plain JS object lists integer-like keys first: "2", "10" would jump in front of _id and name.
+  const text = '{"_id":{"$numberInt":"1"},"name":"x","2024":{"$numberInt":"5"},"10":{"$numberInt":"1"},"2":{"$numberInt":"2"},"nested":{"b":{"$numberInt":"1"},"1":{"$numberInt":"7"},"a":{"$numberInt":"2"}}}';
+
+  it('keeps the order of fields with integer-like names', () => {
+    const d = parseEjsonDoc(text);
+    expect(d.v.map(([k]) => k)).toEqual(['_id', 'name', '2024', '10', '2', 'nested']);
+    expect((getPath(d, 'nested') as { v: [string, BsonValue][] }).v.map(([k]) => k)).toEqual(['b', '1', 'a']);
+  });
+
+  it('writes them back in the same order (shell text, EJSON text)', () => {
+    const d = parseEjsonDoc(text);
+    expect(toShell(d, { inline: 200 })).toBe('{ _id: 1, name: "x", "2024": 5, "10": 1, "2": 2, nested: { b: 1, "1": 7, a: 2 } }');
+    expect(toEjsonText(d, 'canonical', 0)).toBe(text);
+  });
+
+  it('keeps a __proto__ field', () => {
+    const d = parseEjsonDoc('{"__proto__":{"$numberInt":"3"},"a":1}');
+    expect(d.v.map(([k]) => k)).toEqual(['__proto__', 'a']);
+    expect(toEjsonText(d, 'relaxed', 0)).toBe('{"__proto__":3,"a":1}');
+  });
+
+  it('toEjsonText keeps the JSON.stringify layout', () => {
+    const v: BsonValue = B.doc([['a', B.arr([B.int(1), B.doc([])])], ['b', B.long('5')], ['c', B.arr([])]]);
+    expect(toEjsonText(v, 'canonical')).toBe(JSON.stringify(toEjsonJson(v, 'canonical'), null, 2));
+    expect(toEjsonText(v, 'relaxed', 4)).toBe(JSON.stringify(toEjsonJson(v, 'relaxed'), null, 4));
+    expect(toEjsonText(v, 'relaxed', 0)).toBe(JSON.stringify(toEjsonJson(v, 'relaxed')));
+  });
+});
+
+describe('Extended JSON wrappers typed by hand', () => {
+  it('reads numbers wrapped by the shell parser as $date / $timestamp parts', () => {
+    expect(parseShell('{ d: { $date: 0 }, t: { $timestamp: { t: 1, i: 2 } } }')).toEqual(
+      B.doc([['d', { t: 'date', v: 0 }], ['t', { t: 'timestamp', ts: 1, inc: 2 }]]),
+    );
+  });
+});
+
+describe('regex text', () => {
+  it('round-trips a pattern with a bare or escaped slash through shell text', () => {
+    for (const pattern of ['a/b', 'a\\/b', '^/api/', '[/]x', '', 'line\nbreak']) {
+      const v: BsonValue = { t: 'regex', pattern, flags: 'i' };
+      expect(parseShell(`{ r: ${scalarShell(v)} }`)).toEqual(B.doc([['r', v]]));
+    }
+  });
+  it('regexLiteralBody escapes only what would end the literal', () => {
+    expect(regexLiteralBody('a/b')).toBe('a\\/b');
+    expect(regexLiteralBody('a\\/b')).toBe('a\\/b');
+    expect(regexLiteralBody('[/]')).toBe('[/]');
+    expect(regexLiteralBody('a\\\\/b')).toBe('a\\\\\\/b');
   });
 });
