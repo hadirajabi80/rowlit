@@ -52,4 +52,10 @@ plain, unknown host, missing host, bad port, cluster/sentinel against a standalo
 - UI: `ui/src/components/Redis/__tests__/qa.test.tsx` (new, 13 tests), `ui/src/api/ws.m2.test.ts` (+1).
 - Engine: `ValueServiceTests` (+3), `ConnectionTests` (+1), `JobAndInfoTests` (+1), `LiveRedisTests` (+1, real server);
   the fake server gained `LINDEX` and `ACL WHOAMI`.
+- Results on a heavily loaded machine: `npm run lint` (warnings only) and `npm run typecheck` clean; Redis, api and commands vitest
+  folders pass except `browser.test.tsx` "list: pages, pushes and sets an element" (renders two pages of 200 editable rows,
+  exceeds its 30 s timeout under load; it fails identically on the commit before this round, so it is a load flake, not a
+  regression) and "analysis can be cancelled" (passes alone). The full `npm test` could not complete: the vitest process ran out
+  of memory with other agents running. Engine: Redis project 139 pass / 2 skipped (`DBSTUDIO_IT=0`, Release), 141 pass with
+  `DBSTUDIO_IT=1`; the full `engine/DbStudio.slnx` run was not done (only the Redis engine project changed).
 - Run the live Redis tests with `DBSTUDIO_IT=1 dotnet test engine/tests/DbStudio.Sources.Redis.Tests` (141 pass).
