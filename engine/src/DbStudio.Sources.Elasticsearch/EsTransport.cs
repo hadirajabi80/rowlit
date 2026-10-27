@@ -125,7 +125,8 @@ public sealed class EsTransport : IDisposable
             var sw = Stopwatch.StartNew();
             try
             {
-                using var req = new HttpRequestMessage(method, new Uri(url, pathAndQuery.TrimStart('/')));
+                // "./" keeps a first segment such as `remote:logs-*` (cross-cluster search) from being read as a URI scheme
+                using var req = new HttpRequestMessage(method, new Uri(url, "./" + pathAndQuery.TrimStart('/')));
                 if (_auth is not null) req.Headers.Authorization = _auth;
                 if (body is not null)
                 {

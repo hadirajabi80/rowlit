@@ -300,6 +300,22 @@ public sealed class ConsoleTests
     }
 
     [Fact]
+    public async Task Console_paths_keep_cross_cluster_and_date_math_names_intact()
+    {
+        var fake = new FakeEs();
+        await using var c = await Es.ClientAsync(fake);
+        var svc = new ConsoleService();
+        await svc.RunAsync(c, new EsConsoleRequest { Method = "GET", Path = "/remote:logs-*/_search?size=0" }, default);
+        var cross = fake.Requests.Last();
+        Assert.Equal("http", cross.Uri.Scheme);
+        Assert.Equal("/remote:logs-*/_search", cross.Uri.AbsolutePath);
+        Assert.Equal("?size=0", cross.Uri.Query);
+        await svc.RunAsync(c, new EsConsoleRequest { Method = "GET", Path = "/<logs-{now/d}>/_search" }, default);
+        Assert.Contains("%2F", fake.Requests.Last().Uri.OriginalString, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("/_search", fake.Requests.Last().Uri.AbsolutePath);
+    }
+
+    [Fact]
     public async Task Read_only_connections_refuse_writes()
     {
         var fake = new FakeEs();
