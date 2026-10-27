@@ -96,6 +96,29 @@ public sealed class FederatedSessionTests : IAsyncLifetime
         Assert.Equal(ColumnKinds.Decimal, sink.ResultSets[0][2].Kind);
     }
 
+    [Fact]
+    public async Task Decimal_results_keep_their_scale()
+    {
+        // QA round: DECIMAL(38,2) holding 120.50 reached the grid as "120.5" (and a sum of 140.00 as "140"), and materialize
+        // had no scale to build the target column from (it fell back to NUMERIC(38,10)).
+        var s = await _h.OpenAsync(_link);
+        var sink = await FederationHarness.RunAsync(s, "SELECT o.total, sum(o.total) AS everything FROM shop.orders o WHERE o.id = 1 GROUP BY o.total");
+        Assert.Equal([2, 2], sink.ResultSets[0].Select(c => c.Scale));
+        Assert.Equal(["120.50", "120.50"], sink.Single()[0].Select(v => (string)v!));
+    }
+
+    [Fact]
+    public async Task Builder_regex_filter_runs_in_duckdb()
+    {
+        // the SQL the builder compiles for a "matches regex" condition (parameters bound as the builder sends them)
+        var s = await _h.OpenAsync(_link);
+        var args = new[] { new DbStudio.Core.Params.QueryParam("fp1", "string", System.Text.Json.Nodes.JsonValue.Create("^a")) };
+        var sink = await FederationHarness.RunAsync(s, "SELECT c.name FROM crm.customers AS c WHERE regexp_matches(c.name, $fp1, 'i') ORDER BY c.name", parameters: args);
+        Assert.Equal(["Alice"], sink.Single().Select(r => (string)r[0]!));
+        var cs = await FederationHarness.RunAsync(s, "SELECT c.name FROM crm.customers AS c WHERE regexp_matches(c.name, $fp1) ORDER BY c.name", parameters: args);
+        Assert.Empty(cs.Single());
+    }
+
     private static object? Normalize(object? v) => v switch
     {
         int i => (long)i,

@@ -29,6 +29,41 @@ public sealed class DockerMaterializeTests : IDisposable
         new Server("mysql", "mysql", 13306, "shop", new() { ["host"] = "localhost", ["port"] = 13306, ["database"] = "shop", ["user"] = "root", ["sslMode"] = "none", ["allowPublicKeyRetrieval"] = true }, "shop"),
     };
 
+    /// <summary>
+    /// QA round: Oracle creates QA_MAT_X for "qa_mat_x"; append with the name as typed used to fail with "Table was not found".
+    /// </summary>
+    [SkippableFact]
+    public async Task Append_finds_the_table_whose_name_create_folded()
+    {
+        Skip.IfNot(Docker.Reachable("localhost", 15211), "oracle (dbstudio-it, port 15211) is not running.");
+        _h.Runtime.Exec("CREATE SCHEMA src; CREATE TABLE src.t AS SELECT range AS id, 'n' || range AS name FROM range(3)");
+        var link = _h.Link();
+        var cid = _h.AddConnection(new ConnectionProfile
+        {
+            Name = "IT oracle", ProviderId = "oracle",
+            Props = new() { ["connectionType"] = "basic", ["host"] = "localhost", ["port"] = 15211, ["serviceName"] = "FREEPDB1", ["user"] = "shop", ["role"] = "normal" },
+        }, "shop");
+        var d = ImportDialect.For(_h.Providers.Get("oracle").Dialect, "oracle");
+        var table = "qa_ci_" + Guid.NewGuid().ToString("N")[..6];
+        var q = d.Qualify(null, "SHOP", d.Fold(table));
+        try
+        {
+            var (done, result) = await _h.RunAsync(link, new MaterializeRequest("SELECT * FROM src.t", null, null, cid, null, "SHOP", table));
+            Assert.True(done.Status == ExecutionStatus.Ok, done.Error);
+            Assert.Equal(d.Fold(table), result!.Table);
+            var preview = await _h.Materialize.PreviewAsync(link, new MaterializeRequest("SELECT * FROM src.t", null, null, cid, null, "SHOP", table, MaterializeModes.Append), default);
+            Assert.True(preview.TableExists);
+            (done, result) = await _h.RunAsync(link, new MaterializeRequest("SELECT * FROM src.t", null, null, cid, null, "SHOP", table, MaterializeModes.Append));
+            Assert.True(done.Status == ExecutionStatus.Ok, done.Error);
+            Assert.Equal((3L, d.Fold(table)), (result!.Rows, result.Table));
+            Assert.Equal(6L, Convert.ToInt64(await _h.ScalarAsync(cid, $"SELECT COUNT(*) FROM {q}")));
+        }
+        finally
+        {
+            try { await _h.ExecAsync(cid, d.DropTable(q)); } catch (Exception) { /* not created */ }
+        }
+    }
+
     [SkippableTheory]
     [MemberData(nameof(Servers))]
     public async Task Materializes_100k_rows_with_progress(Server s)

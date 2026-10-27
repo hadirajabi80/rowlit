@@ -183,6 +183,16 @@ public sealed class DocumentPushdownTests
     }
 
     [Fact]
+    public void Mongo_empty_collection_still_has_an_id_column()
+    {
+        // QA round: an empty collection used to mount with no columns, and `select count(*) from mg.sessions` failed with
+        // "table does not exist" instead of returning 0.
+        var cols = MongoFetcher.Infer([]);
+        var id = Assert.Single(cols);
+        Assert.Equal(("_id", ColumnKinds.String, true), (id.Name, id.Kind, id.IsPk));
+    }
+
+    [Fact]
     public void Elastic_clauses()
     {
         var mapping = JsonDocument.Parse("""

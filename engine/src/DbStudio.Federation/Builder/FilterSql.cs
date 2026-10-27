@@ -57,7 +57,7 @@ internal sealed partial class FilterSql
         return Compound(string.Join(glue, pieces.Select(p => p.Compound ? "(" + p.Sql + ")" : p.Sql)));
     }
 
-    /// <summary>The predicate (null when nothing applies). Regex conditions cannot be compiled: they are dropped with a warning.</summary>
+    /// <summary>The predicate (null when nothing applies). Regex conditions become <c>regexp_matches</c>.</summary>
     public string? Build(BuilderFilterNode? filter)
     {
         var (server, client) = Split(filter);
@@ -76,7 +76,7 @@ internal sealed partial class FilterSql
             if (node.Enabled == false) return (null, null);
             var ci = Resolve(node.Column ?? "", node.Ordinal);
             if (ci < 0 || FilterValues.ConditionProblem(node, _columns[ci].Kind) is not null) return (null, null);
-            return FilterValues.IsServerOp(node.Op) ? (node, null) : (null, node);
+            return FilterValues.IsServerOp(node.Op) || node.Op == "regex" ? (node, null) : (null, node);
         }
         var parts = (node.Items ?? []).Select(Split).ToList();
         var servers = parts.Where(p => p.Server is not null).Select(p => p.Server!).ToList();
@@ -137,7 +137,12 @@ internal sealed partial class FilterSql
             case "isTrue": return Atom($"{c} = TRUE");
             case "isFalse": return Atom($"{c} = FALSE");
             case "isEmpty": return Atom($"{c} = ''");
-            case "regex": return null;
+            case "regex":
+            {
+                // The grid applies a regex client-side; the builder has no grid filter, DuckDB runs it (RE2 syntax).
+                var p = StrParam(FilterValues.Str(v.Count > 0 ? v[0] : null));
+                return Atom($"regexp_matches({c}, {p}{(cs ? "" : ", 'i'")})");
+            }
             case "contains" or "notContains" or "startsWith" or "endsWith":
             {
                 var raw = FilterValues.Str(v.Count > 0 ? v[0] : null);

@@ -399,7 +399,15 @@ public sealed class LinkRuntime : ILinkRuntime
             if (h.Error is not null || h.Fetcher is null || h.Context is null)
                 throw EngineException.SourceUnavailable($"{t.Table.Alias}: {h.Error ?? "the member cannot be read."}", new { alias = t.Table.Alias });
             var columns = allColumns || t.AllColumns ? t.Source.Columns.Select(c => c.Name).ToList() : t.Columns.ToList();
-            if (columns.Count == 0) continue; // a table without columns cannot be created
+            if (columns.Count == 0)
+            {
+                // A table without columns cannot be created in the engine; say so instead of DuckDB's "table does not exist".
+                if (t.Source.Columns.Count == 0)
+                    throw EngineException.Validation(
+                        $"{t.Table} has no columns the link can read (a ClickHouse parametrised view, a table function or a source that returned no schema): it cannot be queried here.",
+                        new { alias = t.Table.Alias, table = t.Table.Table });
+                continue;
+            }
             var maxRows = t.Limit is { } l ? Math.Min(limits.MaxRowsPerSource, l) : limits.MaxRowsPerSource;
             var proposed = new FetchRequest
             {

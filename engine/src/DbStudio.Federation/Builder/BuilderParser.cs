@@ -690,7 +690,25 @@ public sealed partial class BuilderParser
         }
         if (Str(e, "class") == "COMPARISON") return Comparison(e, column);
         if (LikeCondition(e, column, negated: false) is { } like) return like;
+        if (RegexCondition(e, column) is { } regex) return regex;
         throw Unsupported();
+    }
+
+    /// <summary><c>regexp_matches(col, 'pattern'[, 'i'])</c> → the grid's "matches regex" condition (the compiler's output for it).</summary>
+    private BuilderFilterNode? RegexCondition(JsonElement e, Func<JsonElement, FilterColumnRef?> column)
+    {
+        if (Str(e, "class") != "FUNCTION" || !string.Equals(Str(e, "function_name"), "regexp_matches", StringComparison.OrdinalIgnoreCase)) return null;
+        var children = e.GetProperty("children").EnumerateArray().ToList();
+        if (children.Count is not (2 or 3)) return null;
+        var col = column(children[0]);
+        if (col is null || Constant(children[1]) is not { Kind: "string" } pattern) return null;
+        var caseSensitive = true;
+        if (children.Count == 3)
+        {
+            if (Constant(children[2]) is not { Kind: "string" } flags || flags.Text != "i") return null;
+            caseSensitive = false;
+        }
+        return Condition(col, "regex", [JsonValue.Create(pattern.Text)], caseSensitive);
     }
 
     private static ParseFailure Unsupported() => Fail("This WHERE / HAVING condition cannot be shown as a builder filter.");

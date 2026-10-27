@@ -22,6 +22,9 @@ public sealed record NativeLinkSource(string Alias, string ProviderId, Connectio
 /// </summary>
 public static class NativeLinkScripter
 {
+    /// <summary>A name PostgreSQL leaves alone when unquoted (it folds anything else to lower case).</summary>
+    private static readonly System.Text.RegularExpressions.Regex PgPlain = new("^[a-z_][a-z0-9_$]*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     public const string PasswordPlaceholder = "<password>";
     public const string UserPlaceholder = "<user>";
 
@@ -42,7 +45,7 @@ public static class NativeLinkScripter
     {
         var kinds = KindsFor(target, targetProviderId, member.ProviderId);
         if (kinds.Count == 0)
-            throw EngineException.Validation($"A {CoreJson.ToWire(target)} server cannot link to a {member.ProviderId} member natively.", new { field = "targetConnectionId" });
+            throw EngineException.Validation($"A {targetProviderId} server cannot link to a {member.ProviderId} member natively.", new { field = "targetConnectionId" });
         var k = string.IsNullOrEmpty(kind) ? kinds[0] : kind;
         if (!kinds.Contains(k)) throw EngineException.Validation($"Native link kind '{kind}' is not available here (available: {string.Join(", ", kinds)}).", new { field = "kind" });
         var linkName = string.IsNullOrWhiteSpace(name) ? member.Alias : name.Trim();
@@ -259,12 +262,15 @@ public static class NativeLinkScripter
         s.Line($"CREATE SERVER {server} FOREIGN DATA WRAPPER {wrapper} OPTIONS ({serverOptions});");
         s.Line($"CREATE USER MAPPING FOR CURRENT_USER SERVER {server} OPTIONS ({mappingOptions});");
         s.Line($"CREATE SCHEMA IF NOT EXISTS {localSchema};");
-        var limit = m.AllTables ? "" : " LIMIT TO (" + string.Join(", ", s.TableNames.Select(LinkSql.QuoteIdent)) + ")";
+        // The foreign tables keep the remote names (oracle_fdw lower-cases them), and PostgreSQL folds an unquoted name to
+        // lower case: a SQL Server table "Orders" must be written "Orders" in LIMIT TO and in the examples.
+        string Tn(string t) => m.ProviderId == "oracle" || (PgPlain.IsMatch(t) && !LinkSql.NeedsQuoting(t)) ? LinkSql.QuoteIdent(t) : "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        var limit = m.AllTables ? "" : " LIMIT TO (" + string.Join(", ", s.TableNames.Select(Tn)) + ")";
         if (!m.AllTables && !s.TableNames.Any()) limit = "";
         s.Line($"IMPORT FOREIGN SCHEMA {Dq(remoteSchema)}{limit} FROM SERVER {server} INTO {localSchema};");
         s.Line();
         s.Line("-- Examples");
-        foreach (var t in s.TableNames.Take(5)) s.Line($"SELECT * FROM {localSchema}.{LinkSql.QuoteIdent(t)} LIMIT 100;");
+        foreach (var t in s.TableNames.Take(5)) s.Line($"SELECT * FROM {localSchema}.{Tn(t)} LIMIT 100;");
         s.Line($"-- Remove: DROP SCHEMA {localSchema} CASCADE; DROP SERVER {server} CASCADE;");
     }
 

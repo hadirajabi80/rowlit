@@ -102,6 +102,8 @@ const CQL_SERVER_OPS: ReadonlySet<string> = new Set([
 
 /** Can the condition's operator be pushed to the server of this dialect? */
 function serverOp(op: FilterCondition['op'], dialect?: Dialect): boolean {
+  // DuckDB (linked databases) runs regexp_matches itself; elsewhere a regex stays client-side.
+  if (dialect === 'duckdb' && op === 'regex') return true;
   if (!OPERATOR_INFO[op]?.server) return false;
   return dialect === 'cql' ? CQL_SERVER_OPS.has(op) : true;
 }
@@ -221,7 +223,9 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
       }
       return `${pgText} = ''`;
     case 'regex':
-      return null; // client-only (never reached: filtered out before)
+      // The grid applies a regex client-side (never reached for those dialects); the query builder's DuckDB runs it.
+      if (d !== 'duckdb') return null;
+      return atom(`regexp_matches(${c}, ${strParam(String(v[0]))}${cs ? '' : ", 'i'"})`);
     case 'contains': case 'notContains': case 'startsWith': case 'endsWith': {
       const raw = String(v[0]);
       const pre = cond.op === 'contains' || cond.op === 'notContains' || cond.op === 'endsWith';

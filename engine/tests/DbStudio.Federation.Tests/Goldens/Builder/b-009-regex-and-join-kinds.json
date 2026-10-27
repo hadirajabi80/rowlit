@@ -1,5 +1,5 @@
 {
-  "name": "a regex condition is dropped with a filter warning; joining int to string warns joinKinds",
+  "name": "a regex condition compiles to regexp_matches (case-insensitive by default); joining int to string warns joinKinds",
   "catalog": {
     "crm.customers": [
       {
@@ -191,16 +191,20 @@
     ],
     "limit": 5
   },
-  "sql": "SELECT customers.name\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.ref\nWHERE customers.id >= $fp1\nORDER BY customers.name ASC\nLIMIT 5",
+  "sql": "SELECT customers.name\nFROM crm.customers AS customers\nINNER JOIN shop.orders AS orders ON customers.id = orders.ref\nWHERE regexp_matches(customers.name, $fp1, 'i') AND customers.id >= $fp2\nORDER BY customers.name ASC\nLIMIT 5",
   "params": [
     {
       "name": "fp1",
+      "kind": "string",
+      "value": "^A.*"
+    },
+    {
+      "name": "fp2",
       "kind": "int",
       "value": 10
     }
   ],
   "warnings": [
-    "joinKinds",
-    "filter"
+    "joinKinds"
   ]
 }
