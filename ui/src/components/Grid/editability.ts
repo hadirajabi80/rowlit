@@ -11,9 +11,20 @@ export interface Editability {
   editableColumns: Set<number>;
   /** Ordinals of the key columns in the result. */
   keyOrdinals: number[];
+  /**
+   * Ordinals that can be set on a new row but not changed on an existing one (ClickHouse cannot UPDATE a column of the
+   * sorting key: "Cannot UPDATE key column"). Use `editableColumnsFor`.
+   */
+  updateLocked?: Set<number>;
 }
 
 const NOT = (reason: string): Editability => ({ editable: false, reason, target: null, editableColumns: new Set(), keyOrdinals: [] });
+
+/** The columns whose value can be set on a new row (`isInsert`) or changed on an existing row. */
+export function editableColumnsFor(e: Pick<Editability, 'editableColumns' | 'updateLocked'>, isInsert: boolean): Set<number> {
+  if (isInsert || !e.updateLocked?.size) return e.editableColumns;
+  return new Set([...e.editableColumns].filter((i) => !e.updateLocked!.has(i)));
+}
 
 /**
  * The catalog table or view `schema.name`. Names match case-insensitively, but an exact spelling wins: Oracle can hold
@@ -115,6 +126,7 @@ function finish(
   const defaultSchema = (dialect === 'plsql' ? currentSchema : null) ?? snapshot?.defaultSchema ?? null;
   return {
     editable: true, reason: null, editableColumns, keyOrdinals,
+    ...(dialect === 'clickhouse' ? { updateLocked: new Set(keyOrdinals) } : {}),
     target: { ...t, keyColumns: keyOrdinals.map((i) => columns[i].name), identityColumns: identity, defaultSchema },
   };
 }

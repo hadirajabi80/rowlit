@@ -57,6 +57,35 @@ public sealed class ChSqlTextTests
     [InlineData("a`b", "`a\\`b`")]
     public void Quote_OnlyWhenNeeded(string name, string expected) => Assert.Equal(expected, ChSqlText.Quote(name));
 
+    [Theory]
+    [InlineData("SELECT id FROM t FORMAT JSON", "SELECT id FROM t", "JSON")]
+    [InlineData("SELECT id FROM t FORMAT CSVWithNames;", "SELECT id FROM t", "CSVWithNames")]
+    [InlineData("SELECT id FROM t FORMAT TabSeparated SETTINGS max_threads = 1", "SELECT id FROM t  SETTINGS max_threads = 1", "TabSeparated")]
+    [InlineData("WITH 1 AS x SELECT x FORMAT Vertical", "WITH 1 AS x SELECT x", "Vertical")]
+    [InlineData("SHOW TABLES FORMAT Pretty", "SHOW TABLES", "Pretty")]
+    public void Split_RemovesATrailingFormatClause_TheDriverChoosesTheWireFormat(string sql, string expected, string format)
+    {
+        // A user FORMAT overrides the driver's own and the response can no longer be read ("Unable to read beyond the end of the stream").
+        var st = Assert.Single(ChSqlText.Split(sql));
+        Assert.Equal(expected, st.Text);
+        Assert.Equal(format, st.IgnoredFormat);
+        Assert.True(st.IsQuery);
+    }
+
+    [Theory]
+    [InlineData("SELECT 1 AS format")]
+    [InlineData("SELECT format FROM t ORDER BY format DESC")]
+    [InlineData("SELECT * FROM t WHERE format = 'JSON'")]
+    [InlineData("SELECT f(format JSON)")]
+    [InlineData("INSERT INTO t FORMAT CSV\n1,2")]
+    [InlineData("SELECT 'FORMAT JSON'")]
+    public void Split_LeavesOtherUsesOfTheWordFormatAlone(string sql)
+    {
+        var st = Assert.Single(ChSqlText.Split(sql));
+        Assert.Equal(sql.TrimEnd(), st.Text);
+        Assert.Null(st.IgnoredFormat);
+    }
+
     [Fact]
     public void Literal_EscapesBackslashAndQuote() => Assert.Equal(@"'it\'s \\ ok\n'", ChSqlText.Literal("it's \\ ok\n"));
 }
@@ -139,6 +168,39 @@ public sealed class ChTypesTests
         Assert.Equal("ab", ChTypes.ToWire("ab\0", "FixedString(3)"));
         Assert.Equal("1.2.3.4", ChTypes.ToWire(System.Net.IPAddress.Parse("1.2.3.4"), "IPv4"));
         Assert.Equal("سلام", ChTypes.ToWire("سلام", "String"));
+    }
+
+    [Fact]
+    public void ToWire_DatesInsideCompositesFollowTheDeclaredType()
+    {
+        // The driver hands Date and DateTime elements out as DateTime (Date comes with Kind Utc): only the type tells them apart.
+        var midnightUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var midnight = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        Assert.Equal("[\"2026-01-01\"]", ChTypes.ToWire(new[] { midnightUtc }, "Array(Date)"));
+        Assert.Equal("[\"2026-01-01T00:00:00\"]", ChTypes.ToWire(new[] { midnight }, "Array(DateTime)"));
+        Assert.Equal("[\"2026-01-01T00:00:00\"]", ChTypes.ToWire(new[] { midnightUtc }, "Array(DateTime('UTC'))"));
+        Assert.Equal("[\"2026-01-01T00:00:00.5\"]", ChTypes.ToWire(new[] { midnight.AddMilliseconds(500) }, "Array(DateTime64(3))"));
+        Assert.Equal("[[\"2026-01-02\"]]", ChTypes.ToWire(new[] { new[] { midnightUtc.AddDays(1) } }, "Array(Array(Nullable(Date)))"));
+        Assert.Equal("[\"2026-01-01\",\"2026-01-01T00:00:00\"]", ChTypes.ToWire(Tuple.Create(midnightUtc, midnight), "Tuple(Date,DateTime)"));
+        Assert.Equal("[\"2026-01-01\",\"2026-01-01T00:00:00\"]", ChTypes.ToWire(Tuple.Create(midnightUtc, midnight), "Tuple(d Date, t DateTime('UTC'))"));
+        Assert.Equal("{\"2026-01-01\":\"2026-01-01T00:00:00\"}", ChTypes.ToWire(new Dictionary<DateTime, DateTime> { [midnightUtc] = midnight }, "Map(Date, DateTime)"));
+        Assert.Equal("{\"a\":[\"2026-01-01\"]}", ChTypes.ToWire(new Dictionary<string, DateTime[]> { ["a"] = [midnightUtc] }, "Map(String, Array(Date))"));
+        // without a type the old guess stays: a midnight value that is not Utc reads as a date
+        Assert.Equal("[\"2026-01-01\"]", ChTypes.ToJson(new[] { midnight }));
+    }
+
+    [Fact]
+    public void ToWire_JsonColumnsAndVariants()
+    {
+        // ClickHouse.Driver spells the type "Json"; its value is a JsonNode.
+        Assert.Equal("json", ChTypes.KindFor("Json"));
+        Assert.Equal("json", ChTypes.KindFor("Nullable(JSON)"));
+        Assert.Equal("{\"a\":{\"b\":[1,2]},\"z\":\"é\"}", ChTypes.ToWire(JsonNode.Parse("{\"a\":{\"b\":[1,2]},\"z\":\"é\"}"), "Json"));
+        Assert.Equal("{\"a\":1}", ChTypes.ToWire("{\"a\":1}", "JSON"));
+        Assert.Equal("[1,{\"x\":null}]", ChTypes.ToWire(new object?[] { 1, JsonNode.Parse("{\"x\":null}") }, "Array(Json)"));
+        // an Array(UInt8) inside Dynamic / Variant is a byte[] (strings arrive as strings), not a binary blob
+        Assert.Equal("[1,2]", ChTypes.ToWire(new byte[] { 1, 2 }, "Dynamic"));
+        Assert.Equal("[1,2]", ChTypes.ToWire(new byte[] { 1, 2 }, "Variant(Array(UInt8), String)"));
     }
 
     [Fact]

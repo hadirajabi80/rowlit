@@ -9,8 +9,9 @@ namespace DbStudio.Providers.ClickHouse;
 /// <param name="Kind">Upper-case head: SELECT, INSERT, ALTER, USE, …</param>
 /// <param name="UseDatabase">For <c>USE db</c>: the database name.</param>
 /// <param name="Mutation">For <c>ALTER TABLE t UPDATE/DELETE</c> and lightweight <c>DELETE FROM t</c>: (database, table).</param>
+/// <param name="IgnoredFormat">For a query written with a trailing <c>FORMAT x</c> clause: the format name that was removed.</param>
 public sealed record ChStatement(string Text, int Start, string Kind, bool IsQuery, string? UseDatabase = null,
-    (string? Database, string Table)? Mutation = null)
+    (string? Database, string Table)? Mutation = null, string? IgnoredFormat = null)
 {
     public bool IsInsert => Kind == "INSERT";
 }
@@ -50,9 +51,48 @@ public static class ChSqlText
                 break;
             }
             var stmtText = sql[start..end];
-            result.Add(new ChStatement(stmtText, start, kind, IsQueryKind(kind, st, head), UseTarget(st, head), MutationTarget(st, head)));
+            var isQuery = IsQueryKind(kind, st, head);
+            string? ignored = null;
+            if (isQuery && kind is "SELECT" or "WITH" or "SHOW" or "DESCRIBE" or "DESC" or "EXISTS" && TrailingFormat(st) is { } f)
+            {
+                // The driver asks the server for its own wire format: a FORMAT clause of the user's query would make the response
+                // unreadable ("Unable to read beyond the end of the stream"). Rows are shown in the grid anyway.
+                stmtText = (sql[start..f.Start] + sql[f.End..end]).Trim();
+                ignored = f.Name;
+            }
+            result.Add(new ChStatement(stmtText, start, kind, isQuery, UseTarget(st, head), MutationTarget(st, head), ignored));
         }
         return result;
+    }
+
+    /// <summary>Output formats a trailing <c>FORMAT name</c> clause can name (a column called <c>format</c> is never followed by one of these).</summary>
+    private static readonly HashSet<string> OutputFormats = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "TabSeparated", "TabSeparatedRaw", "TabSeparatedWithNames", "TabSeparatedWithNamesAndTypes", "TSV", "TSVRaw", "TSVWithNames",
+        "TSVWithNamesAndTypes", "CSV", "CSVWithNames", "CSVWithNamesAndTypes", "CustomSeparated", "CustomSeparatedWithNames",
+        "CustomSeparatedWithNamesAndTypes", "Values", "Vertical", "JSON", "JSONStrings", "JSONCompact", "JSONCompactStrings",
+        "JSONColumns", "JSONColumnsWithMetadata", "JSONEachRow", "JSONEachRowWithProgress", "JSONStringsEachRow", "JSONCompactEachRow",
+        "JSONCompactEachRowWithNames", "JSONCompactEachRowWithNamesAndTypes", "JSONObjectEachRow", "JSONLines", "NDJSON", "TSKV",
+        "Pretty", "PrettyCompact", "PrettyCompactMonoBlock", "PrettyNoEscapes", "PrettySpace", "PrettyMonoBlock", "Prometheus",
+        "Protobuf", "ProtobufSingle", "Avro", "Parquet", "Arrow", "ArrowStream", "ORC", "Npy", "RowBinary", "RowBinaryWithNames",
+        "RowBinaryWithNamesAndTypes", "Native", "Null", "XML", "Markdown", "CapnProto", "LineAsString", "RawBLOB", "MsgPack",
+        "Template", "SQLInsert", "BSONEachRow", "Form",
+    };
+
+    /// <summary>The top-level <c>FORMAT name</c> clause at the end of a query (optionally followed by SETTINGS), or null.</summary>
+    private static (int Start, int End, string Name)? TrailingFormat(List<SqlToken> st)
+    {
+        var depth = 0;
+        for (var k = 0; k < st.Count - 1; k++)
+        {
+            var t = st[k];
+            if (t.IsPunct('(')) depth++;
+            else if (t.IsPunct(')')) depth--;
+            else if (depth == 0 && t.IsWord("FORMAT") && st[k + 1].Kind == SqlTokenKind.Word && OutputFormats.Contains(st[k + 1].Value)
+                     && (k + 2 == st.Count || st[k + 2].IsWord("SETTINGS")))
+                return (t.Start, st[k + 1].End, st[k + 1].Value);
+        }
+        return null;
     }
 
     private static int HeadIndex(List<SqlToken> st)

@@ -19,6 +19,22 @@ describe('explorer object actions', () => {
     expect(truncateSql(ref, 'tsql')).toBe('TRUNCATE TABLE dbo.Customers');
   });
 
+  it('ClickHouse: dictionaries, materialized views and SQL functions drop with the statements its parser has', () => {
+    const base = { database: null, schema: 'shop', name: 'product_dict', type: 'type' as const };
+    expect(dropSql(base, 'clickhouse')).toBe('DROP DICTIONARY shop.product_dict');
+    expect(dropSql({ ...base, type: 'mview', name: 'daily_sales' }, 'clickhouse')).toBe('DROP VIEW shop.daily_sales');
+    expect(dropSql({ ...base, type: 'func', name: 'tax' }, 'clickhouse')).toBe('DROP FUNCTION tax'); // global: no database prefix
+    expect(dropSql({ ...base, type: 'table', name: 'orders' }, 'clickhouse')).toBe('DROP TABLE shop.orders');
+    expect(dropSql({ ...base, type: 'view', name: 'v' }, 'clickhouse')).toBe('DROP VIEW shop.v');
+    expect(dropSql({ ...base, name: 'positive_int' }, 'pgsql', 'domain')).toBe('DROP DOMAIN shop.positive_int'); // others unchanged
+  });
+
+  it('ClickHouse: the UPDATE template is a mutation without the key columns in SET', () => {
+    const t = { database: null, schema: 'shop', name: 'events', type: 'table' as const };
+    expect(sqlTemplate('update', t, cols, 'clickhouse', 'shop')).toBe('ALTER TABLE events\nUPDATE Name = :Name,\n       City = :City\nWHERE Id = :Id;');
+    expect(sqlTemplate('delete', t, cols, 'clickhouse', 'shop')).toBe('DELETE FROM events\nWHERE Id = :Id;');
+  });
+
   it('Drop is offered only for droppable types of the dialect', () => {
     expect(canDrop('trigger', 'sqlite')).toBe(true);
     expect(canDrop('proc', 'sqlite')).toBe(false);

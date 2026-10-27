@@ -53,29 +53,68 @@ public static partial class ChLogSql
 
     private static string Contains(string col, string? q) => string.IsNullOrEmpty(q) ? "" : $" AND positionCaseInsensitiveUTF8({col}, {Literal(q)}) > 0";
 
-    public static string QueryLog(DateTime from, DateTime to, string? q, int limit) => $"""
+    /// <summary>
+    /// The level filter as a WHERE fragment (" AND (…)"), so the server applies it before LIMIT: a filter applied only to the
+    /// fetched page finds nothing when the wanted level is rare (a handful of failed queries among thousands of finished ones).
+    /// Empty when no filter is set or it covers every level the source emits. <paramref name="map"/> turns a level into its SQL
+    /// condition (null = the source cannot narrow it: no clause).
+    /// </summary>
+    private static string LevelClause(IReadOnlyList<string>? levels, IReadOnlyList<string> all, Func<string, string> map)
+    {
+        if (levels is not { Count: > 0 }) return "";
+        var wanted = levels.Select(l => l.Trim().ToLowerInvariant()).Select(l => l == LogLevels.Fatal ? LogLevels.Error : l).ToHashSet();
+        if (wanted.Contains(LogLevels.Unknown) || all.All(l => wanted.Contains(l))) return "";
+        var parts = all.Where(wanted.Contains).Select(map).ToList();
+        return parts.Count == 0 ? " AND 0" : " AND (" + string.Join(" OR ", parts) + ")";
+    }
+
+    private static readonly string[] QueryLogLevels = [LogLevels.Info, LogLevels.Warn, LogLevels.Error];
+
+    /// <summary>error = a failed query, warn = a finished one that took a second or more, info = the other finished ones.</summary>
+    private static string QueryLogLevel(string level) => level switch
+    {
+        LogLevels.Error => "type LIKE 'Exception%'",
+        LogLevels.Warn => "(type = 'QueryFinish' AND query_duration_ms >= 1000)",
+        _ => "(type = 'QueryFinish' AND query_duration_ms < 1000)",
+    };
+
+    public static string QueryLog(DateTime from, DateTime to, string? q, int limit, IReadOnlyList<string>? levels = null) => $"""
         SELECT {Iso("event_time_microseconds")} AS ts, toString(type) AS type, query_id, user, current_database AS db, query_duration_ms,
             read_rows, read_bytes, result_rows, written_rows, memory_usage, exception_code, exception, left(query, 8000) AS query,
             toString(query_kind) AS kind
         FROM system.query_log
-        WHERE type != 'QueryStart' AND event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("query", q)}
+        WHERE type != 'QueryStart' AND event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("query", q)}{LevelClause(levels, QueryLogLevels, QueryLogLevel)}
         ORDER BY event_time_microseconds DESC
         LIMIT {limit.ToString(CultureInfo.InvariantCulture)}
         """;
 
-    public static string TextLog(DateTime from, DateTime to, string? q, int limit) => $"""
+    private static readonly string[] TextLogLevels = [LogLevels.Debug, LogLevels.Info, LogLevels.Warn, LogLevels.Error];
+
+    private static string TextLogLevel(string level) => level switch
+    {
+        LogLevels.Error => "level IN ('Fatal', 'Critical', 'Error')",
+        LogLevels.Warn => "level = 'Warning'",
+        LogLevels.Info => "level IN ('Notice', 'Information')",
+        _ => "level IN ('Debug', 'Trace', 'Test')",
+    };
+
+    public static string TextLog(DateTime from, DateTime to, string? q, int limit, IReadOnlyList<string>? levels = null) => $"""
         SELECT {Iso("event_time_microseconds")} AS ts, toString(level) AS level, logger_name, message, query_id, thread_name
         FROM system.text_log
-        WHERE event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("message", q)}
+        WHERE event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("message", q)}{LevelClause(levels, TextLogLevels, TextLogLevel)}
         ORDER BY event_time_microseconds DESC
         LIMIT {limit.ToString(CultureInfo.InvariantCulture)}
         """;
 
-    public static string PartLog(DateTime from, DateTime to, string? q, int limit) => $"""
+    private static readonly string[] PartLogLevels = [LogLevels.Info, LogLevels.Error];
+
+    private static string PartLogLevel(string level) => level == LogLevels.Error ? "error != 0" : "error = 0";
+
+    public static string PartLog(DateTime from, DateTime to, string? q, int limit, IReadOnlyList<string>? levels = null) => $"""
         SELECT {Iso("event_time_microseconds")} AS ts, toString(event_type) AS event_type, database, table, part_name, partition_id,
             rows, size_in_bytes, duration_ms, error, exception, merged_from
         FROM system.part_log
-        WHERE event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("concat(database, '.', table, ' ', part_name, ' ', exception)", q)}
+        WHERE event_date >= toDate({Time(from)}) AND {Range("event_time_microseconds", from, to)}{Contains("concat(database, '.', table, ' ', part_name, ' ', exception)", q)}{LevelClause(levels, PartLogLevels, PartLogLevel)}
         ORDER BY event_time_microseconds DESC
         LIMIT {limit.ToString(CultureInfo.InvariantCulture)}
         """;
@@ -199,17 +238,17 @@ public sealed class ChLogSource(ISqlRunnerFactory runners) : ILogSource, IActivi
         {
             case QueryLog:
             {
-                var rows = await Run(runner, ChLogSql.QueryLog(from, to, query.Q, fetch), f.Needs("query_log"), ct).ConfigureAwait(false);
+                var rows = await Run(runner, ChLogSql.QueryLog(from, to, query.Q, fetch, query.Levels), f.Needs("query_log"), ct).ConfigureAwait(false);
                 return LogFilter.Page(ParseQueryLog(rows), query, sourceHasMore: rows.Rows.Count >= fetch);
             }
             case TextLog:
             {
-                var rows = await Run(runner, ChLogSql.TextLog(from, to, query.Q, fetch), f.Needs("text_log"), ct).ConfigureAwait(false);
+                var rows = await Run(runner, ChLogSql.TextLog(from, to, query.Q, fetch, query.Levels), f.Needs("text_log"), ct).ConfigureAwait(false);
                 return LogFilter.Page(ParseTextLog(rows), query, sourceHasMore: rows.Rows.Count >= fetch);
             }
             case PartLog:
             {
-                var rows = await Run(runner, ChLogSql.PartLog(from, to, query.Q, fetch), f.Needs("part_log"), ct).ConfigureAwait(false);
+                var rows = await Run(runner, ChLogSql.PartLog(from, to, query.Q, fetch, query.Levels), f.Needs("part_log"), ct).ConfigureAwait(false);
                 return LogFilter.Page(ParsePartLog(rows), query, sourceHasMore: rows.Rows.Count >= fetch);
             }
             default:

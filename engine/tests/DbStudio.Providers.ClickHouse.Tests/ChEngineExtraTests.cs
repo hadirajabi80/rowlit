@@ -55,6 +55,46 @@ public sealed class ChEngineExtraTests
     }
 
     [Fact]
+    public void CreateTable_WrapsMultiColumnKeysInParentheses_AsSystemTablesSpellsThem()
+    {
+        // system.tables.sorting_key reads "id, d": "ORDER BY id, d" is a syntax error on the server.
+        var sql = Assert.Single(new ChDdlScripter().ScriptTable(null, Table(new() { ["engine"] = "MergeTree", ["orderBy"] = "id, d", ["partitionBy"] = "toYYYYMM(d), id", ["primaryKey"] = "id" }), Ctx).Statements).Sql;
+        Assert.Contains("ORDER BY (id, d)", sql);
+        Assert.Contains("PARTITION BY (toYYYYMM(d), id)", sql);
+        Assert.Contains("PRIMARY KEY id", sql);
+        Assert.Equal("(a, b)", ChDdlScripter.WrapList("(a, b)"));
+        Assert.Equal("((a), (b))", ChDdlScripter.WrapList("(a), (b)"));
+        Assert.Equal("f(a, b)", ChDdlScripter.WrapList("f(a, b)"));
+        Assert.Equal("(', ', x)", ChDdlScripter.WrapList("', ', x"));
+        Assert.Equal("tuple()", ChDdlScripter.WrapList("tuple()"));
+    }
+
+    [Fact]
+    public void EngineExtra_KeepsTheEngineArguments()
+    {
+        // ReplacingMergeTree(ver) loses its version column when only the name is kept (and VersionedCollapsingMergeTree(sign, ver) becomes invalid).
+        var x = ChDesignerDatabase.EngineExtra("ReplacingMergeTree", "id", "id", "", "", "ReplacingMergeTree(ver) ORDER BY id SETTINGS index_granularity = 8192");
+        Assert.Equal("ReplacingMergeTree(ver)", x["engine"]);
+        Assert.Equal("SummingMergeTree((a, b))", ChDesignerDatabase.EngineExtra("SummingMergeTree", "k", "k", "", "", "SummingMergeTree((a, b)) ORDER BY k")["engine"]);
+        Assert.Equal("Distributed('c', 'db', 't', rand())", ChDesignerDatabase.EngineExtra("Distributed", "", "", "", "", "Distributed('c', 'db', 't', rand())")["engine"]);
+        Assert.Equal("S3('https://h/p(1)/*.csv', CSV)", ChDesignerDatabase.EngineExtra("S3", "", "", "", "", "S3('https://h/p(1)/*.csv', CSV)")["engine"]);
+        Assert.Equal("MergeTree", ChDesignerDatabase.EngineExtra("MergeTree", "id", "id", "", "", "MergeTree ORDER BY id")["engine"]);
+
+        // …and the scripter writes them back without appending "()" or dropping the arguments.
+        var sql = Assert.Single(new ChDdlScripter().ScriptTable(null, Table(new() { ["engine"] = "ReplacingMergeTree(ver)", ["orderBy"] = "id" }), Ctx).Statements).Sql;
+        Assert.Contains("ENGINE = ReplacingMergeTree(ver)\nORDER BY id", sql);
+    }
+
+    [Fact]
+    public void Alter_WithEngineArguments_IsStillANoOp()
+    {
+        var o = new Dictionary<string, string> { ["engine"] = "ReplacingMergeTree(ver)", ["orderBy"] = "id" };
+        var script = new ChDdlScripter().ScriptTable(Table(o), Table(new(o)), Ctx);
+        Assert.Empty(script.Statements);
+        Assert.Empty(script.Warnings);
+    }
+
+    [Fact]
     public void Diff_SeesAChangedExtra_IgnoringBlanks()
     {
         Assert.True(TableDiff.SameExtra(null, new() { ["ttl"] = " " }));

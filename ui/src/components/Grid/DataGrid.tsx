@@ -306,7 +306,7 @@ export function DataGrid(p: DataGridProps) {
       if (!c || !isEditableKind(c)) return false;
       if (r.ins) return editability.editableColumns.has(col);
       if (pending.deletes[r.src]) return false;
-      return editability.editableColumns.has(col);
+      return editability.editableColumns.has(col) && !editability.updateLocked?.has(col);
     },
     [editable, editability, columns, pending.deletes],
   );

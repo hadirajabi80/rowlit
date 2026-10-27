@@ -36,6 +36,13 @@ export function catalogTypeKind(connectionId: string, database: string | null, r
 
 /** The statement Drop… runs (`kind`: the kind of a type object: DROP TYPE / DROP DOMAIN / DROP XML SCHEMA COLLECTION). */
 export function dropSql(ref: Pick<ObjectRef, 'schema' | 'name' | 'type'>, dialect: Dialect, kind?: string | null): string {
+  if (dialect === 'clickhouse') {
+    // ClickHouse: dictionaries are DROP DICTIONARY (never DROP TYPE), a materialized view drops as a VIEW (the parser has no
+    // DROP MATERIALIZED VIEW), and SQL user-defined functions are global: DROP FUNCTION name, no database prefix.
+    if (ref.type === 'type') return `DROP DICTIONARY ${qualifiedName(ref, dialect, { always: true })}`;
+    if (ref.type === 'mview') return `DROP VIEW ${qualifiedName(ref, dialect, { always: true })}`;
+    if (ref.type === 'func') return `DROP FUNCTION ${quoteIdent(ref.name, dialect)}`;
+  }
   if (ref.type === 'type' && kind) return dropTypeSql(ref, kind, dialect);
   const kw = DROP_KEYWORD[ref.type] ?? ref.type.toUpperCase();
   const name = qualifiedName(ref, dialect, { always: dialect !== 'sqlite' });
@@ -87,6 +94,10 @@ export function sqlTemplate(kind: SqlTemplate, ref: ObjectRef, columns: readonly
     }
     case 'update': {
       const set = columns.filter((c) => !c.pk && !c.generated);
+      // ClickHouse has no UPDATE statement: a mutation (the sorting-key columns cannot be changed, hence no pk columns in SET).
+      if (dialect === 'clickhouse') {
+        return `ALTER TABLE ${name}\nUPDATE ${(set.length ? set : columns).map((c) => `${q(c.name)} = ${param(c.name, dialect)}`).join(',\n       ')}\nWHERE ${where || '1 = 0'};`;
+      }
       return `UPDATE ${name}\nSET ${(set.length ? set : columns).map((c) => `${q(c.name)} = ${param(c.name, dialect)}`).join(',\n    ')}\nWHERE ${where || '1 = 0'};`;
     }
     case 'delete':

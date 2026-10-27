@@ -127,8 +127,10 @@ export class GridMockEngine extends MockEngine {
   }
 
   private dml(sql: string, params: QueryParam[]): Interpreted | null {
-    let m = /^UPDATE\s+(?:\S+\.)?(\S+)\s+SET\s+(.+?)\s+WHERE\s+(.+)$/is.exec(sql);
+    // ClickHouse: ALTER TABLE t UPDATE a = x WHERE … [SETTINGS mutations_sync = 1] (a mutation, no row count in the real engine).
+    let m = /^(?:UPDATE\s+(?:\S+\.)?(\S+)\s+SET|ALTER\s+TABLE\s+(?:\S+\.)?(\S+)\s+UPDATE)\s+(.+?)\s+WHERE\s+(.+?)(?:\s+SETTINGS\s+.+)?$/is.exec(sql);
     if (m) {
+      m = [m[0], m[1] ?? m[2], m[3], m[4]] as unknown as RegExpExecArray;
       const t = this.tables.get(ident(m[1]));
       if (!t) return null;
       const sets = m[2].split(/\s*,\s*/).map((a) => a.split(/\s*=\s*/));
