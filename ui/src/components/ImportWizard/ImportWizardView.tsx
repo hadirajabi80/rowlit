@@ -57,7 +57,8 @@ export function ImportWizardView({ tab, visible }: TabViewProps) {
     }
     const ok = await useUi.getState().askConfirm({
       title: 'Close the import?', message: 'The file and the options you chose in this wizard are discarded. Nothing has been imported.',
-      confirmLabel: 'Close', cancelLabel: 'Keep editing',
+      // danger: Enter keeps the wizard ("Keep editing" has the focus); Esc then Enter must not throw the setup away.
+      confirmLabel: 'Close', cancelLabel: 'Keep editing', danger: true,
     });
     if (ok) closeTab();
   };

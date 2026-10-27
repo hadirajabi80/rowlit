@@ -198,9 +198,15 @@ export function CommandPalette() {
   const items = useMemo<Item[]>(() => {
     if (!open) return [];
     if (objectMode) {
-      const hits: Item[] = searchObjects(groups, text, 200).map((h) => ({
-        kind: 'object', key: `${h.entry.connectionId}|${h.entry.database}|${h.entry.schema}|${h.entry.type}|${h.entry.name}`, entry: h.entry, match: h.match,
-      }));
+      // Overloaded routines share connection, schema, type and name: a repeated key makes React duplicate / drop rows
+      // (stale rows that do not match the query), so every repeat gets a counter.
+      const seen = new Map<string, number>();
+      const hits: Item[] = searchObjects(groups, text, 200).map((h) => {
+        const base = `${h.entry.connectionId}|${h.entry.database}|${h.entry.schema}|${h.entry.type}|${h.entry.name}`;
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        return { kind: 'object', key: n ? `${base}#${n}` : base, entry: h.entry, match: h.match };
+      });
       const p = parsed.pattern.toLowerCase();
       // Unloaded connections come last; with a query, those whose name matches first among them.
       const loads = unloaded

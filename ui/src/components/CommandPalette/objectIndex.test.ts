@@ -83,3 +83,15 @@ describe('object index', () => {
     expect(g2[0]).toBe(g1[0]);
   });
 });
+
+describe('overloaded routines', () => {
+  it('are indexed once per name (the catalog lists one object per overload; Enter opens by name)', () => {
+    const objects: CatalogObject[] = [
+      { t: 'func', n: 'price_range', p: [['x', 'int', 'in', 0]] }, { t: 'func', n: 'price_range', p: [['x', 'text', 'in', 0]] },
+      { t: 'proc', n: 'price_range' }, { t: 'table', n: 'orders' },
+    ];
+    const d = { ...db('c_o', 'Shop', 0, 0), loaded: { public: { name: 'public', version: 1, objects } } as Record<string, CatalogSchema> };
+    const entries = collectEntries({ k: d }, false, false).flat();
+    expect(entries.map((e) => `${e.type}:${e.name}`)).toEqual(['func:price_range', 'proc:price_range', 'table:orders']);
+  });
+});

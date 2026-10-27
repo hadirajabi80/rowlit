@@ -16,6 +16,15 @@ export const IMPORT_FILE_FILTERS = [
   { name: 'JSON / NDJSON', extensions: ['json', 'ndjson', 'jsonl'] },
 ];
 
+/**
+ * A path pasted into a "file path" field. Windows "Copy as path" wraps it in double quotes; the engine accepts that, but
+ * the file card and the summaries would show `name.csv"`. Only a matching pair around the whole text is removed.
+ */
+export function cleanPastedPath(raw: string): string {
+  const t = raw.trim();
+  return t.length > 1 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1).trim() : raw;
+}
+
 export function fileNameOf(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }

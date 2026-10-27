@@ -1934,6 +1934,9 @@ body.resizing-row .splitter-horizontal {
   margin-top: 2px;
   user-select: text;
 }
+.test-hint {
+  margin-top: 6px;
+}
 .test-info {
   display: grid;
   grid-template-columns: auto 1fr;

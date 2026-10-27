@@ -475,7 +475,7 @@ export function Explorer() {
         <EmptyState
           icon={<Database size={32} strokeWidth={1.25} />}
           title="Add your first connection"
-          hint="SQL databases, Redis, MongoDB or Kafka."
+          hint="SQL databases, Redis, MongoDB, Kafka, Elasticsearch or Cassandra."
           action={{ command: 'file.newConnection', label: 'New connection' }}
           secondary={{ command: 'file.sampleDb', label: 'Try the sample database' }}
         />

@@ -137,6 +137,19 @@ describe('DataGrid', () => {
     expect(open.fromKeyboard).toBe(true);
   });
 
+  it('the cell menu can sort by the focused column, so a keyboard user does not need the header', () => {
+    const onSortChange = vi.fn();
+    render(<><DataGrid {...props({ serverSort: { sort: [], onSortChange } })} /><MenuHost /></>);
+    selectCell(1, 2);
+    act(() => canvas().focus());
+    fireEvent.keyDown(canvas(), { key: 'F10', code: 'F10', shiftKey: true });
+    const item = screen.getAllByRole('menuitem').find((m) => m.textContent?.includes('Sort by this column'))!;
+    expect(item).toBeTruthy();
+    fireEvent.click(item);
+    fireEvent.click(screen.getAllByRole('menuitem').find((m) => m.textContent?.trim() === 'Descending')!);
+    expect(onSortChange).toHaveBeenCalledWith([{ column: 1, dir: 'desc' }]);
+  });
+
   it('the ContextMenu key opens the header menu when a column is the target', () => {
     render(<><DataGrid {...props()} /><MenuHost /></>);
     act(() => {

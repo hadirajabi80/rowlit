@@ -531,7 +531,7 @@ export const CORE_COMMANDS: Command<never>[] = [
   },
 
   // Help
-  { id: 'help.about', title: 'About Rowlit', category: 'Help', icon: 'Info', run: () => toast('info', `Rowlit ${getPlatform().appVersion}`, 'See your data in a better light. A fast desktop client for SQL Server, Oracle, PostgreSQL, SQLite, Redis, MongoDB and Kafka.') },
+  { id: 'help.about', title: 'About Rowlit', category: 'Help', icon: 'Info', run: () => toast('info', `Rowlit ${getPlatform().appVersion}`, 'See your data in a better light. A fast desktop client for SQL Server, Oracle, PostgreSQL, MySQL, MariaDB, SQLite, ClickHouse, Snowflake, Redis, MongoDB, Kafka, Elasticsearch and Cassandra.') },
   {
     id: 'help.checkForUpdates', title: 'Check for Updates…', category: 'Help', icon: 'RefreshCw', keywords: 'update upgrade new version release',
     run: () => checkForUpdatesNow(),

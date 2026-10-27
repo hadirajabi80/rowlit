@@ -240,6 +240,8 @@ describe('stepper and navigation', () => {
     fireEvent.change(screen.getByLabelText('File path'), { target: { value: CSV } });
     fireEvent.keyDown(screen.getByLabelText('File path'), { key: 'Escape' });
     await waitFor(() => expect(useUi.getState().confirm?.title).toBe('Close the import?'));
+    // Enter on the dialog keeps the wizard: Cancel ("Keep editing") has the initial focus on a danger confirmation.
+    expect(useUi.getState().confirm?.danger).toBe(true);
     expect(close).toHaveBeenCalledTimes(1);
     act(() => useUi.getState().resolveConfirm(true));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
