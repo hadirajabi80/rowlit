@@ -120,7 +120,7 @@ export class Binder {
     }
     const pred = ref.kind === 'function' ? (e: ObjectEntry) => e.type === 'tablefunc' || e.isTabular : TABULAR;
     const raw = this.index.resolveRaw(parts, (e) => e.type === 'synonym' || pred(e));
-    const sfFn = ref.kind === 'function' && this.index.spec.id === 'snowflake'; // FLATTEN / SPLIT_TO_TABLE output columns
+    const sfFn = ref.kind === 'function' && (this.index.spec.id === 'snowflake' || this.index.spec.id === 'tsql'); // FLATTEN / SPLIT_TO_TABLE / STRING_SPLIT / OPENJSON output columns
     const pgFn = ref.kind === 'function' && this.index.spec.id === 'pgsql';
     if (raw) {
       const syn = raw.type === 'synonym' ? raw : null;
@@ -346,6 +346,16 @@ export class Binder {
       if (obj) return { kind: 'object', entry: obj };
       const temp = this.symbols.tables.get(q.text.toUpperCase());
       if (temp) return { kind: 'record', name: temp.name, columns: this.tempColumns(temp), variable: { name: temp.name, kind: 'tableVar', type: 'TABLE', range: temp.defRange } };
+      // T-SQL OUTPUT inserted.| / deleted.|: the pseudo tables have the columns of the DML target
+      if (idx.spec.id === 'tsql' && !q.quoted && /^(inserted|deleted)$/i.test(q.text)) {
+        for (let s: Scope | null = scope; s; s = s.parent) {
+          if (!s.targetTable || !['insert', 'update', 'delete', 'merge'].includes(s.kind)) continue;
+          const tgt = this.target(s);
+          if (!tgt) break;
+          const nm = q.text.toLowerCase();
+          return { kind: 'record', name: nm, columns: tgt.columns(), variable: { name: nm, kind: 'record', type: `${nm} row of ${tgt.display}`, range: tgt.ref.nameRange } };
+        }
+      }
       return null;
     }
     if (parts.length === 2) {

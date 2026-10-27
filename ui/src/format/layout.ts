@@ -59,6 +59,17 @@ const DDL_WORDS = set(`
   AUTOINCREMENT STORED ONLINE FILLFACTOR PAD_INDEX DATA_COMPRESSION SORT_IN_TEMPDB DROP_EXISTING CHAR BYTE`);
 /** MySQL table / column options and ALTER words, upper-cased in CREATE / ALTER statements (never in a name position). */
 const MYSQL_DDL_WORDS = set('AUTO_INCREMENT ENGINE CHARSET CHARACTER COMMENT ROW_FORMAT ALGORITHM INVISIBLE VISIBLE FIRST AFTER MODIFY CHANGE');
+/** Snowflake object kinds / plurals after CREATE, ALTER, DROP, SHOW, USE, DESCRIBE, GRANT (`SHOW TABLES`, `USE ROLE r`). */
+const SF_KIND_WORDS = set(`
+  WAREHOUSE WAREHOUSES STAGE STAGES TASK TASKS STREAM STREAMS PIPE PIPES PROCEDURE PROCEDURES FUNCTION FUNCTIONS
+  DYNAMIC TRANSIENT SECURE TEMPORARY TEMP EXTERNAL HYBRID ICEBERG EVENT MATERIALIZED SEQUENCES TABLES VIEWS SCHEMAS
+  DATABASES ROLE ROLES USER USERS INTEGRATION INTEGRATIONS NETWORK POLICY POLICIES MASKING TAG TAGS ALERT ALERTS SHARE
+  SHARES RESOURCE MONITOR MONITORS FORMAT FORMATS FILE GRANTS PARAMETERS COLUMNS OBJECTS SECONDARY ACCOUNT ACCOUNTS
+  LOCAL GLOBAL REPLICATION FAILOVER CONNECTION CONNECTIONS CLASS NOTEBOOK STREAMLIT SESSION`);
+/** Words that may sit between the verb and an object kind: `CREATE OR REPLACE SECURE VIEW`, `SHOW TERSE TABLES`, `SHOW ALL ROLES`. */
+const SF_KIND_LEADERS = set('OR TERSE ALL HISTORY IF NOT EXISTS');
+/** Snowflake ALTER … <action> words: the word after them is a name, not another action. */
+const SF_ALTER_ACTIONS = set('ADD RENAME SWAP SUSPEND RESUME REFRESH RECLUSTER COLUMN');
 /** PL/SQL subprogram header modifiers. */
 const HEADER_WORDS = set('DETERMINISTIC PIPELINED PARALLEL_ENABLE RESULT_CACHE RELIES_ON AUTHID DEFINER CURRENT_USER ACCESSIBLE AGGREGATE SHARING METADATA');
 const OBJECT_WORDS = set('TYPE BODY PACKAGE SEQUENCE SYNONYM MATERIALIZED DIRECTORY CONTEXT LIBRARY EDITIONABLE NONEDITIONABLE FORCE NOFORCE');
@@ -1511,6 +1522,10 @@ export class Layout {
       const r = this.pgContextualKw(k, p, n);
       if (r !== null) return r;
     }
+    if (this.d === 'snowflake' && p !== '.' && n !== '.' && n !== '(') {
+      const r = this.sfContextualKw(k, p, n, pk);
+      if (r !== null) return r;
+    }
     if (t.u === 'INCLUDE' && n === '(') return this.verbCtx === 'CREATE';
     if ((t.u === 'OVER' || t.u === 'FILTER' || t.u === 'COLUMNS') && n === '(') return true;
     if (p === 'PRAGMA') return this.d === 'plsql';
@@ -1582,6 +1597,36 @@ export class Layout {
   }
 
   /** PostgreSQL non-reserved words in keyword positions; null = no decision (generic rules apply). */
+  /**
+   * Snowflake: object-kind words (WAREHOUSE, PROCEDURE, STAGE, SHOW TABLES, USE ROLE …) and the clause words of CREATE /
+   * ALTER (CLUSTER BY, CLONE, RETURNS, LANGUAGE, COMMENT, DEFAULT, ALTER … ADD / RENAME) are keywords in their position
+   * and never in a name position (`CREATE TABLE stage (…)`, `ADD COLUMN refresh`); null = not one of these words.
+   */
+  private sfContextualKw(k: number, p: string, n: string, pk: string | undefined): boolean | null {
+    const u = this.S(k)!.u;
+    const verb = this.verbCtx;
+    const DDL = verb === 'CREATE' || verb === 'ALTER';
+    if (p === 'LANGUAGE' && DDL && (u === 'JAVASCRIPT' || u === 'PYTHON' || u === 'JAVA' || u === 'SCALA')) return true;
+    if (SF_KIND_WORDS.has(u)) {
+      if (!['CREATE', 'ALTER', 'DROP', 'UNDROP', 'SHOW', 'USE', 'DESCRIBE', 'DESC', 'GRANT', 'REVOKE', 'COMMENT'].includes(verb)) return null;
+      if (p === verb || p === 'REPLACE' || SF_KIND_WORDS.has(p) || SF_KIND_LEADERS.has(p)) return true;
+      if ((verb === 'GRANT' || verb === 'REVOKE') && (p === 'ON' || p === 'TO' || p === 'FROM' || p === 'IN' || p === 'ALL' || p === 'FUTURE')) return n !== '=';
+      return null;
+    }
+    if (!DDL) return null;
+    const namePrev = pk === 'ident' || pk === 'quotedIdent' || p === ')';
+    switch (u) {
+      case 'CLUSTER': return n === 'BY' && p !== '(' && p !== ',';
+      case 'CLONE': return namePrev && n !== '=' && p !== 'ADD' && p !== 'COLUMN';
+      case 'RETURNS': case 'LANGUAGE': return namePrev || p === ')';
+      case 'COMMENT': return n === '=' || this.S(k + 1)?.kind === 'string' ? p !== '(' && p !== ',' && p !== 'COLUMN' : null;
+      case 'DEFAULT': return p !== '(' && p !== ',' && p !== 'COLUMN' && p !== 'ADD' && n !== '=' ? (pk === 'ident' || pk === 'quotedIdent' || p === ')' || pk === 'keyword' || SF_KIND_WORDS.has(p)) : null;
+      case 'ADD': case 'RENAME': case 'SWAP': case 'SUSPEND': case 'RESUME': case 'REFRESH': case 'RECLUSTER':
+        return verb === 'ALTER' && namePrev && !SF_ALTER_ACTIONS.has(p) && n !== '=' ? true : null;
+      default: return null;
+    }
+  }
+
   private pgContextualKw(k: number, p: string, n: string): boolean | null {
     const u = this.S(k)!.u;
     if (p === '.' || n === '.') return false;

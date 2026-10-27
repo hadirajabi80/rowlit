@@ -39,6 +39,8 @@ export interface MarkerData {
   statementStart?: boolean;
   /** INSERT … ON CONFLICT: conflict target (`ON CONFLICT |`, `(cols)`) or action (`DO NOTHING` / `DO UPDATE SET`). */
   conflict?: 'target' | 'columns' | 'action' | 'do';
+  /** Snowflake `USE [DATABASE | SCHEMA | …] |`: what the name is (`object` = no keyword typed yet, `other` = warehouse / role: not completed). */
+  use?: 'database' | 'schema' | 'object' | 'other';
 }
 
 export interface Marker { pos: number; clause: ClauseKind; data?: MarkerData }
