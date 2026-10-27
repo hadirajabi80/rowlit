@@ -351,7 +351,9 @@ const keySugs = (defs: readonly KeyDef[], siblings: readonly string[]): DslSugge
 export function suggest(text: string, fields: readonly EsField[], start: DslContext = { kind: 'root' }): { cursor: JsonCursor; items: DslSuggestion[] } {
   const cursor = analyzeJson(text);
   if (cursor.container === 'none') return { cursor, items: [] };
-  const ctx = contextOf(cursor.path, start);
+  const raw = contextOf(cursor.path, start);
+  // `"filter": { "…` (a single clause instead of an array) sits in a query list's own object: it takes query clauses
+  const ctx: DslContext = raw.kind === 'queryList' && cursor.container === 'obj' ? { kind: 'query' } : raw;
   const items: DslSuggestion[] = [];
   if (cursor.inKey) {
     switch (ctx.kind) {

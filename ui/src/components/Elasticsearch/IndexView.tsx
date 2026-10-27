@@ -286,7 +286,8 @@ function StatsPanel({ detail }: { detail: EsIndexDetail | null }) {
   return (
     <div className="es-scroll es-pad">
       <div className="es-tiles" role="list" aria-label="Index statistics">
-        <Tile label="Documents (primaries)" value={formatCount(n(p, 'docs.count'))} sub={`${formatCount(n(p, 'docs.deleted'))} deleted`} />
+        <Tile label="Lucene documents (primaries)" value={formatCount(n(p, 'docs.count'))}
+          sub={`${formatCount(n(p, 'docs.deleted'))} deleted · nested objects included`} />
         <Tile label="Store (primaries)" value={formatBytes(n(p, 'store.size_in_bytes'))} sub={`${formatBytes(n(t, 'store.size_in_bytes'))} with replicas`} />
         <Tile label="Indexing ops" value={formatCount(n(t, 'indexing.index_total'))} sub={`avg ${avg(n(t, 'indexing.index_time_in_millis'), n(t, 'indexing.index_total'))}`} />
         <Tile label="Queries" value={formatCount(n(t, 'search.query_total'))} sub={`avg ${avg(n(t, 'search.query_time_in_millis'), n(t, 'search.query_total'))}`} />

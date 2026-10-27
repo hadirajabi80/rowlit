@@ -5,8 +5,8 @@ import { aggViews } from '../aggs';
 import { bodyForSend, indexOfPath, isNdjsonPath, isSearchPath, parseConsole, requestAt, requestsIn, toCurl } from '../console';
 import { flattenSource, gridBody, gridColumns, sortFieldFor } from '../docs';
 import { analyzeJson, contextOf, suggest } from '../dsl';
-import { formatBytes, formatCount, indexNameError } from '../format';
-import { parseLenient, stripJsonExtras } from '../json';
+import { formatBytes, formatCount, formatMs, indexNameError } from '../format';
+import { bodyIndexSetting, parseLenient, stripJsonExtras } from '../json';
 import { EsMock } from '../mock/engine';
 
 const FIELDS: EsField[] = [
@@ -112,7 +112,8 @@ describe('JSON, grid and formatting helpers', () => {
     expect(flattenSource({ a: 1, b: { c: 2, d: { e: 3 } }, f: [1] })).toEqual({ a: 1, 'b.c': 2, 'b.d': { e: 3 }, f: [1] });
     expect(gridColumns([{ source: { a: 1 } }, { source: { b: { c: 1 } } }] as never)).toEqual(['a', 'b.c']);
     expect(gridBody({ q: 'status:paid', sortField: 'total', sortDir: 'desc', from: 0, size: 50 })).toEqual({
-      query: { query_string: { query: 'status:paid', default_operator: 'AND', lenient: true } }, sort: [{ total: { order: 'desc', unmapped_type: 'keyword' } }],
+      query: { query_string: { query: 'status:paid', default_operator: 'AND', lenient: true } }, version: true,
+      sort: [{ total: { order: 'desc', unmapped_type: 'keyword' } }],
     });
     expect(sortFieldFor('name', FIELDS)).toBe('name.keyword');
     expect(sortFieldFor('total', FIELDS)).toBe('total');
@@ -179,5 +180,47 @@ describe('mock cluster', () => {
     expect(cat.body.split('\n')[0]).toMatch(/^health\s+status\s+index/);
     expect(es.console('GET', '/nope/_search', null, false).status).toBe(404);
     expect(() => es.console('DELETE', '/shop-orders', null, true)).toThrow(/read-only/);
+  });
+});
+
+describe('QA round fixes', () => {
+  it('completes query clauses inside a single-object bool clause', () => {
+    const labels = (t: string) => suggest(t, FIELDS).items.map((i) => i.label);
+    expect(labels('{ "query": { "bool": { "filter": { "')).toContain('term');
+    expect(labels('{ "query": { "bool": { "must": { "match": { "')).toContain('name');
+    expect(labels('{ "query": { "bool": { "filter": { "term": { "status": "a" }, "')).not.toContain('term');
+    expect(labels('{ "query": { "bool": { "must": [ { "')).toContain('range');
+    // between the items of the array itself no key is offered
+    expect(labels('{ "query": { "bool": { "must": [ ')).toEqual([]);
+  });
+
+  it('rounds counts and durations before choosing the unit', () => {
+    expect(formatCount(99_949)).toBe('99.9k');
+    expect(formatCount(99_950)).toBe('100k');
+    expect(formatCount(999_499)).toBe('999k');
+    expect(formatCount(999_500)).toBe('1.0M');
+    expect(formatCount(999_999_999)).toBe('1.0B');
+    expect(formatCount(12_345)).toBe('12.3k');
+    expect(formatMs(119_600)).toBe('2 min 0 s');
+    expect(formatMs(59_949)).toBe('59.9 s');
+    expect(formatMs(59_950)).toBe('1 min 0 s');
+    expect(formatMs(3_599_700)).toBe('1 h 0 min');
+    expect(formatMs(3_725_000)).toBe('1 h 2 min');
+  });
+
+  it('reads the index of a console path without throwing on a stray % or date math', () => {
+    expect(indexOfPath('/shop%2Dorders/_search')).toBe('shop-orders');
+    expect(indexOfPath('/100%/_search')).toBe('100%');
+    expect(indexOfPath('/<logs-{now/d}>/_search')).toBeNull();
+    expect(indexOfPath('/_cat/indices')).toBeNull();
+  });
+
+  it('finds shards/replicas settings typed into the create-index body', () => {
+    expect(bodyIndexSetting({ settings: { index: { number_of_shards: 3 } } }, 'number_of_shards')).toBe('3');
+    expect(bodyIndexSetting({ settings: { number_of_replicas: '0' } }, 'number_of_replicas')).toBe('0');
+    expect(bodyIndexSetting({ settings: { 'index.number_of_shards': 2 } }, 'number_of_shards')).toBe('2');
+    expect(bodyIndexSetting({ mappings: {} }, 'number_of_shards')).toBeNull();
+    expect(bodyIndexSetting(undefined, 'number_of_shards')).toBeNull();
+    expect(bodyIndexSetting({ settings: { analysis: {} } }, 'number_of_replicas')).toBeNull();
   });
 });

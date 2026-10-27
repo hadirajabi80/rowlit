@@ -9,7 +9,7 @@ namespace DbStudio.Sources.Elasticsearch.Services;
 /// DELETE, HEAD; the path is sanitised (no scheme/host, no dot segments, no CR/LF, backslash or fragment). Read-only
 /// connections allow GET/HEAD and the read-only POST APIs only. Elasticsearch error statuses are answered in the body.
 /// </summary>
-public sealed class ConsoleService
+public sealed partial class ConsoleService
 {
     private static readonly HashSet<string> Methods = new(StringComparer.Ordinal) { "GET", "POST", "PUT", "DELETE", "HEAD" };
 
@@ -18,6 +18,8 @@ public sealed class ConsoleService
     {
         "_search", "_msearch", "_count", "_mget", "_field_caps", "_explain", "_analyze", "_validate", "_render", "_sql", "_eql",
         "_async_search", "_pit", "_termvectors", "_mtermvectors", "_plugins/_sql", "_plugins/_ppl", "_opendistro/_sql",
+        // ES|QL (8.11+), kNN search, ranking evaluation and vector tiles only read
+        "_query", "_knn_search", "_rank_eval", "_mvt",
     };
 
     public async Task<EsConsoleResponse> RunAsync(EsClient c, EsConsoleRequest? req, CancellationToken ct)
@@ -62,6 +64,10 @@ public sealed class ConsoleService
         if (!p.StartsWith('/')) p = "/" + p;
         var q = p.IndexOf('?');
         var pathPart = q >= 0 ? p[..q] : p;
+        // Date math index names (`<logs-{now/d}>`) hold a '/' that belongs to the name, not to the path: send it as %2F
+        // (Elasticsearch answers "no handler found" for the raw slash; Kibana's console encodes it the same way).
+        if (pathPart.Contains('<', StringComparison.Ordinal))
+            pathPart = DateMath().Replace(pathPart, m => m.Value.Replace("/", "%2F", StringComparison.Ordinal));
         foreach (var seg in pathPart.Split('/'))
         {
             var decoded = Uri.UnescapeDataString(seg);
@@ -71,6 +77,9 @@ public sealed class ConsoleService
         if (pathPart.Contains(' ')) pathPart = pathPart.Replace(" ", "%20", StringComparison.Ordinal);
         return q >= 0 ? pathPart + p[q..] : pathPart;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("<[^<>]*>")]
+    private static partial System.Text.RegularExpressions.Regex DateMath();
 
     private static string PathOnly(string path) => path.Split('?')[0];
 

@@ -3,7 +3,7 @@
 // methods, API paths, index names and DSL keys/fields in search bodies. Response pane (read-only, foldable) with
 // status and time; history per connection; copy as cURL; auto-indent of the request at the cursor.
 import { displayShortcut } from '../../commands/keys';
-import { Braces, Clock, Copy, Play, PlayCircle, Trash2 } from 'lucide-react';
+import { Braces, Clock, Copy, Play, PlayCircle, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { bodyForSend, formatRequest, parseConsole, requestAt, requestsIn, toCurl, type ConsoleRequest } from '../../es/console';
@@ -107,6 +107,12 @@ export function ConsoleView({ tab, theme, cid }: TabViewProps & { cid: string })
     }
   }, [cid]);
 
+  /** Frees the view from a slow request (requests can take minutes); the cluster may still finish it. */
+  const stop = () => {
+    ctl.current?.abort();
+    setBusy(false);
+  };
+
   const runAtCursor = () => {
     const reqs = parseConsole(textRef.current);
     const sel = editor.current?.selectionLines();
@@ -176,7 +182,11 @@ export function ConsoleView({ tab, theme, cid }: TabViewProps & { cid: string })
           )}
         </div>
         <button type="button" className="btn btn-xs" onClick={runAll} disabled={busy} title={`Run every request (${displayShortcut('Mod+Shift+Enter')})`}><PlayCircle size={13} aria-hidden /> Run all</button>
-        <button type="button" className="btn btn-xs btn-primary" onClick={runAtCursor} disabled={busy} title={`Run the request at the cursor (${displayShortcut('Mod+Enter')})`}><Play size={13} aria-hidden /> {busy ? 'Running…' : 'Run'}</button>
+        {busy ? (
+          <button type="button" className="btn btn-xs" onClick={stop} title="Stop waiting for the answer (the cluster may still finish the request)"><X size={13} aria-hidden /> Cancel</button>
+        ) : (
+          <button type="button" className="btn btn-xs btn-primary" onClick={runAtCursor} title={`Run the request at the cursor (${displayShortcut('Mod+Enter')})`}><Play size={13} aria-hidden /> Run</button>
+        )}
       </ViewHeader>
       <div className="es-split">
         <div className="es-split-left">

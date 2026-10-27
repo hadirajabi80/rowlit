@@ -2,7 +2,7 @@
 // explorer tree, commands (read-only), overview, indices, documents (edit with optimistic concurrency), search with
 // aggregations, Dev Tools console, SQL, dialogs (create/delete index, reindex job), tasks stream.
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../../api/client';
 import { engineSocket } from '../../../api/ws';
 import { getCommand, isEnabled, runCommand } from '../../../commands/registry';
@@ -251,6 +251,21 @@ describe('dialogs', () => {
     fireEvent.change(name, { target: { value: 'new-index' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(esConn(CID).indices.data?.some((i) => i.name === 'new-index')).toBe(true));
+  });
+
+  it('create index lets shards typed into the settings JSON win over the form fields', async () => {
+    const create = vi.spyOn(api.es, 'createIndex');
+    runCommand('es.createIndex', { kind: 'connection', connectionId: CID });
+    fireEvent.change(await screen.findByLabelText(/^Name/), { target: { value: 'sharded' } });
+    expect(screen.getByLabelText('Primary shards')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Index body'), { target: { value: '{ "settings": { "index": { "number_of_shards": 3 } }, }' } });
+    await waitFor(() => expect(screen.getByLabelText('Primary shards')).toBeDisabled());
+    expect(screen.getByLabelText('Primary shards')).toHaveValue('3');
+    expect(screen.getByLabelText('Replicas')).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][1]).toMatchObject({ name: 'sharded', shards: null, replicas: 1 });
+    create.mockRestore();
   });
 
   it('delete index needs the typed name', async () => {

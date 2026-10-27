@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DbStudio.Core.Models;
 using DbStudio.Core.Services;
 using DbStudio.Sources.Elasticsearch.Services;
@@ -225,6 +226,8 @@ public sealed class ConsoleTests
     [InlineData("  /shop-orders/_search  ", "/shop-orders/_search")]
     [InlineData("", "/")]
     [InlineData("/_search?q=a b", "/_search?q=a b")]
+    [InlineData("/<logs-{now/d}>/_search", "/<logs-{now%2Fd}>/_search")]
+    [InlineData("<logs-{now/d{yyyy.MM.dd|+01:00}}>/_count?q=a/b", "/<logs-{now%2Fd{yyyy.MM.dd|+01:00}}>/_count?q=a/b")]
     public void Sanitizes_paths(string raw, string expected) => Assert.Equal(expected, ConsoleService.SanitizePath(raw));
 
     [Theory]
@@ -250,6 +253,8 @@ public sealed class ConsoleTests
     [InlineData("POST", "/_plugins/_sql", true)]
     [InlineData("POST", "/shop/_explain/1", true)]
     [InlineData("POST", "/_analyze", true)]
+    [InlineData("POST", "/_query?format=json", true)]
+    [InlineData("POST", "/_query/async", true)]
     [InlineData("POST", "/shop/_validate/query", true)]
     [InlineData("POST", "/_search/scroll", true)]
     [InlineData("POST", "/shop/_doc", false)]
@@ -487,6 +492,23 @@ public sealed class ImportExportUnitTests
     }
 
     [Fact]
+    public async Task Import_takes_ids_from_nested_fields_and_reports_documents_without_one()
+    {
+        Assert.Equal("7", JobsService.IdOf(System.Text.Json.Nodes.JsonNode.Parse("""{"a":{"id":7}}""")!.AsObject(), "a.id"));
+        Assert.Equal("x", JobsService.IdOf(System.Text.Json.Nodes.JsonNode.Parse("""{"a.id":"x","a":{"id":7}}""")!.AsObject(), "a.id"));
+        Assert.Null(JobsService.IdOf(System.Text.Json.Nodes.JsonNode.Parse("""{"a":{"id":{"x":1}},"b":""}""")!.AsObject(), "a.id"));
+        Assert.Null(JobsService.IdOf(System.Text.Json.Nodes.JsonNode.Parse("""{"b":""}""")!.AsObject(), "b"));
+
+        var fake = new FakeEs();
+        await using var c = await Es.ClientAsync(fake);
+        var lines = "{\"k\":{\"id\":\"A\"},\"n\":1}\n{\"n\":2}\n{\"k\":{\"id\":\"C\"},\"n\":3}\n";
+        var r = await new JobsService().ImportAsync(c, Plan("ndjson", lines, idField: "k.id"), null, default);
+        Assert.Equal((2, 1), (r.Indexed, r.Failed));
+        Assert.Equal("document 2: no value in the id field 'k.id'", Assert.Single(r.Errors));
+        Assert.Equal(["A", "C"], fake.Indices["shop"].Docs.Keys.Order());
+    }
+
+    [Fact]
     public async Task Import_cuts_bulk_requests_by_size()
     {
         var fake = new FakeEs();
@@ -528,6 +550,64 @@ public sealed class ImportExportUnitTests
         Assert.Equal("_id,n,name,address.city,tags", rows[0].TrimEnd('\r'));
         Assert.Equal("d0001,1,\"علی, \"\"q\"\"\",Berlin,\"[\"\"a\"\",\"\"b\"\"]\"", rows[1].TrimEnd('\r'));
         Assert.Equal(3, rows.Length);
+    }
+
+    [Fact]
+    public async Task Csv_export_header_covers_fields_that_appear_after_the_first_page()
+    {
+        var fake = new FakeEs();
+        // 2,500 documents = three scroll pages; only the last document has `late` and `deep.x`
+        fake.Add("het", Enumerable.Range(1, 2500).Select(i => ($"d{i:0000}", i == 2500 ? (object)new { n = i, late = "hello, world", deep = new { x = 7 } } : new { n = i })).ToArray());
+        await using var c = await Es.ClientAsync(fake);
+        var csv = new MemoryStream();
+        Assert.Equal(2500, await new JobsService().ExportAsync(c, JobsService.ParseExport(new EsExportRequest { Index = "het", Format = "csv" }), csv, null, default));
+        var rows = Encoding.UTF8.GetString(csv.ToArray()).TrimStart('﻿').Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal("_id,n,late,deep.x", rows[0].TrimEnd('\r'));
+        Assert.Equal(2501, rows.Length);
+        Assert.Equal("d0001,1,,", rows[1].TrimEnd('\r'));
+        Assert.Equal("d2500,2500,\"hello, world\",7", rows[2500].TrimEnd('\r'));
+        // an explicit field list is streamed as is
+        var picked = new MemoryStream();
+        await new JobsService().ExportAsync(c, JobsService.ParseExport(new EsExportRequest { Index = "het", Format = "csv", Fields = ["late"], Max = 1 }), picked, null, default);
+        Assert.StartsWith("_id,late", Encoding.UTF8.GetString(picked.ToArray()).TrimStart('﻿'));
+    }
+
+    [Fact]
+    public async Task Csv_import_keeps_long_ids_exact_and_oversized_integers_as_text()
+    {
+        var docs = await Read(Plan("csv", "id,big,ratio\n1234567890123456789,12345678901234567890,0.5\n"));
+        Assert.Equal(1234567890123456789L, docs[0].Source["id"]!.GetValue<long>());
+        Assert.Equal("12345678901234567890", docs[0].Source["big"]!.GetValue<string>());
+        Assert.Equal(0.5, docs[0].Source["ratio"]!.GetValue<double>());
+    }
+
+    [Fact]
+    public async Task Create_index_does_not_override_settings_of_the_body()
+    {
+        var fake = new FakeEs();
+        await using var c = await Es.ClientAsync(fake);
+        var svc = new IndexService();
+        await svc.CreateAsync(c, new EsCreateIndexRequest { Name = "a1", Shards = 3, Replicas = 0, Body = Es.J("""{"settings":{"index":{"number_of_replicas":0}}}""") }, default);
+        var sent = JsonNode.Parse(fake.Requests.Last(r => r.Method == "PUT" && r.PathAndQuery == "/a1").Body!)!["settings"]!;
+        Assert.Equal(3, sent["index"]!["number_of_shards"]!.GetValue<int>());
+        Assert.Equal(0, sent["index"]!["number_of_replicas"]!.GetValue<int>());
+        Assert.Null(sent["number_of_shards"]);
+        // the same value in both places is fine, another one is a conflict instead of a silent override
+        await svc.CreateAsync(c, new EsCreateIndexRequest { Name = "a2", Shards = 2, Body = Es.J("""{"settings":{"number_of_shards":"2"}}""") }, default);
+        var ex = await Assert.ThrowsAsync<EngineException>(() => svc.CreateAsync(c, new EsCreateIndexRequest { Name = "a3", Shards = 1, Body = Es.J("""{"settings":{"index.number_of_shards":3}}""") }, default));
+        Assert.Contains("number_of_shards", ex.Message);
+        Assert.DoesNotContain(fake.Requests, r => r.PathAndQuery == "/a3");
+    }
+
+    [Fact]
+    public void A_search_body_pasted_as_the_query_is_unwrapped()
+    {
+        var (body, _) = JobsService.ReindexBody(new EsReindexRequest { Source = "a", Dest = "c", Query = Es.J("""{"query":{"term":{"s":"x"}}}""") });
+        Assert.Equal("""{"term":{"s":"x"}}""", body["source"]!["query"]!.ToJsonString());
+        Assert.Equal("""{"term":{"s":"x"}}""", JobsService.ParseExport(new EsExportRequest { Index = "a", Query = Es.J("""{"query":{"term":{"s":"x"}}}""") }).Query!.ToJsonString());
+        // a real clause, or a body with more than the query, is left alone
+        Assert.Equal("""{"match_all":{}}""", JobsService.ParseExport(new EsExportRequest { Index = "a", Query = Es.J("""{"match_all":{}}""") }).Query!.ToJsonString());
+        Assert.Equal("""{"query":{"match_all":{}},"size":5}""", JobsService.ParseExport(new EsExportRequest { Index = "a", Query = Es.J("""{"query":{"match_all":{}},"size":5}""") }).Query!.ToJsonString());
     }
 
     [Fact]

@@ -185,7 +185,13 @@ public sealed class EsTransport : IDisposable
         var hosts = string.Join(", ", _settings.Urls.Select(u => u.Authority));
         if (ex is null) return $"Cannot reach Elasticsearch at {hosts}.";
         if (IsTls(ex))
-            return $"TLS handshake with {hosts} failed: {ex.GetBaseException().Message} (set a CA certificate or enable 'Skip TLS verification' for self-signed certificates).";
+        {
+            var why = ex.GetBaseException().Message;
+            // https:// against a server that answers plain HTTP ends in .NET's "frame size" error
+            if (why.Contains("frame size", StringComparison.OrdinalIgnoreCase) || why.Contains("corrupted frame", StringComparison.OrdinalIgnoreCase))
+                return $"TLS handshake with {hosts} failed: the server does not answer TLS ({why}). It probably speaks plain HTTP: use http:// in the URL.";
+            return $"TLS handshake with {hosts} failed: {why} (set a CA certificate or enable 'Skip TLS verification' for self-signed certificates).";
+        }
         var inner = ex.GetBaseException().Message;
         return $"Cannot reach Elasticsearch at {hosts}: {inner}";
     }

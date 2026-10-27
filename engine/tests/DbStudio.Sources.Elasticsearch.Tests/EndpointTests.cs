@@ -25,6 +25,19 @@ public sealed class EndpointTests : IAsyncLifetime
     private string Ro => $"es/{_h.ReadOnlyCid}";
 
     [Fact]
+    public async Task Cluster_document_count_is_the_top_level_count_not_the_lucene_one()
+    {
+        // 4 documents in the fake; `_cluster/stats` would add nested objects, `_count` does not
+        _h.Fake.On("GET", "/_count", _ => (200, new { count = 4, _shards = new { total = 1, successful = 1, failed = 0 } }));
+        var (_, cluster) = await _h.Get($"{C}/cluster");
+        Assert.Equal(4, cluster.GetProperty("docs").GetInt64());
+        // without `_count` (older servers, restricted roles) the stats number is the fallback
+        _h.Fake.On("GET", "/_count", _ => (403, new { error = new { type = "security_exception", reason = "denied" }, status = 403 }));
+        var (_, fallback) = await _h.Get($"{C}/cluster");
+        Assert.Equal(5, fallback.GetProperty("docs").GetInt64());
+    }
+
+    [Fact]
     public async Task Cluster_nodes_and_indices()
     {
         var (s, cluster) = await _h.Get($"{C}/cluster");
@@ -227,6 +240,24 @@ public sealed class EndpointTests : IAsyncLifetime
         Assert.Equal("application/octet-stream", res.Content.Headers.ContentType!.MediaType);
         Assert.Contains("shop-orders.csv", res.Content.Headers.ContentDisposition!.ToString());
         Assert.StartsWith("_id,", (await res.Content.ReadAsStringAsync()).TrimStart('﻿'));
+    }
+
+    [Fact]
+    public async Task Failed_export_keeps_the_existing_file_and_leaves_no_partial_one()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"es-export-keep-{Guid.NewGuid():N}.ndjson");
+        File.WriteAllText(path, "precious\n");
+        try
+        {
+            _h.Fake.On("POST", "/shop-orders/_search", _ => (400, new { error = new { type = "parsing_exception", reason = "unknown query [bogus]" }, status = 400 }));
+            var (es, exp) = await _h.Post($"{C}/export", new { index = "shop-orders", format = "ndjson", path, query = new { bogus = new { } } });
+            Assert.Equal(202, es);
+            var done = await _h.Events.DoneAsync(exp.GetProperty("jobId").GetString()!);
+            Assert.Equal(ExecutionStatus.Error, done.Status);
+            Assert.Equal("precious\n", File.ReadAllText(path));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + ".*.part"));
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]

@@ -110,5 +110,15 @@ Pass/fail per step. Run in both themes and at 150 % app zoom. Keyboard-only step
 38. SQL goes to `_plugins/_sql` (JDBC format, cursor paging); index names are quoted with backticks
     (`` SELECT * FROM `shop-orders` ``); Translate uses `_plugins/_sql/_explain`.
 
+## Added by the QA round (see round-elasticsearch.md)
+39. Create index…: put `{"settings":{"number_of_shards":3}}` into the JSON: Primary shards shows 3 (disabled, "set in the JSON") and the index is created with 3 shards.
+40. Export an index whose later documents have extra fields as CSV: the header holds the union of all fields, not only the first 1,000 documents'.
+41. A document with a number past 2^53 (`{"id": 1793050634678000001}`): Edit shows the exact text, Save keeps it (check with `GET /idx/_source/<id>`).
+42. Dev Tools: `GET /<logs-{now/d}>/_search` reaches Elasticsearch as an encoded date-math name (404 `index_not_found`, not "no handler").
+43. The Overview Documents tile equals the sum of the Indices list (top-level documents, not Lucene documents).
+44. Dev Tools / Search: a slow request turns Run into Cancel. A search with `"size": 10000` shows 200 hits and "Show 200 more".
+45. Import with an Id field: nested `a.b` works; documents without a value are listed as failed, never given generated ids.
+46. Export to a file whose query fails leaves an existing file at that path untouched.
+
 Screenshots of the mock build (light and dark): overview, documents (Persian names), mappings, search with a date
 histogram, Dev Tools, SQL, tasks — taken with `ui/scripts/shot.mjs` against `npm run dev:mock`.

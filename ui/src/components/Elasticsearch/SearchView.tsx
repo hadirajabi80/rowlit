@@ -2,7 +2,7 @@
 // from the mapping), Run (Ctrl+Enter), Explain, and the response as Hits (score, highlights, explanation),
 // Aggregations (bucket tables with bars, metric tiles) and the raw JSON.
 import { displayShortcut } from '../../commands/keys';
-import { ChevronDown, ChevronRight, Copy, Play, SquareTerminal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Play, SquareTerminal, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { EsHit, EsSearchResponse } from '../../api/types.es';
@@ -118,7 +118,11 @@ export function SearchView({ tab, theme, visible, cid }: TabViewProps & { cid: s
         <label className="check" title="Adds explain: true; every hit carries its score explanation"><input type="checkbox" checked={explain} onChange={(e) => setExplain(e.target.checked)} /> Explain</label>
         <span className="flex-1" />
         {res && <span className="muted es-count">{res.total?.toLocaleString('en-US') ?? '?'}{res.totalRelation === 'gte' ? '+' : ''} hits · took {formatMs(res.took)} · {res.shards.successful}/{res.shards.total} shards{res.shards.failed ? ` · ${res.shards.failed} failed` : ''}{res.timedOut ? ' · timed out' : ''}</span>}
-        <button type="button" className="btn btn-xs btn-primary" onClick={() => void run()} disabled={busy} title={`Run (${displayShortcut('Mod+Enter')})`}><Play size={13} aria-hidden /> {busy ? 'Running…' : 'Run'}</button>
+        {busy ? (
+          <button type="button" className="btn btn-xs" onClick={() => { ctl.current?.abort(); setBusy(false); }} title="Stop waiting for the answer"><X size={13} aria-hidden /> Cancel</button>
+        ) : (
+          <button type="button" className="btn btn-xs btn-primary" onClick={() => void run()} title={`Run (${displayShortcut('Mod+Enter')})`}><Play size={13} aria-hidden /> Run</button>
+        )}
       </div>
       <div className="es-split">
         <div className="es-split-left">
@@ -149,8 +153,13 @@ export function SearchView({ tab, theme, visible, cid }: TabViewProps & { cid: s
   );
 }
 
-function HitList({ hits }: { hits: EsHit[] }) {
+/** Hits rendered at once: a size of 10,000 would otherwise mount that many expandable rows and freeze the tab. */
+const HIT_PAGE = 200;
+
+function HitList({ hits: all }: { hits: EsHit[] }) {
   const [open, setOpen] = useState<Set<number>>(new Set([0]));
+  const [shown, setShown] = useState(HIT_PAGE);
+  const hits = useMemo(() => (all.length > shown ? all.slice(0, shown) : all), [all, shown]);
   const cols = useMemo(() => gridColumns(hits, 6), [hits]);
   if (!hits.length) return <Empty>No hits.</Empty>;
   const toggle = (i: number) => setOpen((s) => {
@@ -197,6 +206,13 @@ function HitList({ hits }: { hits: EsHit[] }) {
           </div>
         );
       })}
+      {all.length > hits.length && (
+        <div className="es-pad">
+          <button type="button" className="btn btn-xs" onClick={() => setShown((n) => n + HIT_PAGE)}>
+            Show {Math.min(HIT_PAGE, all.length - hits.length).toLocaleString('en-US')} more ({hits.length.toLocaleString('en-US')} of {all.length.toLocaleString('en-US')} shown)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

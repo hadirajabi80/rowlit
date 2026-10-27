@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import type { EsExportRequest, EsExportResult, EsFileFormat, EsImportResult, EsReindexResult } from '../../api/types.es';
 import { formatCount, formatMs, indexNameError } from '../../es/format';
-import { isPlainObject, parseLenient, pretty } from '../../es/json';
+import { bodyIndexSetting, isPlainObject, parseLenient, pretty } from '../../es/json';
 import { getPlatform } from '../../platform';
 import { toast } from '../../store/ui';
 import type { EffectiveTheme } from '../../theme/useTheme';
@@ -15,7 +15,7 @@ import { CodeEditor } from './CodeEditor';
 import { useJob, type JobState } from './jobs';
 import { JsonTree } from './JsonTree';
 import { esErrorText } from './parts';
-import { knownTargets, loadAliases } from './store';
+import { esConn, knownTargets, loadAliases } from './store';
 import './es.css';
 
 function ErrorLine({ error }: { error: string | null }) {
@@ -110,11 +110,16 @@ export function CreateIndexDialog({ cid, onClose, onCreated }: { cid: string; on
   const theme = useEffectiveTheme();
   const [name, setName] = useState('');
   const [shards, setShards] = useState('1');
-  const [replicas, setReplicas] = useState('1');
+  // a single data node cannot hold a replica next to its primary: the index would start out yellow
+  const [replicas, setReplicas] = useState(() => (esConn(cid).cluster.data?.dataNodes === 1 ? '0' : '1'));
   const [body, setBody] = useState(CREATE_TEMPLATE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameError = name ? indexNameError(name) : null;
+  // a shards / replicas setting typed into the JSON wins: the form fields would otherwise override it silently
+  const parsedBody = useMemo(() => parseLenient(body), [body]);
+  const jsonShards = parsedBody.ok ? bodyIndexSetting(parsedBody.value, 'number_of_shards') : null;
+  const jsonReplicas = parsedBody.ok ? bodyIndexSetting(parsedBody.value, 'number_of_replicas') : null;
   const submit = async () => {
     const err = indexNameError(name);
     if (err) return setError(err);
@@ -124,7 +129,12 @@ export function CreateIndexDialog({ cid, onClose, onCreated }: { cid: string; on
     setBusy(true);
     setError(null);
     try {
-      await api.es.createIndex(cid, { name, shards: Number(shards) || 1, replicas: replicas === '' ? null : Number(replicas), body: parsed.value ?? null });
+      await api.es.createIndex(cid, {
+        name,
+        shards: jsonShards !== null ? null : Number(shards) || 1,
+        replicas: jsonReplicas !== null || replicas === '' ? null : Number(replicas),
+        body: parsed.value ?? null,
+      });
       onCreated(name);
       onClose();
     } catch (e) {
@@ -144,10 +154,13 @@ export function CreateIndexDialog({ cid, onClose, onCreated }: { cid: string; on
         <label className="form-label" htmlFor="es-new-name">Name<span className="req">*</span></label>
         <input id="es-new-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="my-index" aria-invalid={!!nameError} />
         <label className="form-label" htmlFor="es-new-shards">Primary shards</label>
-        <input id="es-new-shards" className="input" inputMode="numeric" value={shards} onChange={(e) => setShards(e.target.value.replace(/\D/g, ''))} />
+        <input id="es-new-shards" className="input" inputMode="numeric" value={jsonShards ?? shards} disabled={jsonShards !== null}
+          title={jsonShards !== null ? 'Set in the settings JSON below' : undefined} onChange={(e) => setShards(e.target.value.replace(/\D/g, ''))} />
         <label className="form-label" htmlFor="es-new-replicas">Replicas</label>
-        <input id="es-new-replicas" className="input" inputMode="numeric" value={replicas} onChange={(e) => setReplicas(e.target.value.replace(/\D/g, ''))} />
+        <input id="es-new-replicas" className="input" inputMode="numeric" value={jsonReplicas ?? replicas} disabled={jsonReplicas !== null}
+          title={jsonReplicas !== null ? 'Set in the settings JSON below' : undefined} onChange={(e) => setReplicas(e.target.value.replace(/\D/g, ''))} />
       </div>
+      {(jsonShards !== null || jsonReplicas !== null) && <div className="form-hint">Shards / replicas come from the settings JSON below.</div>}
       {nameError && <div className="form-hint es-warn-text">{nameError}</div>}
       <div className="es-dialog-label">Settings, mappings and aliases (JSON, optional)</div>
       <CodeEditor value={body} onChange={setBody} language="json" ariaLabel="Index body" theme={theme} height={220} />
@@ -434,7 +447,7 @@ export function ImportDialog({ cid, index, onClose, onDone, initialFile }: {
           </>
         )}
         <label className="form-label" htmlFor="es-im-id">Id field</label>
-        <input id="es-im-id" className="input mono" placeholder="generated ids" value={idField} onChange={(e) => setIdField(e.target.value)} />
+        <input id="es-im-id" className="input mono" placeholder="generated ids" title="A field (or a.b path) holding the document id; documents without it are reported as failed" value={idField} onChange={(e) => setIdField(e.target.value)} />
         <label className="form-label" htmlFor="es-im-batch">Batch size</label>
         <input id="es-im-batch" className="input" inputMode="numeric" value={batch} onChange={(e) => setBatch(e.target.value.replace(/\D/g, ''))} />
       </div>

@@ -8,12 +8,13 @@ import { api } from '../../api/client';
 import type { EsField, EsHit, EsSearchResponse } from '../../api/types.es';
 import { DEFAULT_GRID_QUERY, flattenSource, gridBody, gridColumns, sortFieldFor, type GridQuery } from '../../es/docs';
 import { formatMs } from '../../es/format';
-import { parseLenient, pretty } from '../../es/json';
+import { hasUnsafeIntegerLiteral, hasUnsafeNumber, parseLenient, pretty } from '../../es/json';
 import { toast } from '../../store/ui';
 import type { EffectiveTheme } from '../../theme/useTheme';
 import { CodeEditor } from './CodeEditor';
 import { CellValue, JsonTree } from './JsonTree';
 import { patchTab } from './open';
+import { readRawSource, writeRaw } from './rawDoc';
 import { Banner, esErrorText, isVersionConflict, readOnlyReason } from './parts';
 import { indicesChanged, loadFields } from './store';
 
@@ -25,6 +26,8 @@ interface EditState {
   conflict: boolean;
   error: string | null;
   busy: boolean;
+  /** The document holds integers past 2^53: its exact text is being read ('loading') or could not be ('failed'), saving waits. */
+  exact?: 'loading' | 'failed';
 }
 
 const PAGE_SIZES = [25, 50, 100, 200];
@@ -102,11 +105,20 @@ export function DocumentsPanel({ cid, index, theme, visible, tabId, initialQ, in
 
   const startEdit = (m: EditState['mode'], h: EsHit | null) => {
     const src = h ? h.source : {};
-    setEdit({ mode: m, hit: h, text: pretty(src ?? {}), id: m === 'edit' && h ? h.id : '', conflict: false, error: null, busy: false });
+    // the grid holds `JSON.parse`d numbers: past 2^53 they are already rounded, so the editor reads the exact text instead
+    const lossy = !!h && m !== 'new' && hasUnsafeNumber(src);
+    setEdit({ mode: m, hit: h, text: lossy ? '' : pretty(src ?? {}), id: m === 'edit' && h ? h.id : '', conflict: false, error: null, busy: false, exact: lossy ? 'loading' : undefined });
+    if (lossy && h) {
+      readRawSource(cid, h.index, h.id, h.routing).then(
+        (text) => setEdit((x) => (x && x.hit === h && x.exact === 'loading' ? { ...x, text, exact: undefined } : x)),
+        (e: unknown) => setEdit((x) => (x && x.hit === h && x.exact === 'loading'
+          ? { ...x, text: pretty(src), exact: 'failed', error: `Could not read the exact document: ${esErrorText(e)}. Large numbers shown here are rounded, so saving is disabled.` } : x)),
+      );
+    }
   };
 
   const save = async (force = false) => {
-    if (!edit) return;
+    if (!edit || edit.exact) return;
     const parsed = parseLenient(edit.text);
     if (!parsed.ok || typeof parsed.value !== 'object' || parsed.value === null || Array.isArray(parsed.value)) {
       setEdit({ ...edit, error: parsed.ok ? 'The document must be a JSON object.' : `Invalid JSON: ${parsed.error}` });
@@ -115,19 +127,26 @@ export function DocumentsPanel({ cid, index, theme, visible, tabId, initialQ, in
     setEdit({ ...edit, busy: true, error: null });
     try {
       let id: string;
+      // an integer literal past 2^53 would be rounded by JSON.stringify: send the text itself
+      const raw = hasUnsafeIntegerLiteral(edit.text);
       if (edit.mode === 'edit' && edit.hit) {
         const h = edit.hit;
-        const r = await api.es.putDoc(cid, h.index, h.id, {
-          source: parsed.value, routing: h.routing, ...(force ? {} : { ifSeqNo: h.seqNo, ifPrimaryTerm: h.primaryTerm }),
-        });
+        const guard = force ? {} : { ifSeqNo: h.seqNo, ifPrimaryTerm: h.primaryTerm };
+        const r = raw
+          ? await writeRaw(cid, { index: h.index, id: h.id, text: edit.text, routing: h.routing, ...guard })
+          : await api.es.putDoc(cid, h.index, h.id, { source: parsed.value, routing: h.routing, ...guard });
         id = r.id;
         toast('success', `Saved ${h.id}`, r.result === 'noop' ? 'No change' : `version ${r.version ?? '?'} · seq_no ${r.seqNo ?? '?'}`);
       } else if (edit.id.trim()) {
-        const r = await api.es.putDoc(cid, index, edit.id.trim(), { source: parsed.value, create: true });
+        const r = raw
+          ? await writeRaw(cid, { index, id: edit.id.trim(), text: edit.text, create: true })
+          : await api.es.putDoc(cid, index, edit.id.trim(), { source: parsed.value, create: true });
         id = r.id;
         toast('success', `Created ${r.id}`);
       } else {
-        const r = await api.es.createDoc(cid, index, { source: parsed.value });
+        const r = raw
+          ? await writeRaw(cid, { index, id: null, text: edit.text })
+          : await api.es.createDoc(cid, index, { source: parsed.value });
         id = r.id;
         toast('success', `Created ${r.id}`);
       }
@@ -151,7 +170,8 @@ export function DocumentsPanel({ cid, index, theme, visible, tabId, initialQ, in
         return;
       }
       const fresh: EsHit = { ...edit.hit, seqNo: d.seqNo, primaryTerm: d.primaryTerm, version: d.version, source: d.source };
-      setEdit({ ...edit, hit: fresh, text: pretty(d.source), conflict: false, error: null });
+      const text = hasUnsafeNumber(d.source) ? await readRawSource(cid, fresh.index, fresh.id, fresh.routing) : pretty(d.source);
+      setEdit({ ...edit, hit: fresh, text, conflict: false, error: null });
     } catch (e) {
       setEdit({ ...edit, error: esErrorText(e) });
     }
@@ -289,12 +309,12 @@ export function DocumentsPanel({ cid, index, theme, visible, tabId, initialQ, in
               )}
               {edit.error && <Banner>{edit.error}</Banner>}
               <CodeEditor value={edit.text} onChange={(text) => setEdit((x) => (x ? { ...x, text } : x))} language="json" ariaLabel="Document JSON" theme={theme}
-                onRun={() => void save()} className="es-record-editor" autoFocus />
+                onRun={() => void save()} className="es-record-editor" autoFocus readOnly={edit.exact === 'loading'} />
               <div className="es-record-actions">
                 <span className="muted es-hint">{displayShortcut('Mod+Enter')} saves</span>
                 <span className="flex-1" />
                 <button type="button" className="btn btn-xs" onClick={() => setEdit(null)}>Cancel</button>
-                <button type="button" className="btn btn-xs btn-primary" disabled={edit.busy} onClick={() => void save()}>{edit.busy ? 'Saving…' : 'Save'}</button>
+                <button type="button" className="btn btn-xs btn-primary" disabled={edit.busy || !!edit.exact} onClick={() => void save()}>{edit.busy ? 'Saving…' : 'Save'}</button>
               </div>
             </div>
           ) : hit ? (

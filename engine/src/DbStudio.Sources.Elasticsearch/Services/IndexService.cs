@@ -283,20 +283,36 @@ public sealed class IndexService
         {
             var settings = body["settings"] as JsonObject ?? new JsonObject();
             body["settings"] = settings;
-            // settings may be nested under "index"
-            var target = settings["index"] as JsonObject ?? settings;
             if (req.Shards is { } sh)
             {
                 if (sh < 1 || sh > 1024) throw EngineException.Validation("Shards must be between 1 and 1024.", new { field = "shards" });
-                target["number_of_shards"] = sh;
+                ApplySetting(settings, "number_of_shards", sh, "shards");
             }
             if (req.Replicas is { } rp)
             {
                 if (rp < 0 || rp > 64) throw EngineException.Validation("Replicas must be between 0 and 64.", new { field = "replicas" });
-                target["number_of_replicas"] = rp;
+                ApplySetting(settings, "number_of_replicas", rp, "replicas");
             }
         }
         await c.Transport.JsonAsync(HttpMethod.Put, EsTransport.Seg(name), body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Puts an index setting next to the ones of the request body. Settings may be nested (<c>{ index: { number_of_shards } }</c>)
+    /// or flat (<c>"index.number_of_shards"</c>, <c>"number_of_shards"</c>). A body that already sets it with another value is a
+    /// conflict (the typed value used to override it silently).
+    /// </summary>
+    internal static void ApplySetting(JsonObject settings, string name, int value, string field)
+    {
+        var nested = settings["index"] as JsonObject;
+        foreach (var (holder, key) in new (JsonObject?, string)[] { (nested, name), (settings, name), (settings, $"index.{name}") })
+        {
+            if (holder is null || !holder.TryGetPropertyValue(key, out var existing) || existing is null) continue;
+            var text = existing.ToString();
+            if (text == value.ToString(System.Globalization.CultureInfo.InvariantCulture)) return;
+            throw EngineException.Validation($"{name} is {value} here but {text} in the settings of the body: set it in one place.", new { field });
+        }
+        (nested ?? settings)[name] = value;
     }
 
     public async Task DeleteAsync(EsClient c, string index, CancellationToken ct)
@@ -353,7 +369,7 @@ public sealed class IndexService
                     ["index"] = EsNames.Target(add.Index, $"actions[{i}].add.index"),
                     ["alias"] = EsNames.Index(add.Alias, $"actions[{i}].add.alias"),
                 };
-                if (EsJson.Node(add.Filter) is { } filter) o["filter"] = filter;
+                if (EsJson.UnwrapQuery(EsJson.Node(add.Filter)) is { } filter) o["filter"] = filter;
                 if (!string.IsNullOrWhiteSpace(add.Routing)) o["routing"] = add.Routing.Trim();
                 if (add.IsWriteIndex is { } w) o["is_write_index"] = w;
                 actions.Add(new JsonObject { ["add"] = o });

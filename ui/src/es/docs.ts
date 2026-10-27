@@ -48,6 +48,8 @@ export const DEFAULT_GRID_QUERY: GridQuery = { q: '', sortField: null, sortDir: 
 export function gridBody(g: GridQuery): Record<string, unknown> {
   const body: Record<string, unknown> = {
     query: g.q.trim() ? { query_string: { query: g.q.trim(), default_operator: 'AND', lenient: true } } : { match_all: {} },
+    // the record panel shows _version next to _seq_no / _primary_term (the editor header read "version —" without it)
+    version: true,
   };
   if (g.sortField) body.sort = [{ [g.sortField]: { order: g.sortDir, unmapped_type: 'keyword' } }];
   return body;

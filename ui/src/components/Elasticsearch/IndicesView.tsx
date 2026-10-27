@@ -85,7 +85,8 @@ export function IndicesView({ cid }: { cid: string }) {
           </thead>
           <tbody>
             {rows.map((i) => (
-              <tr key={i.name} onClick={() => openIndex(cid, i.name)} className={i.status === 'close' ? 'es-row-closed' : undefined}>
+              <tr key={i.name} onClick={() => openIndex(cid, i.name)} className={i.status === 'close' ? 'es-row-closed' : undefined} tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) openIndex(cid, i.name); }}>
                 <td><HealthDot health={i.health} label /></td>
                 <td className="mono">
                   {i.name}
