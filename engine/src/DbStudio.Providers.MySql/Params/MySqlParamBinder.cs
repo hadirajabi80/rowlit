@@ -121,6 +121,12 @@ public sealed class MySqlParamBinder : IParamBinder
             parameter.Value = DBNull.Value;
             return parameter;
         }
+        if (value is ExactDecimal exact)
+        {
+            parameter.MySqlDbType = MySqlDbType.NewDecimal;
+            parameter.Value = ExactValue(exact);
+            return parameter;
+        }
         switch (p.Kind)
         {
             case ParamKinds.Int:
@@ -173,4 +179,21 @@ public sealed class MySqlParamBinder : IParamBinder
     }
 
     public object? ReadOutput(DbParameter parameter) => ParamValues.ToWire(parameter.Value);
+
+    private static readonly System.Reflection.ConstructorInfo? MySqlDecimalFromText = typeof(MySqlDecimal).GetConstructor(
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+        [typeof(string)]);
+
+    /// <summary>
+    /// A value System.Decimal / long cannot hold (DECIMAL(65,30), BIGINT UNSIGNED above 2^63) as one MySqlConnector writes
+    /// as an unquoted number, so the server reads an exact DECIMAL literal: a BigInteger for integers, a MySqlDecimal
+    /// otherwise (its text constructor is internal). A quoted string would be compared with a DECIMAL column as a double.
+    /// </summary>
+    public static object ExactValue(ExactDecimal exact)
+    {
+        if (!exact.IsFinite) throw new FormatException($"MySQL numbers have no {exact.Text}.");
+        if (exact.IsInteger) return exact.ToBigInteger();
+        if (MySqlDecimalFromText?.Invoke([exact.Text]) is MySqlDecimal d) return d;
+        return exact.Text;
+    }
 }

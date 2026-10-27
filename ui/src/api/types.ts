@@ -188,6 +188,8 @@ export interface CatalogObject {
   /** Type objects: the kind (see lib/typeKinds.ts) and a one-line definition summary. */
   k?: string;
   bt?: string;
+  /** Routines owned by an extension or a type (PostgreSQL): the explorer sub-folder they are listed in. */
+  g?: string;
 }
 export interface CatalogSchema { name: string; version: number; objects: CatalogObject[] }
 export interface CatalogSnapshot {

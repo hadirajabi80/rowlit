@@ -49,6 +49,9 @@ describe('pgsql UPDATE / DELETE', () => {
   it('uuid, time, decimal and date keep their native kinds', () => {
     expect(paramKindFor('guid', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'pgsql')).toBe('guid');
     expect(paramKindFor(opens.kind, '10:30:00', 'pgsql')).toBe('time');
+    // timetz as the engine shows it (docs/qa/round-postgresql.md 14): untyped text, the time bind has no zone.
+    expect(paramKindFor(opens.kind, '10:20:30+05', 'pgsql')).toBe('string');
+    expect(paramKindFor(opens.kind, '10:20:30.5-03:30', 'pgsql')).toBe('string');
     expect(paramKindFor('decimal', '1.50', 'pgsql')).toBe('decimal');
     expect(paramKindFor('date', '2025-01-02', 'pgsql')).toBe('date');
     expect(paramKindFor('datetimeoffset', '2025-01-02T03:04:05+02:00', 'pgsql')).toBe('datetimeoffset');

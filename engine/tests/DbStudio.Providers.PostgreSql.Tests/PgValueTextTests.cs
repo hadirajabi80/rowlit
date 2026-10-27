@@ -35,6 +35,14 @@ public sealed class PgBinaryTextUnitTests
     public void Numeric_SpecialValues(int sign, string expected) =>
         Assert.Equal(expected, PgBinaryText.Numeric(NumericBytes(0, (ushort)sign, 0)));
 
+    /// <summary>docs/qa/round-postgresql.md 14: timetz prints like PostgreSQL ("+05", not "+05:00").</summary>
+    [Theory]
+    [InlineData(37_230_000_000L, -18_000, "10:20:30+05")]
+    [InlineData(37_230_500_000L, 12_600, "10:20:30.5-03:30")]
+    [InlineData(0L, 0, "00:00:00+00")]
+    [InlineData(37_230_000_000L, -20_730, "10:20:30+05:45:30")]
+    public void TimeTz_Text(long micros, int secondsWest, string expected) => Assert.Equal(expected, PgBinaryText.TimeTz(micros, secondsWest));
+
     [Theory]
     [InlineData(0, "2000-01-01")]
     [InlineData(-1, "1999-12-31")]

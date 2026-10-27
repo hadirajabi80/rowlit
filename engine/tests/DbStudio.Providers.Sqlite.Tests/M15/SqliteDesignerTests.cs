@@ -178,6 +178,8 @@ public sealed class SqliteParserTests
         Assert.Equal("Status <> 'x' AND (a OR b)", SqliteCreateTableParser.IndexFilter("CREATE INDEX i ON t (a, (b + 1)) WHERE Status <> 'x' AND (a OR b);"));
         Assert.Null(SqliteCreateTableParser.IndexFilter("CREATE INDEX i ON t (a)"));
         Assert.Equal("SELECT a AS \"x\" FROM t", SqliteCreateTableParser.ViewBody("CREATE VIEW v (x) AS SELECT a AS \"x\" FROM t;"));
+        Assert.Equal(("SELECT a, b FROM t", "x, \"y z\""), SqliteCreateTableParser.ViewParts("CREATE VIEW IF NOT EXISTS main.v (x, \"y z\") AS SELECT a, b FROM t"));
+        Assert.Equal(("SELECT (1)", null), SqliteCreateTableParser.ViewParts("CREATE VIEW v AS SELECT (1)"));
     }
 }
 
@@ -504,6 +506,21 @@ public sealed class SqliteDesignerRoundTripTests : IAsyncLifetime
         await _db.ApplyAsync(_profile, null, new DdlApplyRequest(null, script.Statements.Select(s => s.Sql).ToList(), true), CancellationToken.None);
         Assert.Equal(0, await ScalarAsync("SELECT count(*) FROM sqlite_master WHERE name = 'CustomerOrderTotals'"));
         Assert.Equal(SampleDatabase.CustomerCount, await ScalarAsync("SELECT count(*) FROM CustomerRevenue"));
+    }
+
+    [Fact]
+    public async Task ViewWithColumnList_KeepsItsColumnNamesThroughTheDesigner()
+    {
+        // docs/qa/round-sqlite.md O2: CREATE VIEW v (a, b) AS ... lost the list when saved from the view designer.
+        await _db.ApplyAsync(_profile, null, new DdlApplyRequest(null,
+            ["CREATE VIEW Named (cust, total) AS SELECT Id, Id * 2 FROM Customers", "CREATE VIEW Same (Id) AS SELECT Id FROM Customers"], true), CancellationToken.None);
+        var view = await _db.ReadViewAsync(_profile, null, null, null, "Named", CancellationToken.None);
+        Assert.Equal("WITH \"Named\"(cust, total) AS (\nSELECT Id, Id * 2 FROM Customers\n)\nSELECT * FROM \"Named\"", view.Body);
+        var script = _scripter.ScriptView(new ViewDefinition(null, view.Name, view.Name, view.Body, view.Options), DdlScriptContext.Default);
+        await _db.ApplyAsync(_profile, null, new DdlApplyRequest(null, script.Statements.Select(s => s.Sql).ToList(), true), CancellationToken.None);
+        Assert.Equal(SampleDatabase.CustomerCount, await ScalarAsync("SELECT count(*) FROM Named WHERE total = cust * 2"));
+        // The SELECT already yields the listed names: the body stays as written.
+        Assert.Equal("SELECT Id FROM Customers", (await _db.ReadViewAsync(_profile, null, null, null, "Same", CancellationToken.None)).Body);
     }
 
     [Fact]

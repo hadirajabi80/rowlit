@@ -58,8 +58,13 @@ public sealed class SqlServerPlanReader : IPlanReader
             if (p.IsPositional || p.IsOutput || p.Kind == ParamKinds.RefCursor || !IsIdentifier(p.BareName)) return null;
             var type = p.Kind switch
             {
-                ParamKinds.Int => ParamValues.ToClr(p) is long l && l is >= int.MinValue and <= int.MaxValue ? "int" : "bigint",
-                ParamKinds.Decimal => $"decimal(38, {(ParamValues.ToClr(p) is decimal m ? Math.Min((int)m.Scale, 38) : 0)})",
+                ParamKinds.Int => ParamValues.ToClr(p) switch
+                {
+                    long l when l is >= int.MinValue and <= int.MaxValue => "int",
+                    ExactDecimal => "decimal(38, 0)",
+                    _ => "bigint",
+                },
+                ParamKinds.Decimal => $"decimal(38, {ParamValues.ToClr(p) switch { decimal m => Math.Min((int)m.Scale, 38), ExactDecimal x => Math.Min(x.Scale, 38), _ => 0 }})",
                 ParamKinds.Float => "float",
                 ParamKinds.Bool => "bit",
                 ParamKinds.Date => "date",
