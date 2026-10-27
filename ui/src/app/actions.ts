@@ -978,7 +978,7 @@ export async function openSampleDatabase(): Promise<void> {
     const cid = r.connectionId ?? r.profile?.id;
     if (!cid) throw new Error('The engine did not return the sample connection');
     const sql = [
-      'SELECT c.FirstName, c.LastName, c.City, COUNT(o.Id) AS Orders, SUM(o.Total) AS Revenue',
+      'SELECT c.FirstName, c.LastName, c.City, COUNT(o.Id) AS Orders, ROUND(SUM(o.Total), 2) AS Revenue',
       'FROM Customers c',
       'LEFT JOIN Orders o ON o.CustomerId = c.Id',
       'GROUP BY c.Id, c.FirstName, c.LastName, c.City',

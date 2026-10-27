@@ -26,7 +26,7 @@ public sealed class SqliteProviderTests(SqliteFixture fixture) : IClassFixture<S
         var path = _provider.FormSpec.Fields[0];
         Assert.True(path.Required);
         Assert.Equal("file", path.Type);
-        Assert.Equal("*.db;*.sqlite;*.sqlite3", path.FileFilter);
+        Assert.Equal("*.db;*.sqlite;*.sqlite3;*.db3", path.FileFilter);
         Assert.Equal("sqlite", _provider.Id);
         Assert.Equal('"', _provider.Identifiers.QuoteOpen);
         Assert.Contains("SELECT", _provider.Identifiers.ReservedWords);
@@ -52,6 +52,36 @@ public sealed class SqliteProviderTests(SqliteFixture fixture) : IClassFixture<S
         var result = await _provider.TestAsync(SqliteFixture.CreateProfile(file), null, CancellationToken.None);
         Assert.False(result.Ok);
         Assert.Equal("SQLITE_NOTADB", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task TestConnection_PathProblems_AreExplained()
+    {
+        // A folder is not a database file.
+        var folder = await _provider.TestAsync(SqliteFixture.CreateProfile(fixture.Directory), null, CancellationToken.None);
+        Assert.False(folder.Ok);
+        Assert.Equal("VALIDATION", folder.Error!.Code);
+        Assert.Contains("folder", folder.Error.Message);
+
+        // Create-if-missing creates the file, not the folders above it.
+        var nested = Path.Combine(fixture.Directory, "no-such-folder", "a.sqlite");
+        var missingFolder = await _provider.TestAsync(SqliteFixture.CreateProfile(nested), null, CancellationToken.None);
+        Assert.False(missingFolder.Ok);
+        Assert.Contains("folder does not exist", missingFolder.Error!.Message);
+
+        // A malformed attach entry is reported, not skipped.
+        var profile = SqliteFixture.CreateProfile(fixture.DbPath);
+        profile.Props["attach"] = new JsonArray("archive");
+        var attach = await _provider.TestAsync(profile, null, CancellationToken.None);
+        Assert.False(attach.Ok);
+        Assert.Contains("name=path", attach.Error!.Message);
+
+        // A missing attached file is not created by a connection that may not create files.
+        var strict = SqliteFixture.CreateProfile(fixture.DbPath, Path.Combine(fixture.Directory, "nothing.sqlite"));
+        strict.Props["createIfMissing"] = false;
+        var missingAttach = await _provider.TestAsync(strict, null, CancellationToken.None);
+        Assert.False(missingAttach.Ok);
+        Assert.Contains("Attached database file not found", missingAttach.Error!.Message);
     }
 
     [Fact]
@@ -156,6 +186,26 @@ public sealed class SqliteProviderTests(SqliteFixture fixture) : IClassFixture<S
         var lines = await reader.GetObjectDetailsAsync(new ObjectRef(null, "main", "order_lines", ObjectTypes.Table), CancellationToken.None);
         Assert.Contains(lines.Indexes, i => i.IsPrimaryKey && i.Columns.SequenceEqual(["order_id", "product_id"]));
         Assert.Null(lines.RowCountEstimate); // WITHOUT ROWID and no sqlite_stat1
+    }
+
+    [Fact]
+    public async Task Ddl_ViewIncludesItsInsteadOfTriggers()
+    {
+        // Editing a view runs DROP VIEW + CREATE VIEW: the script has to carry the triggers DROP VIEW takes along.
+        var path = Path.Combine(fixture.Directory, "views.sqlite");
+        await using (var c = new SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            await c.OpenAsync();
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); CREATE VIEW v AS SELECT name FROM t; "
+                              + "CREATE TRIGGER v_ins INSTEAD OF INSERT ON v BEGIN INSERT INTO t (name) VALUES (NEW.name); END;";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        await using var reader = await _provider.OpenCatalogReaderAsync(SqliteFixture.CreateProfile(path), null, CancellationToken.None);
+        var ddl = await reader.GetDdlAsync(new ObjectRef(null, "main", "v", ObjectTypes.View), CancellationToken.None);
+        Assert.StartsWith("CREATE VIEW v AS", ddl.Ddl);
+        Assert.Contains("CREATE TRIGGER v_ins INSTEAD OF INSERT ON v", ddl.Ddl);
+        Assert.DoesNotContain("CREATE TABLE", ddl.Ddl);
     }
 
     [Fact]

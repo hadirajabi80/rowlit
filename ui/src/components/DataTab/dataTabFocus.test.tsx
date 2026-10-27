@@ -212,12 +212,13 @@ describe('keyless paging order (features-r1-04)', () => {
     render(<DataTabView tab={tabState('dt-ux')} theme="light" visible />);
     await until(() => gridProps?.rows.length === 1000);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(pages()[0]).toBe('SELECT *\nFROM customers\nORDER BY email\nLIMIT 1000 OFFSET 0');
+    // (SQLite: the rowid is read too, as the row identity of the keyless table; it does not change the paging order.)
+    expect(pages()[0]).toBe('SELECT *, rowid\nFROM customers\nORDER BY email\nLIMIT 1000 OFFSET 0');
     await act(async () => {
       gridProps!.onReachEnd!();
     });
     await until(() => gridProps!.rows.length === 2000);
-    expect(pages().at(-1)).toBe('SELECT *\nFROM customers\nORDER BY email\nLIMIT 1000 OFFSET 1000');
+    expect(pages().at(-1)).toBe('SELECT *, rowid\nFROM customers\nORDER BY email\nLIMIT 1000 OFFSET 1000');
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });

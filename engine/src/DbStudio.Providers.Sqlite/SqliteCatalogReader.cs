@@ -114,7 +114,9 @@ internal sealed partial class SqliteCatalogReader(SqliteConnection connection, I
         }
 
         var parts = new List<string> { Terminate(master.Sql) };
-        if (master.Type == "table")
+        // A table's DDL carries its indexes and triggers; a view's its INSTEAD OF triggers: editing a view drops and recreates
+        // it (SQLite has no CREATE OR REPLACE), and DROP VIEW takes those triggers along.
+        if (master.Type is "table" or "view")
         {
             parts.AddRange(masters
                 .Where(m => m.Type is "index" or "trigger" && m.TableName.Equals(master.Name, StringComparison.OrdinalIgnoreCase)

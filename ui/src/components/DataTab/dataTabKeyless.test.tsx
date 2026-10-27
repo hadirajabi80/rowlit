@@ -167,7 +167,8 @@ describe('keyless paging order is decided before the first page (features-r2-02)
     vi.spyOn(api, 'objectDetails').mockResolvedValue({ indexes: [] } as never);
     render(<DataTabView tab={tab('kl-rowid', 'table')} theme="light" visible />);
     await until(() => gridProps?.rows.length === 1000);
-    expect(pages()[0]).toBe('SELECT *\nFROM vbig\nORDER BY rowid\nLIMIT 1000 OFFSET 0');
+    // The rowid is also read (hidden last column): it is the row identity that makes the keyless table editable.
+    expect(pages()[0]).toBe('SELECT *, rowid\nFROM vbig\nORDER BY rowid\nLIMIT 1000 OFFSET 0');
     expect(calls.indexOf(pages()[0])).toBeLessThan(calls.findIndex((c) => c.startsWith('SELECT COUNT(*)')));
     await screen.findByText(/1,000 of 1,500 rows/);
     expect(screen.queryByText(UNORDERED_HINT)).toBeNull();

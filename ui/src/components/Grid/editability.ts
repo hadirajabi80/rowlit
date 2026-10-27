@@ -1,6 +1,6 @@
 // Can a result set be edited in place? (PLAN-M1.5 A1: single-table SELECT with every key column present.)
 import type { CatalogObject, CatalogSnapshot, ColumnInfo, ConnectionProfile, Dialect } from '../../api/types';
-import { ROWID_COLUMN, isRowidColumn, type TableTarget } from '../../data/sqlgen';
+import { isRowidColumn, rowidColumnFor, type TableTarget } from '../../data/sqlgen';
 
 export interface Editability {
   editable: boolean;
@@ -62,9 +62,9 @@ export function tableEditability(
   const found = findTable(snapshot, schema, name, currentSchema);
   const pk = found?.obj.pk?.length ? found.obj.pk : columns.filter((c) => c.isKey).map((c) => c.name);
   const t = { schema: found?.schema ?? schema, name: found?.obj.n ?? name };
-  // Oracle table without a primary key: the hidden ROWID column the data tab reads identifies the rows.
+  // Oracle / SQLite table without a primary key: the hidden ROWID / rowid column the data tab reads identifies the rows.
   if (!pk.length && !isView && hasRowid(columns, dialect)) {
-    return finish(columns, { ...t, keyColumns: [ROWID_COLUMN], rowid: true }, found?.obj, snapshot, dialect, currentSchema);
+    return finish(columns, { ...t, keyColumns: [rowidColumnFor(dialect)], rowid: true }, found?.obj, snapshot, dialect, currentSchema);
   }
   if (!pk.length) return NOT(isView ? 'View without a key: read-only' : 'No primary key: read-only');
   return finish(columns, { ...t, keyColumns: pk }, found?.obj, snapshot, dialect, currentSchema);
@@ -92,9 +92,12 @@ export function resultEditability(
   // Oracle `SELECT t.*, ROWID FROM t` (the PL/SQL Developer idiom) edits a table without a primary key by ROWID.
   const view = found?.obj.t === 'view';
   if (!pk.length && !view && hasRowid(columns, opts.dialect)) {
-    return finish(columns, { ...t, keyColumns: [ROWID_COLUMN], rowid: true }, found?.obj, opts.snapshot, opts.dialect, opts.currentSchema);
+    return finish(columns, { ...t, keyColumns: [rowidColumnFor(opts.dialect)], rowid: true }, found?.obj, opts.snapshot, opts.dialect, opts.currentSchema);
   }
-  if (!pk.length) return NOT(opts.dialect === 'plsql' && !view ? `${table} has no primary key: select ROWID too (SELECT t.*, ROWID FROM …) to edit` : `${table} has no primary key`);
+  if (!pk.length) {
+    const hint = opts.dialect === 'plsql' ? 'ROWID' : opts.dialect === 'sqlite' ? 'rowid' : null;
+    return NOT(hint && !view ? `${table} has no primary key: select ${hint} too (SELECT t.*, ${hint} FROM …) to edit` : `${table} has no primary key`);
+  }
   const missing = pk.filter((k) => !columns.some((c) => c.name.toLowerCase() === k.toLowerCase()));
   if (missing.length) return NOT(`Add the key column${missing.length > 1 ? 's' : ''} ${missing.join(', ')} to edit`);
   return finish(columns, { ...t, keyColumns: pk }, found?.obj, opts.snapshot, opts.dialect, opts.currentSchema);

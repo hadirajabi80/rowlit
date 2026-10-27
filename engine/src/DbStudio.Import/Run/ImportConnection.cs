@@ -57,9 +57,8 @@ public static class ImportConnections
             }
             case "sqlite":
             {
-                var c = new SqliteConnection(provider.BuildConnectionString(profile, null));
-                await OpenGuarded(c, ct).ConfigureAwait(false);
-                return new ImportConnection(c);
+                // Opened by the provider: it also attaches the profile's "attach" databases (an import target may live there).
+                return new ImportConnection(await DbStudio.Providers.Sqlite.SqliteProvider.OpenImportConnectionAsync(profile, ct).ConfigureAwait(false));
             }
             case "mysql" or "mariadb":
             {

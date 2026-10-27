@@ -68,7 +68,9 @@ public sealed class DesignerService(ConnectionStore connections, ProviderRegistr
         if (string.IsNullOrWhiteSpace(view.Name)) throw EngineException.Validation("name is required.", new { field = "name" });
         if (string.IsNullOrWhiteSpace(view.Body)) throw EngineException.Validation("body is required.", new { field = "body" });
         var (profile, provider, password) = Resolve(connectionId);
-        var context = await features.Database(provider.Id).GetScriptContextAsync(profile, password, Blank(database), view.Schema, null, ct).ConfigureAwait(false);
+        // The view being edited is passed as the "table": SQLite reads the INSTEAD OF triggers it must recreate after DROP VIEW
+        // (other providers only read dependents of a real table and find none).
+        var context = await features.Database(provider.Id).GetScriptContextAsync(profile, password, Blank(database), view.Schema, Blank(view.OriginalName), ct).ConfigureAwait(false);
         try
         {
             return features.Scripter(provider.Id).ScriptView(view, context);

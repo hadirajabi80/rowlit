@@ -170,6 +170,14 @@ public sealed partial class SqliteDdlScripter : IDdlScripter
         var table = original.Name;
         if (d.TableRenamed && !original.Name.Equals(d.Desired.Name, StringComparison.Ordinal))
         {
+            if (original.Name.Equals(d.Desired.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                // Only the case changes: SQLite refuses to rename a table to a name it already has ("another table with this name"),
+                // so it goes through a temporary name.
+                var hop = original.Name + RebuildSuffix;
+                statements.Add(new DdlStatement($"ALTER TABLE {Qualified(schema, table)} RENAME TO {Quote(hop)}", DdlKinds.Rename));
+                table = hop;
+            }
             statements.Add(new DdlStatement($"ALTER TABLE {Qualified(schema, table)} RENAME TO {Quote(d.Desired.Name)}", DdlKinds.Rename));
             table = d.Desired.Name;
         }
@@ -193,7 +201,12 @@ public sealed partial class SqliteDdlScripter : IDdlScripter
         var original = d.Original!;
         var desired = d.Desired;
         var schema = desired.Schema ?? original.Schema;
-        var temp = desired.Name + RebuildSuffix;
+        // A rename together with a rebuild is done last, with a native ALTER TABLE ... RENAME TO: SQLite then also repoints the
+        // REFERENCES clauses of other tables, which a rebuilt table under a new name would leave dangling. A change of case
+        // only cannot be renamed natively (the name is taken by the table itself): the rebuild creates the new spelling.
+        var tableRenamed = !original.Name.Equals(desired.Name, StringComparison.OrdinalIgnoreCase);
+        var rebuildName = tableRenamed ? original.Name : desired.Name;
+        var temp = rebuildName + RebuildSuffix;
         var dependents = context.Dependents ?? [];
 
         // Objects SQLite drops with the table (its triggers) or that would break the RENAME (views/triggers referencing it).
@@ -220,26 +233,26 @@ public sealed partial class SqliteDdlScripter : IDdlScripter
         if (original.Columns.Any(c => c.Autoincrement) && desired.Columns.Any(c => c.Autoincrement))
             ScriptKeepAutoincrementCounter(schema, original.Name, temp, statements);
         statements.Add(new DdlStatement($"DROP TABLE {Qualified(schema, original.Name)}", DdlKinds.Rebuild));
-        statements.Add(new DdlStatement($"ALTER TABLE {Qualified(schema, temp)} RENAME TO {Quote(desired.Name)}", DdlKinds.Rebuild));
+        statements.Add(new DdlStatement($"ALTER TABLE {Qualified(schema, temp)} RENAME TO {Quote(rebuildName)}", DdlKinds.Rebuild));
         foreach (var ix in desired.Indexes)
-            statements.Add(new DdlStatement(CreateIndexSql(schema, desired.Name, ix), DdlKinds.Index));
+            statements.Add(new DdlStatement(CreateIndexSql(schema, rebuildName, ix), DdlKinds.Index));
 
         var renames = d.Renames;
-        var tableRenamed = !original.Name.Equals(desired.Name, StringComparison.OrdinalIgnoreCase);
         foreach (var trg in triggersOnTable)
         {
-            var sql = RewriteReferences(trg.Sql, original.Name, desired.Name, renames);
+            var sql = RewriteReferences(trg.Sql, original.Name, rebuildName, renames);
             var warn = UsesDroppedColumn(trg.Sql, d) ? $"Trigger {trg.Name} uses a dropped column and will fail when it fires." : null;
             statements.Add(new DdlStatement(sql, DdlKinds.Create, warn));
         }
         foreach (var dep in referencing)
         {
-            var sql = RewriteReferences(dep.Sql, original.Name, desired.Name, renames);
+            var sql = RewriteReferences(dep.Sql, original.Name, rebuildName, renames);
             var warn = UsesDroppedColumn(dep.Sql, d) ? $"{(dep.Type == "view" ? "View" : "Trigger")} {dep.Name} uses a dropped column." : null;
             statements.Add(new DdlStatement(sql, DdlKinds.Create, warn));
         }
-        if (tableRenamed && (triggersOnTable.Count > 0 || referencing.Count > 0))
-            warnings.Add("Triggers and views were recreated with the new table name; review their text in the preview.");
+        // Renames the table and, with it, the references of other tables, views and triggers (all recreated above).
+        if (tableRenamed)
+            statements.Add(new DdlStatement($"ALTER TABLE {Qualified(schema, rebuildName)} RENAME TO {Quote(desired.Name)}", DdlKinds.Rename));
 
         statements.Add(new DdlStatement("PRAGMA foreign_key_check", DdlKinds.Pragma));
         statements.Add(new DdlStatement("PRAGMA foreign_keys = ON", DdlKinds.Pragma));
@@ -390,6 +403,12 @@ public sealed partial class SqliteDdlScripter : IDdlScripter
         statements.Add(new DdlStatement($"CREATE VIEW {Qualified(schema, view.Name)} AS\n{TrimBody(view.Body)}", DdlKinds.Create));
         if (original is not null && !editing)
             statements.Add(new DdlStatement($"DROP VIEW IF EXISTS {Qualified(schema, original)}", DdlKinds.Drop));
+        // DROP VIEW silently drops the INSTEAD OF triggers defined on the view: recreate them (on the new name when renamed).
+        if (original is not null)
+        {
+            foreach (var trg in (context.Dependents ?? []).Where(x => x.Type == "trigger" && x.OnTable))
+                statements.Add(new DdlStatement(RewriteReferences(trg.Sql, original, view.Name, new Dictionary<string, string>()), DdlKinds.Create));
+        }
         return new DdlScript(statements, false, true, warnings);
     }
 
