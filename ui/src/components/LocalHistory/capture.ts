@@ -32,6 +32,8 @@ let active: Capture | null = null;
 export interface CaptureOptions {
   /** Defaults to the engine REST call. */
   send?: Send;
+  /** Defaults to the engine REST call; runs once, after the first stored snapshot. */
+  prune?: (days: number) => Promise<unknown>;
   intervalMs?: number;
 }
 
@@ -40,6 +42,7 @@ export function startLocalHistoryCapture(opts: CaptureOptions = {}): Capture {
   if (active) return active;
   const send: Send = opts.send ?? ((i) => localHistoryApi.add(i));
   const interval = opts.intervalMs ?? AUTO_INTERVAL_MS;
+  const prune = opts.prune ?? ((days: number) => localHistoryApi.prune(days));
   const lastByKey = new Map<string, string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let pruned = false;
@@ -54,7 +57,7 @@ export function startLocalHistoryCapture(opts: CaptureOptions = {}): Capture {
       .then(() => {
         if (pruned) return;
         pruned = true;
-        void localHistoryApi.prune(retentionDays()).catch(() => undefined);
+        void prune(retentionDays()).catch(() => undefined);
       })
       .catch((e) => {
         lastByKey.delete(key); // try again with the next trigger

@@ -20,30 +20,25 @@ export interface SnapshotDiffProps {
 export default function SnapshotDiff({ snapshot, current, dialect, theme, ariaLabel }: SnapshotDiffProps) {
   const host = useRef<HTMLDivElement>(null);
   const models = useRef<{ original: monaco.editor.ITextModel; modified: monaco.editor.ITextModel } | null>(null);
-  const editor = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
-  const initial = useRef({ snapshot, current });
-  initial.current = { snapshot, current };
 
   useEffect(() => {
     if (!host.current) return;
     ensureMonacoSetup();
     const lang = LANGUAGE_IDS[dialect];
-    const original = monaco.editor.createModel(initial.current.snapshot, lang);
-    const modified = monaco.editor.createModel(initial.current.current, lang);
+    const original = monaco.editor.createModel('', lang);
+    const modified = monaco.editor.createModel('', lang);
     const diff = monaco.editor.createDiffEditor(host.current, diffEditorOptions(THEME_IDS[theme]));
     diff.setModel({ original, modified });
     plainBrackets(original, modified);
     const unbindFont = bindEditorFontSize(diff, { suggest: false });
     remeasureAfterFonts();
     models.current = { original, modified };
-    editor.current = diff;
     return () => {
       unbindFont();
       diff.dispose();
       original.dispose();
       modified.dispose();
       models.current = null;
-      editor.current = null;
     };
     // rebuilt only for another language or theme; the texts update in place below
   }, [dialect, theme]);
@@ -53,7 +48,7 @@ export default function SnapshotDiff({ snapshot, current, dialect, theme, ariaLa
     if (!m) return;
     if (m.original.getValue() !== snapshot) m.original.setValue(snapshot);
     if (m.modified.getValue() !== current) m.modified.setValue(current);
-  }, [snapshot, current]);
+  }, [snapshot, current, dialect, theme]);
 
   return <div className="lh-diff" ref={host} role="group" aria-label={ariaLabel} />;
 }
