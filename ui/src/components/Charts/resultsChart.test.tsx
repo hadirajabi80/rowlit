@@ -46,7 +46,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   localStorage.clear();
-  act(() => useChartMode.setState({ on: {} }));
+  act(() => useChartMode.setState({ view: {} }));
 });
 
 function show() {

@@ -8,6 +8,7 @@ import { showMenuBelow } from '../common/Menu';
 import { buildChartData } from './aggregate';
 import { ChartBuilder } from './ChartBuilder';
 import { ChartSvg } from './ChartSvg';
+import { registerChartExporter } from './chartMode';
 import { copyChart, saveChart } from './exportChart';
 import { buildScene } from './scene';
 import { loadSpec, saveSpec } from './settings';
@@ -26,10 +27,12 @@ export interface ChartPanelProps {
   queryText: string;
   /** Base of exported file names. */
   name: string;
+  /** The result set's view key: lets the palette commands (Export chart) find this panel. */
+  viewKey?: string;
 }
 
 export default function ChartPanel(props: ChartPanelProps) {
-  const { columns, rows, rev, done, truncated, queryText, name } = props;
+  const { columns, rows, rev, done, truncated, queryText, name, viewKey } = props;
   const [saved] = useState(() => loadSpec(queryText, columns));
   /** The user's own choice; until there is one, the remembered settings or a suggestion from the columns apply. */
   const [chosen, setChosen] = useState<ChartSpec | null>(null);
@@ -70,6 +73,14 @@ export default function ChartPanel(props: ChartPanelProps) {
 
   const data = useMemo(() => buildChartData(columns, rows, spec), [columns, rows, spec, deferredRev]); // eslint-disable-line react-hooks/exhaustive-deps
   const scene = useMemo(() => buildScene(data, spec, size.w, size.h), [data, spec, size.w, size.h]);
+
+  useEffect(() => {
+    if (!viewKey) return;
+    return registerChartExporter(viewKey, {
+      save: (format) => (svgRef.current ? saveChart(svgRef.current, format, name) : undefined),
+      copy: () => (svgRef.current ? copyChart(svgRef.current) : undefined),
+    });
+  }, [viewKey, name]);
 
   const exportMenu = (el: HTMLElement) => {
     const svg = svgRef.current;

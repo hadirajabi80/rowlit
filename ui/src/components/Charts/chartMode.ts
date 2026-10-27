@@ -36,6 +36,20 @@ export function toggleChart(key: string): ResultView {
   return next;
 }
 
+/** What a mounted chart panel offers the palette commands (registered by the lazy panel while it is on screen). */
+export interface ChartExporter {
+  save(format: 'png' | 'svg'): void | Promise<void>;
+  copy(): void | Promise<void>;
+}
+const exporters = new Map<string, ChartExporter>();
+export function registerChartExporter(key: string, e: ChartExporter): () => void {
+  exporters.set(key, e);
+  return () => {
+    if (exporters.get(key) === e) exporters.delete(key);
+  };
+}
+export const chartExporter = (key: string): ChartExporter | undefined => exporters.get(key);
+
 /** Items of the overflow ("...") menu while the Grid | Chart | Both switch is collapsed. */
 export function chartToggleMenu(viewKey: string, disabled?: boolean): MenuItem[] {
   const cur = chartViewOf(viewKey);

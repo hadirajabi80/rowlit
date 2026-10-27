@@ -56,6 +56,8 @@ import { ExecutedQueryLine } from '../ResultsPane/ExecutedQueryLine';
 import type { ExecutedQuery } from '../ResultsPane/executedQuery';
 import { openExportDialog } from '../Export/open';
 import { GRID_EXPORT_MENU } from '../ResultsPane/toolbarModel';
+import { chartBodyClass, useResultView } from '../Charts/chartMode';
+import { ChartPanel, ChartToggle } from '../Charts/ChartToggle';
 import { consumeGridFocus, dataGridKey, hasPendingGridFocus, openDataTab, type DataTabState, type SortByName } from './open';
 import { getSqlRunner } from './runner';
 import { registerDataTabActivity, releaseIdleDataSession } from './sessionLimit';
@@ -125,6 +127,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const pageSize = useSettings((s) => s.settings.grid?.pageSize) || DEFAULT_PAGE;
   const gridKey = dataGridKey(tab.id);
   const buffer = useEditBuffer(gridKey);
+  const resultView = useResultView(gridKey);
   const viewerWidth = useUi((s) => s.cellViewerWidth);
   const setLayout = useUi((s) => s.setLayout);
   useCommandContext();
@@ -829,6 +832,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
           </span>
         )}
         <span className="rs-sep" />
+        <ChartToggle viewKey={gridKey} disabled={!data.columns} />
         <button
           className="btn btn-xs"
           aria-haspopup="menu"
@@ -909,7 +913,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
           <button className="btn btn-xs" onClick={retryLoading}>Retry</button>
         </div>
       )}
-      <div className="resultset-body">
+      <div className={`resultset-body${chartBodyClass(resultView)}`}>
         <div className="resultset-grid">
           {data.columns ? (
             <>
@@ -986,6 +990,12 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
             </div>
           )}
         </div>
+        {resultView !== 'grid' && data.columns && (
+          <ChartPanel
+            viewKey={gridKey} columns={columns} rows={data.rows} rev={data.rev} done={!data.loading} truncated={data.hasMore}
+            queryText={`data ${connectionId} ${database ?? ''} ${state.schema ?? ''}.${state.name}`} name={state.name}
+          />
+        )}
         {recordOpen && (
           <>
             <Splitter direction="vertical" onDragStart={() => setDragStart(viewerWidth)} onDrag={(d) => setLayout({ cellViewerWidth: Math.max(220, Math.min(900, dragStart - d)) })} />
