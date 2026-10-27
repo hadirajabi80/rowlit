@@ -41,7 +41,7 @@ import { AggregateStrip } from '../Grid/AggregateStrip';
 import type { FileFormat } from '../Grid/clientExport';
 import { DataGrid } from '../Grid/LazyDataGrid';
 import { rowValue, type GridSelectionInfo, type RowRef } from '../Grid/gridTypes';
-import { findTable, foreignKeys, referencingTables, tableEditability, type FkLink } from '../Grid/editability';
+import { editableColumnsFor, findTable, foreignKeys, referencingTables, tableEditability, type FkLink } from '../Grid/editability';
 import { overlayRows } from '../Grid/overlay';
 import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
@@ -911,7 +911,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                 columns={columns}
                 values={recordValues}
                 edited={selRef?.src !== undefined ? new Set(Object.keys(buffer.pending.updates[selRef.src] ?? {}).map(Number)) : undefined}
-                editableColumns={editability?.editable ? editability.editableColumns : null}
+                editableColumns={editability?.editable ? editableColumnsFor(editability, !!selRef?.ins) : null}
                 rowLabel={sel ? (sel.sourceRow !== null ? `Row ${sel.row + 1}` : 'New row') : 'Record'}
                 nullText={nullText}
                 dialect={dialect}

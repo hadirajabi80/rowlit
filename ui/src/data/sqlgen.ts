@@ -245,7 +245,12 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
   const pb = new ParamBuilder(dialect, 'p', 1, { positional: true });
   const table = tableSql(t, dialect);
   const q = (n: string) => quoteIdent(n, dialect);
-  const bind = (cv: ColumnValue) => pb.add(paramKindFor(cv.column.kind, cv.value, dialect), bindValue(cv.column.kind, cv.value, dialect));
+  const bind = (cv: ColumnValue) => {
+    const p = pb.add(paramKindFor(cv.column.kind, cv.value, dialect), bindValue(cv.column.kind, cv.value, dialect));
+    // ClickHouse has no implicit String → Array / Map / Tuple conversion in a written value: the JSON text a cell holds is
+    // parsed into the column's own type on the server.
+    return dialect === 'clickhouse' ? clickhouseTyped(p, cv) : p;
+  };
 
   if (change.kind === 'update') {
     const sets = change.set.map((s) => `${q(s.column.name)} = ${bind(s)}`).join(', ');
@@ -258,6 +263,12 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
         .map((s) => (isNullValue(s.old, dialect) ? `${q(s.column.name)} IS NULL` : `${q(s.column.name)} = ${pb.add(paramKindFor(s.column.kind, s.old, dialect), bindValue(s.column.kind, s.old, dialect))}`));
       if (checks.length) where += ` AND ${checks.join(' AND ')}`;
     }
+    if (dialect === 'clickhouse') {
+      // ClickHouse has no UPDATE statement (before 25.x lightweight updates): a mutation, which is asynchronous unless the
+      // statement waits for it (mutations_sync = 1), and the refetch that follows must see the new values. A mutation reports
+      // no row count, so a conflict (0 rows) cannot be detected.
+      return { kind: 'update', ref: change.ref, sql: `ALTER TABLE ${table} UPDATE ${sets} WHERE ${where} SETTINGS mutations_sync = 1`, params: pb.params, returning: [], expectOne: false };
+    }
     return { kind: 'update', ref: change.ref, sql: `UPDATE ${table} SET ${sets} WHERE ${where}`, params: pb.params, returning: [], expectOne: true };
   }
 
@@ -269,7 +280,8 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
         .map((o) => (isNullValue(o.value, dialect) ? `${q(o.column.name)} IS NULL` : `${q(o.column.name)} = ${bind(o)}`));
       if (checks.length) where += ` AND ${checks.join(' AND ')}`;
     }
-    return { kind: 'delete', ref: change.ref, sql: `DELETE FROM ${table} WHERE ${where}`, params: pb.params, returning: [], expectOne: true };
+    // ClickHouse: a lightweight DELETE (MergeTree tables) answers after the rows are masked, but reports no row count.
+    return { kind: 'delete', ref: change.ref, sql: `DELETE FROM ${table} WHERE ${where}`, params: pb.params, returning: [], expectOne: dialect !== 'clickhouse' };
   }
 
   // INSERT: identity columns are omitted unless the user typed a value; unset columns get their DEFAULT.
@@ -323,6 +335,10 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
   } else if (dialect === 'pgsql') {
     const head = values.length ? `INSERT INTO ${table} (${cols}) VALUES (${vals})` : `INSERT INTO ${table} DEFAULT VALUES`;
     sql = ret.length ? `${head} RETURNING ${ret.map(q).join(', ')}` : head;
+  } else if (dialect === 'clickhouse') {
+    // No RETURNING, no DEFAULT VALUES, no generated keys: the row is read back by the key the user typed (else shown as typed).
+    const first = opts.columns?.[0]?.name ?? t.keyColumns[0] ?? change.values[0]?.column.name;
+    sql = values.length ? `INSERT INTO ${table} (${cols}) VALUES (${vals})` : `INSERT INTO ${table} (${q(first ?? 'id')}) VALUES (DEFAULT)`;
   } else if (dialect === 'mysql') {
     // MySQL / MariaDB: no DEFAULT VALUES; the generated key of the row comes back through LAST_INSERT_ID().
     sql = values.length ? `INSERT INTO ${table} (${cols}) VALUES (${vals})` : `INSERT INTO ${table} () VALUES ()`;
@@ -335,7 +351,16 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
       if (ret.length === 1) followUp = `SELECT last_insert_rowid() AS ${q(ret[0])}`;
     }
   }
-  return { kind: 'insert', ref: change.ref, sql, params: pb.params, returning: ret, followUp, expectOne: false };
+  return { kind: 'insert', ref: change.ref, sql, params: pb.params, returning: dialect === 'clickhouse' ? [] : ret, followUp, expectOne: false };
+}
+
+/** ClickHouse composite types a JSON text value is parsed into (JSONExtract); JSON / Variant / Dynamic columns take the text as it is. */
+const CH_PARSED_TYPE = /^(array|map|tuple|nested|point|ring|polygon|multipolygon|linestring|multilinestring)\b/i;
+
+function clickhouseTyped(placeholderSql: string, cv: ColumnValue): string {
+  if (cv.column.kind !== 'json' || typeof cv.value !== 'string' || !CH_PARSED_TYPE.test(cv.column.dbType.trim())) return placeholderSql;
+  const type = cv.column.dbType.trim().replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return `JSONExtract(${placeholderSql}, '${type}')`;
 }
 
 function isComparable(cv: ColumnValue, dialect: Dialect): boolean {

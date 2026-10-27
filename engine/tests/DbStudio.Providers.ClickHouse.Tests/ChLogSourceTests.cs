@@ -23,6 +23,26 @@ public sealed class ChLogSourceTests
     }
 
     [Fact]
+    public void LevelFilter_RunsOnTheServer_BeforeTheLimit()
+    {
+        // Filtering only the fetched page finds no failed query among thousands of finished ones.
+        var from = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = from.AddDays(1);
+        var errors = ChLogSql.QueryLog(from, to, null, 101, [LogLevels.Error]);
+        Assert.Contains("AND (type LIKE 'Exception%')", errors);
+        Assert.Contains("(type = 'QueryFinish' AND query_duration_ms >= 1000)", ChLogSql.QueryLog(from, to, null, 101, [LogLevels.Warn]));
+        var both = ChLogSql.QueryLog(from, to, null, 101, [LogLevels.Warn, LogLevels.Fatal]);
+        Assert.Contains("(type = 'QueryFinish' AND query_duration_ms >= 1000) OR type LIKE 'Exception%'", both);
+        // every level, none, or an unknown one = no narrowing
+        Assert.DoesNotContain("Exception%", ChLogSql.QueryLog(from, to, null, 101, [LogLevels.Info, LogLevels.Warn, LogLevels.Error]));
+        Assert.DoesNotContain("Exception%", ChLogSql.QueryLog(from, to, null, 101));
+        Assert.DoesNotContain("Exception%", ChLogSql.QueryLog(from, to, null, 101, []));
+        Assert.Contains("AND (error != 0)", ChLogSql.PartLog(from, to, null, 101, [LogLevels.Error]));
+        Assert.Contains("AND (level IN ('Fatal', 'Critical', 'Error'))", ChLogSql.TextLog(from, to, null, 101, [LogLevels.Error]));
+        Assert.DoesNotContain("level IN", ChLogSql.TextLog(from, to, null, 101, LogLevels.Standard));
+    }
+
+    [Fact]
     public void Sources_FollowTheSystemTablesThatExist()
     {
         var f = new ChLogSource.Facts("shop", "24.8", new HashSet<string> { "query_log", "errors", "processes" });

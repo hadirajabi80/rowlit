@@ -225,15 +225,42 @@ public sealed class ChDdlScripter : IDdlScripter
         if (engine.IsMergeTree)
         {
             var key = t.PrimaryKey?.Columns ?? [];
-            if (!string.IsNullOrWhiteSpace(engine.PartitionBy)) sb.Append("\nPARTITION BY ").Append(engine.PartitionBy);
-            sb.Append("\nORDER BY ").Append(!string.IsNullOrWhiteSpace(engine.OrderBy) ? engine.OrderBy : KeyExpression(key));
-            if (!string.IsNullOrWhiteSpace(engine.PrimaryKey)) sb.Append("\nPRIMARY KEY ").Append(engine.PrimaryKey);
+            if (!string.IsNullOrWhiteSpace(engine.PartitionBy)) sb.Append("\nPARTITION BY ").Append(WrapList(engine.PartitionBy));
+            sb.Append("\nORDER BY ").Append(!string.IsNullOrWhiteSpace(engine.OrderBy) ? WrapList(engine.OrderBy) : KeyExpression(key));
+            if (!string.IsNullOrWhiteSpace(engine.PrimaryKey)) sb.Append("\nPRIMARY KEY ").Append(WrapList(engine.PrimaryKey));
             if (!string.IsNullOrWhiteSpace(engine.SampleBy)) sb.Append("\nSAMPLE BY ").Append(engine.SampleBy);
             if (!string.IsNullOrWhiteSpace(engine.Ttl)) sb.Append("\nTTL ").Append(engine.Ttl);
             if (!string.IsNullOrWhiteSpace(engine.Settings)) sb.Append("\nSETTINGS ").Append(engine.Settings);
         }
         if (!string.IsNullOrWhiteSpace(t.Comment)) sb.Append("\nCOMMENT ").Append(ChSqlText.Literal(t.Comment));
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// A key expression as ORDER BY / PARTITION BY / PRIMARY KEY accept it: a comma-separated list needs its own parentheses
+    /// (<c>ORDER BY id, ts</c> is a syntax error, <c>ORDER BY (id, ts)</c> is not). <c>system.tables.sorting_key</c> spells
+    /// multi-column keys without them, so a model read from the server must be wrapped when it is scripted again.
+    /// </summary>
+    public static string WrapList(string expression)
+    {
+        var e = expression.Trim();
+        var depth = 0;
+        var quote = '\0';
+        for (var i = 0; i < e.Length; i++)
+        {
+            var c = e[i];
+            if (quote != '\0')
+            {
+                if (c == '\\') i++;
+                else if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '\'' or '`' or '"') quote = c;
+            else if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == ',' && depth == 0) return "(" + e + ")";
+        }
+        return e;
     }
 
     public static string KeyExpression(IReadOnlyList<string> columns) => columns.Count switch

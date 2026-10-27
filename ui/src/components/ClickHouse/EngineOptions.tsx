@@ -25,7 +25,8 @@ export default function EngineOptions({ table, existing, disabled, onChange }: D
     onChange(next);
   };
   const engine = extra.engine ?? 'MergeTree';
-  const mergeTree = engine.endsWith('MergeTree');
+  // The engine keeps its arguments (`ReplacingMergeTree(ver)`): the family is decided by the name before the parenthesis.
+  const mergeTree = engine.split('(')[0].trim().endsWith('MergeTree');
   return (
     <div className="dz-engine" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', padding: '6px 12px', borderBottom: '1px solid var(--border)' }} data-testid="ch-engine-options">
       <label className="dz-field" title="Table engine">

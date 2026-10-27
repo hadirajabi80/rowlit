@@ -234,7 +234,11 @@ public sealed class ChSession : AdoSessionBase, IDbSession
                 await EmitMessageAsync(MessageSeverity.Warning, $"KILL QUERY failed: {ChErrors.CleanMessage(ex.Message)}", null, null, MessageSource.Engine).ConfigureAwait(false);
             }
         }
-        if (context.Status != BatchStatus.Ok || !context.Items.TryGetValue(ReaderKey, out var o) || o is not ChBatchReader r) return;
+        if (!context.Items.TryGetValue(ReaderKey, out var o) || o is not ChBatchReader r) return;
+        foreach (var outcome in r.Outcomes)
+            if (outcome.Statement.IgnoredFormat is { } format)
+                await EmitMessageAsync(MessageSeverity.Info, $"FORMAT {format} was ignored: rows are shown in the result grid (use Export for other formats).", null, null, MessageSource.Engine).ConfigureAwait(false);
+        if (context.Status != BatchStatus.Ok) return;
         foreach (var outcome in r.Outcomes)
         {
             if (outcome.Statement.Mutation is not { } m) continue;

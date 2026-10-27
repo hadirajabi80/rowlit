@@ -139,7 +139,7 @@ public sealed partial class ChDesignerDatabase(ClickHouseProvider provider) : ID
     /// <summary>The engine options the designer's Engine panel edits (<see cref="TableOptions.Extra"/>), from system.tables.</summary>
     public static Dictionary<string, string> EngineExtra(string engine, string? sortingKey, string? primaryKey, string? partitionKey, string? samplingKey, string engineFull)
     {
-        var extra = new Dictionary<string, string> { ["engine"] = engine };
+        var extra = new Dictionary<string, string> { ["engine"] = EngineExpression(engine, engineFull) };
         void Put(string name, string? value) { if (!string.IsNullOrWhiteSpace(value)) extra[name] = value.Trim(); }
         Put("orderBy", sortingKey);
         // PRIMARY KEY is only a separate clause when it differs from the sorting key
@@ -151,6 +151,33 @@ public sealed partial class ChDesignerDatabase(ClickHouseProvider provider) : ID
         var ttl = TtlClause().Match(settings >= 0 ? engineFull[..settings] : engineFull);
         if (ttl.Success) Put("ttl", ttl.Groups["ttl"].Value);
         return extra;
+    }
+
+    /// <summary>
+    /// The engine with its arguments as <c>engine_full</c> spells it: <c>ReplacingMergeTree(ver)</c>, <c>SummingMergeTree((a, b))</c>,
+    /// <c>VersionedCollapsingMergeTree(sign, ver)</c>, <c>Distributed('c', db, t)</c>. The bare name alone would script a different
+    /// (or invalid) table.
+    /// </summary>
+    public static string EngineExpression(string engine, string? engineFull)
+    {
+        var s = (engineFull ?? "").TrimStart();
+        if (engine.Length == 0 || !s.StartsWith(engine + "(", StringComparison.Ordinal)) return engine;
+        var depth = 0;
+        var quote = '\0';
+        for (var i = engine.Length; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (quote != '\0')
+            {
+                if (c == '\\') i++;
+                else if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '\'' or '`' or '"') quote = c;
+            else if (c == '(') depth++;
+            else if (c == ')' && --depth == 0) return s[..(i + 1)];
+        }
+        return engine;
     }
 
     public async Task<ViewModel> ReadViewAsync(ConnectionProfile profile, string? password, string? database, string? schema, string name, CancellationToken ct)

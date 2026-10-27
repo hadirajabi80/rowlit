@@ -34,6 +34,14 @@ describe('ClickHouse engine options panel', () => {
     expect(screen.queryByPlaceholderText('toYYYYMM(date)')).toBeNull();
   });
 
+  it('an engine with arguments keeps its MergeTree clauses visible', () => {
+    // The engine carries its arguments (ReplacingMergeTree(ver)); matching the whole string hid ORDER BY / TTL / SETTINGS.
+    render(<EngineOptions table={table({ engine: 'ReplacingMergeTree(ver)', orderBy: 'id, ts' })} existing disabled={false} onChange={() => {}} />);
+    expect(screen.getByDisplayValue('ReplacingMergeTree(ver)')).toBeDisabled();
+    expect(screen.getByDisplayValue('id, ts')).toBeDisabled();
+    expect(screen.getByPlaceholderText('date + INTERVAL 90 DAY')).toBeEnabled();
+  });
+
   it('the registry answers per provider', () => {
     const off = registerDesignerOptionsPanel('test-provider', EngineOptions);
     expect(designerOptionsPanel('test-provider')).toBe(EngineOptions);

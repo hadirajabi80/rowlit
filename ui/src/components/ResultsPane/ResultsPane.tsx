@@ -36,7 +36,7 @@ import { AggregateStrip } from '../Grid/AggregateStrip';
 import { CellViewer } from '../Grid/CellViewer';
 import { DataGrid } from '../Grid/LazyDataGrid';
 import { rowValue, type GridSelectionInfo, type RowRef } from '../Grid/gridTypes';
-import { foreignKeys, referencingTables, resultEditability, type FkLink } from '../Grid/editability';
+import { editableColumnsFor, foreignKeys, referencingTables, resultEditability, type FkLink } from '../Grid/editability';
 import { overlayRows } from '../Grid/overlay';
 import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
@@ -638,7 +638,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
                   columns={columns}
                   values={recordValues}
                   edited={selRef?.src !== undefined ? new Set(Object.keys(buffer.pending.updates[selRef.src] ?? {}).map(Number)) : undefined}
-                  editableColumns={editability?.editable ? editability.editableColumns : null}
+                  editableColumns={editability?.editable ? editableColumnsFor(editability, !!selRef?.ins) : null}
                   rowLabel={sel ? (sel.sourceRow !== null ? `Row ${sel.row + 1}` : 'New row') : 'Record'}
                   nullText={nullText}
                   dialect={dialect}
