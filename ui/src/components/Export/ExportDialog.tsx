@@ -8,6 +8,7 @@ import { EXPORT_EXT, EXPORT_FILTER_NAME } from '../../lib/exportFormats';
 import { getPlatform } from '../../platform';
 import { Dialog } from '../common/Dialog';
 import { Select, type SelectOption } from '../common/Select';
+import { cleanPastedPath } from '../ImportWizard/files';
 import { DATE_PRESETS } from './dateFormat';
 import {
   DEFAULT_SETTINGS, defaultNullText, dirOf, EXPORT_LABEL, exportFileName, isBinaryFormat, isServerScope, isTextFormat, joinPath, loadPrefs, nullTextOf, savePrefs,
@@ -261,7 +262,7 @@ export function ExportDialog({ source, onClose }: { source: ExportSource; onClos
             <div className="file-input">
               <input
                 id="ex-path" className="input flex-1" spellCheck={false} dir="ltr" value={path} disabled={running}
-                placeholder={platform.hasFileSystem ? 'Choose a file…' : 'Full path on this computer'} onChange={(e) => setPath(e.target.value)}
+                placeholder={platform.hasFileSystem ? 'Choose a file…' : 'Full path on this computer'} onChange={(e) => setPath(cleanPastedPath(e.target.value))}
               />
               {platform.hasFileSystem && (
                 <button className="btn" type="button" onClick={() => void browse()} disabled={running}><FolderOpen size={14} aria-hidden /> Browse…</button>

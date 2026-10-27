@@ -16,11 +16,25 @@ function unquote(raw: string): string {
   return last.replace(/^[[\]"`']+|[[\]"`']+$/g, '');
 }
 
-/** The identifier an "unknown table / column" error is about (SQLite, SQL Server, Oracle wording). */
+/**
+ * The identifier an "unknown table / column" error is about: SQLite, SQL Server and Oracle wording, and the wording of
+ * PostgreSQL (`relation "x" does not exist`, `column c.x does not exist`), MySQL / MariaDB (`Table 'db.x' doesn't
+ * exist`, `Unknown column 'x' in 'field list'`), ClickHouse and Snowflake.
+ */
 export function unknownIdentifier(text: string): UnknownIdentifier | null {
-  let m = /no such table:\s*([\w$#.[\]"`]+)/i.exec(text) ?? /Invalid object name '([^']+)'/i.exec(text);
+  let m = /no such table:\s*([\w$#.[\]"`]+)/i.exec(text) ?? /Invalid object name '([^']+)'/i.exec(text)
+    ?? /(?<!of\s)relation\s+"([^"]+)"\s+does not exist/i.exec(text)
+    ?? /Table\s+'([^']+)'\s+doesn't exist/i.exec(text)
+    ?? /Unknown table expression identifier\s+[`']([^`']+)[`']/i.exec(text)
+    ?? /Table\s+([\w$.`"]+)\s+does not exist/i.exec(text)
+    ?? /Object\s+'([^']+)'\s+does not exist or not authorized/i.exec(text);
   if (m) return { kind: 'table', name: unquote(m[1]) };
-  m = /no such column:\s*([\w$#.[\]"`]+)/i.exec(text) ?? /Invalid column name '([^']+)'/i.exec(text) ?? /ORA-00904:\s*("?[\w$#]+"?(?:\."?[\w$#]+"?)?)\s*: invalid identifier/i.exec(text);
+  m = /no such column:\s*([\w$#.[\]"`]+)/i.exec(text) ?? /Invalid column name '([^']+)'/i.exec(text) ?? /ORA-00904:\s*("?[\w$#]+"?(?:\."?[\w$#]+"?)?)\s*: invalid identifier/i.exec(text)
+    ?? /Unknown column\s+'([^']+)'\s+in\s+'/i.exec(text)
+    ?? /column\s+("?[\w$]+"?(?:\."?[\w$]+"?)?)\s+(?:of relation\s+"[^"]+"\s+)?does not exist/i.exec(text)
+    ?? /Missing columns:\s*'([^']+)'/i.exec(text)
+    ?? /Unknown expression(?: or function)? identifier\s+[`']([^`']+)[`']/i.exec(text)
+    ?? /invalid identifier\s+'([^']+)'/i.exec(text);
   if (m) return { kind: 'column', name: unquote(m[1]) };
   return null;
 }

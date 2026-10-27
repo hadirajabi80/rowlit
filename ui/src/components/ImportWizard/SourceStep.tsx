@@ -5,7 +5,7 @@ import { useState, type DragEvent, type Ref } from 'react';
 import { getPlatform } from '../../platform';
 import { toast } from '../../store/ui';
 import { hasFiles, pathOfFile, toastUnsupported } from './fileDrop';
-import { FORMAT_BADGE, FORMAT_LABEL, IMPORT_FILE_FILTERS, fileNameOf, formatOfPath, isImportable } from './files';
+import { FORMAT_BADGE, FORMAT_LABEL, IMPORT_FILE_FILTERS, cleanPastedPath, fileNameOf, formatOfPath, isImportable } from './files';
 import { formatBytes, formatCount } from './model';
 import { Callout, ConnectionPicker, Field, FileTypeIcon, StepHeader } from './parts';
 import { forgetRecent, readRecent, type RecentFile } from './recent';
@@ -132,7 +132,7 @@ export function SourceStep({ w, headingRef }: { w: Wizard; headingRef: Ref<HTMLH
           spellCheck={false}
           dir="ltr"
           data-primary-focus={platform.hasFileSystem ? undefined : ''}
-          onChange={(e) => setPath(e.target.value)}
+          onChange={(e) => setPath(cleanPastedPath(e.target.value))}
         />
       </Field>
 

@@ -155,10 +155,20 @@ export function singleSchema(d: DbCatalog | undefined): string | null {
   return list && list.length === 1 ? list[0].name : null;
 }
 
+/**
+ * Routines the catalog lists once per overload (PostgreSQL, SQL Server numbered procedures): the tree shows one node per
+ * name, like the Objects tab (it opens the routine by name anyway), and node ids stay unique (they are React keys and
+ * the selection).
+ */
+const ROUTINE_TYPES = new Set<CatalogObjectType>(['proc', 'func', 'tablefunc']);
+
 function groupObjects(objects: CatalogObject[], types: Set<CatalogObjectType> | null): Map<CatalogObjectType, CatalogObject[]> {
   const m = new Map<CatalogObjectType, CatalogObject[]>();
+  const seenRoutine = new Set<string>();
   for (const o of objects) {
     if (types && !types.has(o.t)) continue;
+    if (ROUTINE_TYPES.has(o.t) && seenRoutine.has(`${o.t}\u0001${o.n}`)) continue;
+    if (ROUTINE_TYPES.has(o.t)) seenRoutine.add(`${o.t}\u0001${o.n}`);
     let l = m.get(o.t);
     if (!l) m.set(o.t, (l = []));
     l.push(o);
@@ -481,8 +491,14 @@ function buildFiltered(input: TreeInput): TreeRow[] {
         if (!d.loaded[s.name] && d.schemaStatus[s.name] !== 'loading') unloaded.push({ db: d.database, schema: s.name });
       }
       for (const s of Object.values(d.loaded)) {
+        const seenRoutine = new Set<string>();
         for (const o of s.objects) {
           if (types && !types.has(o.t)) continue;
+          if (ROUTINE_TYPES.has(o.t)) {
+            const rk = `${o.t}\u0001${o.n}`;
+            if (seenRoutine.has(rk)) continue; // an overload of a routine already listed
+            seenRoutine.add(rk);
+          }
           const m = fuzzyMatchLower(pattern, o.n, o.n.toLowerCase());
           let cols: Map<string, number[]> | undefined;
           let colScore = 0;

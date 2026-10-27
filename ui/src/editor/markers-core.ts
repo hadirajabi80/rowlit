@@ -78,7 +78,8 @@ export function suggestIdentifier(name: string, candidates: readonly string[]): 
   for (const c of candidates) {
     if (Math.abs(c.length - n.length) > max) continue;
     if (c.toLowerCase() === n.toLowerCase()) return null;
-    const d = editDistance(n, c);
+    // Case is not a typo: PostgreSQL folds an unquoted Custmers to custmers before it reports it.
+    const d = editDistance(n.toLowerCase(), c.toLowerCase());
     if (d <= max && (d < bestD || (d === bestD && best !== null && c.length < best.length))) {
       best = c;
       bestD = d;

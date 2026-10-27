@@ -58,7 +58,15 @@ const columnCache = new WeakMap<CatalogSchema, IndexEntry[]>();
 function schemaEntries(d: DbCatalog, s: CatalogSchema): IndexEntry[] {
   let list = objectCache.get(s);
   if (list) return list;
-  list = s.objects.map((o) => ({
+  // One entry per routine name: the catalog lists an overloaded routine once per overload, and Enter opens it by name.
+  const seenRoutine = new Set<string>();
+  list = s.objects.filter((o) => {
+    if (o.t !== 'proc' && o.t !== 'func' && o.t !== 'tablefunc') return true;
+    const k = `${o.t}\u0001${o.n}`;
+    if (seenRoutine.has(k)) return false;
+    seenRoutine.add(k);
+    return true;
+  }).map((o) => ({
     name: o.n, lower: o.n.toLowerCase(), type: o.t, connectionId: d.connectionId, database: d.database, schema: s.name,
     ref: { database: d.database, schema: s.name, name: o.n, type: o.t },
   }));

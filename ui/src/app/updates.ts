@@ -8,7 +8,8 @@ import { REPO_URL } from './brand';
 import { getPlatform } from '../platform';
 import type { UpdateStatus } from '../platform/bridge';
 import { autoCheckUpdates, useSettings } from '../store/settings';
-import { toast } from '../store/ui';
+import { toast, useUi } from '../store/ui';
+import { describeUnsavedWork } from './unsavedWork';
 import { useUpdates } from '../store/updates';
 
 export const RELEASES_URL = `${REPO_URL}/releases`;
@@ -123,6 +124,18 @@ export async function checkForUpdatesNow(): Promise<void> {
 
 /** "Restart now" (install mode). */
 export async function restartToUpdate(): Promise<void> {
+  // The restart ends every engine session: unsaved grid edits are gone and open transactions roll back.
+  const lost = describeUnsavedWork();
+  if (lost) {
+    const go = await useUi.getState().askConfirm({
+      title: 'Restart Rowlit to update?',
+      message: `Restarting closes the engine sessions. You have ${lost}; they are lost when Rowlit restarts. Your consoles are kept.`,
+      confirmLabel: 'Discard and restart',
+      cancelLabel: 'Not now',
+      danger: true,
+    });
+    if (!go) return;
+  }
   const ok = await getPlatform().quitAndInstall?.().catch(() => false);
   if (!ok) toast('warning', 'The update could not be installed now', 'It will be installed when Rowlit quits.');
 }

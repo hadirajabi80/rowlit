@@ -11,6 +11,7 @@ import { runCommand } from '../../commands/registry';
 import { CONNECTION_PALETTE, connColorCss } from '../../theme/connColors';
 import { fileFilterExtensions } from '../../lib/fileFilter';
 import { Dialog } from '../common/Dialog';
+import { connectionHint } from './connectionHints';
 import { Select } from '../common/Select';
 import { PROVIDER_LABEL } from '../common/icons';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
@@ -399,12 +400,14 @@ export function ConnectionDialog({ state, onClose }: Props) {
 
 function TestResultPanel({ r }: { r: TestConnectionResult }) {
   if (!r.ok) {
+    const hint = connectionHint([r.error?.message, r.error?.detail].filter(Boolean).join(' '));
     return (
       <div className="test-result error" role="alert">
         <CircleAlert size={16} />
         <div>
           <div className="test-title">Connection failed</div>
           <div className="test-detail">{r.error?.message ?? 'Unknown error'}</div>
+          {hint && <div className="test-detail test-hint">{hint}</div>}
         </div>
       </div>
     );

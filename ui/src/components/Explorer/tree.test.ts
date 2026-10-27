@@ -130,3 +130,22 @@ describe('explorer tree while the catalog revalidates (no collapse / flash after
     expect(quiet.find((r) => r.kind === 'connection')?.busy).toBe(false);
   });
 });
+
+describe('overloaded routines', () => {
+  it('appear once in the Functions folder, with unique node ids (the catalog lists one object per overload)', () => {
+    const base = input({ expanded: new Set(['c:c1', nodeId.db('c1', 'Shop'), nodeId.schema('c1', 'Shop', 'dbo'), nodeId.folder('c1', 'Shop', 'dbo', 'func')]) });
+    const d = base.dbs.k;
+    const objs: CatalogObject[] = [
+      { t: 'func', n: 'price_range', p: [['x', 'int', 'in', 0]] }, { t: 'func', n: 'price_range', p: [['x', 'text', 'in', 0]] }, { t: 'func', n: 'fn_tax' },
+    ];
+    const withOverloads: TreeInput = { ...base, dbs: { [dbKey('c1', 'Shop')]: { ...d, loaded: { dbo: { name: 'dbo', version: 1, objects: objs } } } } };
+    const rows = buildTree(withOverloads);
+    const ids = rows.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(rows.find((r) => r.kind === 'folder' && r.objectType === 'func')?.count).toBe(2);
+    expect(rows.filter((r) => r.kind === 'object' && r.label === 'price_range')).toHaveLength(1);
+    // the filtered tree as well
+    const filtered = buildTree({ ...withOverloads, filter: 'price' });
+    expect(filtered.filter((r) => r.kind === 'object' && r.label === 'price_range')).toHaveLength(1);
+  });
+});

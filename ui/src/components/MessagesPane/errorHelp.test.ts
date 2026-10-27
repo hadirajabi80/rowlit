@@ -25,6 +25,29 @@ describe('error guidance (design-22 / design-p8)', () => {
     expect(unknownIdentifier('ORA-00904: "C"."CITTY": invalid identifier')).toEqual({ kind: 'column', name: 'CITTY' });
   });
 
+  it('extracts the unknown identifier from PostgreSQL, MySQL / MariaDB, ClickHouse and Snowflake errors', () => {
+    expect(unknownIdentifier('[42P01] relation "custmers" does not exist')).toEqual({ kind: 'table', name: 'custmers' });
+    expect(unknownIdentifier('relation "public.custmers" does not exist')).toEqual({ kind: 'table', name: 'custmers' });
+    expect(unknownIdentifier('[42703] column "citty" does not exist')).toEqual({ kind: 'column', name: 'citty' });
+    expect(unknownIdentifier('column c.citty does not exist')).toEqual({ kind: 'column', name: 'citty' });
+    expect(unknownIdentifier('column "citty" of relation "customers" does not exist')).toEqual({ kind: 'column', name: 'citty' });
+    expect(unknownIdentifier("Table 'shop.custmers' doesn't exist")).toEqual({ kind: 'table', name: 'custmers' });
+    expect(unknownIdentifier("Unknown column 'c.citty' in 'field list'")).toEqual({ kind: 'column', name: 'citty' });
+    expect(unknownIdentifier('Code: 60. DB::Exception: Table shop.custmers does not exist.')).toEqual({ kind: 'table', name: 'custmers' });
+    expect(unknownIdentifier("Unknown table expression identifier 'custmers' in scope SELECT * FROM custmers")).toEqual({ kind: 'table', name: 'custmers' });
+    expect(unknownIdentifier("SQL compilation error: Object 'CUSTMERS' does not exist or not authorized.")).toEqual({ kind: 'table', name: 'CUSTMERS' });
+    expect(unknownIdentifier("SQL compilation error: error line 1 at position 7\ninvalid identifier 'CITTY'")).toEqual({ kind: 'column', name: 'CITTY' });
+    // not an unknown table / column
+    expect(unknownIdentifier('database "nodb" does not exist')).toBeNull();
+    expect(unknownIdentifier('schema "x" does not exist')).toBeNull();
+    expect(unknownIdentifier('function foo(integer) does not exist')).toBeNull();
+  });
+
+  it('suggests the closest catalog name for a PostgreSQL error (the user typed Custmers, the error says custmers)', () => {
+    expect(didYouMean('c1', '[42P01] relation "custmers" does not exist')).toEqual({ kind: 'table', name: 'custmers', suggestion: 'Customers' });
+    expect(errorHelp(null, 'relation "invoices" does not exist')?.sentence).toMatch(/no table or view named “invoices”/);
+  });
+
   it('suggests the closest catalog name', () => {
     expect(didYouMean('c1', 'no such table: Custmers')).toEqual({ kind: 'table', name: 'Custmers', suggestion: 'Customers' });
     expect(didYouMean('c1', 'no such column: Citty', 'select Citty from Customers')?.suggestion).toBe('City');

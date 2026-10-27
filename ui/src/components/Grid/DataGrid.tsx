@@ -727,6 +727,15 @@ export function DataGrid(p: DataGridProps) {
       { label: 'View value', onClick: () => p.onOpenViewer?.(selInfo(col, row)) },
       { separator: true },
       { label: 'Filter', shortcut: displayShortcut('Mod+Alt+F'), submenu: filterSubmenu(col, v) },
+      // Sorting is otherwise a header click: this is the keyboard way (Shift+F10 on a cell) and saves the trip up to the header.
+      {
+        label: 'Sort by this column',
+        submenu: [
+          { label: 'Ascending', onClick: () => setSort([{ column: col, dir: 'asc' }]) },
+          { label: 'Descending', onClick: () => setSort([{ column: col, dir: 'desc' }]) },
+          { label: 'Clear sort', disabled: shownSort.length === 0, onClick: () => setSort([]) },
+        ],
+      },
     ];
     if (fk && v !== null && r.src !== undefined && p.onNavigateFk) {
       items.push({ label: `Go to referenced row (${fk.refTable})`, shortcut: displayShortcut('Mod+Click'), onClick: () => p.onNavigateFk!(fk, fk.ordinals.map((o) => valueAt(r, o))) });
