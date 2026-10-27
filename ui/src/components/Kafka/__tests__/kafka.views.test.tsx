@@ -256,6 +256,16 @@ describe('views', () => {
     expect(within(results).getAllByRole('row')[1]).toHaveTextContent('25');
   });
 
+  it('produce can send a null value (tombstone) without validating or sending the value text', async () => {
+    show(openProduce(CID, 'events', { key: 'k1', value: '{not json', valueFormat: 'json' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Null value/ }));
+    expect(screen.queryByLabelText('Value')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Produce' }));
+    // the invalid JSON text would be refused client-side if it were still validated
+    await screen.findByRole('table', { name: 'Produced messages' });
+    expect(screen.queryByText(/not valid JSON/)).not.toBeInTheDocument();
+  });
+
   it('produce on a read-only connection is disabled', async () => {
     setReadOnly(true);
     show(openProduce(CID, 'events'));
