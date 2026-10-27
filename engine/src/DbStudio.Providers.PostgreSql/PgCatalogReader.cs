@@ -161,6 +161,7 @@ public sealed partial class PgCatalogReader : ICatalogReader
                 Comment = p.Comment,
                 Parameters = parameters,
                 Columns = cols,
+                Group = p.Group,
             });
         }
 
@@ -208,11 +209,12 @@ public sealed partial class PgCatalogReader : ICatalogReader
     // ------------------------------------------------------------------ routines
 
     internal sealed record RawRoutine(uint Oid, string Name, string Kind, bool ReturnsSet, string? Result, string? Comment, string? Language,
-        int DefaultCount, string[] ArgNames, string[] Modes, string[] ArgTypes, uint ReturnRelation, string? ReturnTypeType, string? ReturnType);
+        int DefaultCount, string[] ArgNames, string[] Modes, string[] ArgTypes, uint ReturnRelation, string? ReturnTypeType, string? ReturnType,
+        string? Group = null);
 
     private static RawRoutine ReadRoutine(NpgsqlDataReader r) => new(
         PgDb.Oid(r, 0), r.GetString(1), r.GetString(2), PgDb.Bool(r, 3), PgDb.Str(r, 4), PgDb.Str(r, 5), PgDb.Str(r, 6),
-        PgDb.Int(r, 7), PgDb.Strings(r, 8), PgDb.Strings(r, 9), PgDb.Strings(r, 10), PgDb.Oid(r, 11), PgDb.Str(r, 12), PgDb.Str(r, 13));
+        PgDb.Int(r, 7), PgDb.Strings(r, 8), PgDb.Strings(r, 9), PgDb.Strings(r, 10), PgDb.Oid(r, 11), PgDb.Str(r, 12), PgDb.Str(r, 13), PgDb.Str(r, 14));
 
     /// <summary>
     /// prokind p → proc; set-returning, RETURNS TABLE / SETOF record or a row type → tablefunc; else func. Parameters:

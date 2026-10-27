@@ -45,6 +45,11 @@ public sealed class CatalogObject
     public string? Kind { get; init; }
     /// <summary>Type objects: one-line description of the definition (base type, subtype, element type...). Wire "bt".</summary>
     public string? BaseType { get; init; }
+    /// <summary>
+    /// Routines that belong to another object rather than to the user (PostgreSQL: members of an extension, the
+    /// constructors of a range type): the explorer lists them in a sub-folder with this label. Wire "g".
+    /// </summary>
+    public string? Group { get; init; }
 }
 
 /// <summary>Kinds of <see cref="ObjectTypes.Type"/> objects (wire tokens of <c>CatalogObject.k</c>).</summary>

@@ -34,3 +34,7 @@ driving a live Oracle 23ai instance through the UI; each is fixed with a regress
   of memory and no Oracle container was running), so the integration regression tests for items 7 and 10 were not
   re-run in the final pass. Re-run them with the container up (`engine/tests/docker`).
 - The three 150 ms formatter performance tests above are timing-sensitive; re-run them on an idle machine.
+- Follow-up round (open items fix): both points are still open, as environment items. Docker Desktop did not answer
+  `docker ps`, so the Oracle container could not be started. The unit side of NUMBER binds now goes through the shared
+  exact value (`ExactDecimal`, `OracleParamBinder.ToOracleDecimal`; an int param beyond long binds as NUMBER too, NaN is
+  rejected), tested by `OracleM15Tests.Bind_DecimalBeyondSystemDecimal_IsExact`.

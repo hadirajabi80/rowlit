@@ -69,6 +69,8 @@ export const nodeId = {
   savedQuery: (cid: string, id: string) => `sq:${cid}:${id}`,
   /** A kind sub-folder of a schema's Types folder ("User-Defined Table Types"). */
   typeKind: (folderId: string, kind: string) => `${folderId}#${kind}`,
+  /** An owner sub-folder of a Functions / Procedures folder ("Extension postgis"). */
+  routineGroup: (folderId: string, group: string) => `${folderId}#g:${group}`,
   /** A database's "System Data Types" group and its category sub-folders. */
   systemTypes: (cid: string, db: string | null) => `sty:${cid}:${db ?? ''}`,
   systemCategory: (groupId: string, category: string) => `${groupId}#${category}`,
@@ -360,6 +362,7 @@ function addFolders(rows: TreeRow[], input: TreeInput, cid: string, db: string |
     });
     if (!open) continue;
     if (t === 'type') addTypeObjects(rows, input, cid, db, schema, objs, fid, depth + 1);
+    else if (ROUTINE_TYPES.has(t)) addRoutineObjects(rows, input, cid, db, schema, t, objs, fid, depth + 1);
     else for (const o of objs) addObject(rows, input, cid, db, schema, o, depth + 1);
   }
   if (withQueries) addQueries(rows, input, cid, db, schema, depth);
@@ -393,6 +396,36 @@ function addTypeObjects(rows: TreeRow[], input: TreeInput, cid: string, db: stri
     rows.push({
       id, kind: 'folder', depth, label: typeKindInfo(kind)?.plural ?? kind, expandable: true, expanded: open, connectionId: cid, database: db, schema,
       objectType: 'type', typeKind: kind, count: list.length,
+    });
+    if (open) for (const o of list) addObject(rows, input, cid, db, schema, o, depth + 1);
+  }
+  for (const o of plain) addObject(rows, input, cid, db, schema, o, depth);
+}
+
+/**
+ * The routines of a Functions / Procedures folder. Those owned by something else (`g`: PostgreSQL extension members such
+ * as PostGIS or postgres_fdw, range type constructors) sit in one collapsed sub-folder per owner, so the user's own
+ * routines are not lost among them; completion still offers all of them.
+ */
+function addRoutineObjects(
+  rows: TreeRow[], input: TreeInput, cid: string, db: string | null, schema: string, t: CatalogObjectType, objs: CatalogObject[], fid: string, depth: number,
+) {
+  const byGroup = new Map<string, CatalogObject[]>();
+  const plain: CatalogObject[] = [];
+  for (const o of objs) {
+    if (!o.g) plain.push(o);
+    else {
+      let l = byGroup.get(o.g);
+      if (!l) byGroup.set(o.g, (l = []));
+      l.push(o);
+    }
+  }
+  for (const g of [...byGroup.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))) {
+    const list = byGroup.get(g)!;
+    const id = nodeId.routineGroup(fid, g);
+    const open = input.expanded.has(id);
+    rows.push({
+      id, kind: 'folder', depth, label: g, expandable: true, expanded: open, connectionId: cid, database: db, schema, objectType: t, count: list.length,
     });
     if (open) for (const o of list) addObject(rows, input, cid, db, schema, o, depth + 1);
   }

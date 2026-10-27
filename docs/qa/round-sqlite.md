@@ -24,10 +24,10 @@ Severity: crash / wrong data / failed operation > broken workflow > UX.
 
 | # | Area | Sev | Finding | Why open |
 |---|------|-----|---------|----------|
-| O1 | Console | cosmetic | An unnamed `?` placeholder is rewritten to `@__p1`, so `SELECT ?` shows a column called `@__p1`. | Needs an alias injection in the binder; no data impact. |
-| O2 | Designer | UX | A view created with a column list (`CREATE VIEW v (a, b) AS ...`) loses the list when edited in the view designer (the body is the SELECT only). | Rare; needs a CTE wrapper or a model field. F4 (script edit) keeps the text as is. |
+| O1 | Console | cosmetic | An unnamed `?` placeholder is rewritten to `@__p1`, so `SELECT ?` shows a column called `@__p1`. | **Fixed**: result columns named after a rewritten placeholder are shown as `?` (`SqliteSession.DescribeColumns`). Test: `ParamExecutionTests.UnnamedPlaceholderColumn_IsNamedAsWritten`. |
+| O2 | Designer | UX | A view created with a column list (`CREATE VIEW v (a, b) AS ...`) loses the list when edited in the view designer (the body is the SELECT only). | **Fixed**: when the SELECT does not already yield the listed names, the designer body is the SELECT wrapped in a CTE with the list (`WITH v(a, b) AS (...) SELECT * FROM v`), so a save keeps them (`SqliteCreateTableParser.ViewParts`, `SqliteDesignerDatabase.ReadViewAsync`). Test: `SqliteDesignerRoundTripTests.ViewWithColumnList_KeepsItsColumnNamesThroughTheDesigner`. |
 | O3 | Connection | UX | "Test connection" on a profile with create-if-missing creates the (empty) file. | By design: the file is created on connect anyway; documented. |
-| O4 | Console | cosmetic | `SELECT NULL AS x` (and `PRAGMA table_info` `dflt_value` of a NULL first row) is typed `binary` because SQLite gives no declared type. | Type is inferred from the first row; harmless. |
+| O4 | Console | cosmetic | `SELECT NULL AS x` (and `PRAGMA table_info` `dflt_value` of a NULL first row) is typed `binary` because SQLite gives no declared type. | Left: Microsoft.Data.Sqlite infers the type from the first row (NULL → BLOB affinity) before any row is read; the values themselves are shown correctly. |
 | O5 | Explorer | UX | Temp tables/views of a console session are not shown in the explorer (the `temp` schema is excluded). | Intentional; they die with the session. |
 
 ## Verified without findings

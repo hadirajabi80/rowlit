@@ -188,6 +188,8 @@ export function tableSql(t: TableTarget, dialect: Dialect): string {
 export function paramKindFor(kind: ColumnKind, value: CellValue, dialect: Dialect): ParamKind {
   if (value === null) return kind === 'binary' ? 'binary' : kindToParam(kind, dialect);
   if (typeof value === 'boolean') return hasBool(dialect) ? 'bool' : 'int';
+  // PostgreSQL timetz ("10:20:30+05"): the time bind has no zone; untyped text is cast by the server.
+  if (dialect === 'pgsql' && kind === 'time' && typeof value === 'string' && /\d[+-]\d\d(:\d\d){0,2}$/.test(value.trim())) return 'string';
   return kindToParam(kind, dialect);
 }
 
