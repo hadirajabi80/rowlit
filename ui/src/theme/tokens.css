@@ -187,6 +187,16 @@
   --diff-inserted-mark: rgb(22 163 74 / 55%);
   --diff-removed-mark: rgb(220 38 38 / 50%);
   --diff-diagonal: rgb(16 24 40 / 5%);
+
+  /* chart series palette (components/Charts): >= 3:1 on --bg-panel, hues spread for colour-blind readability */
+  --chart-1: #2563eb;
+  --chart-2: #c2410c;
+  --chart-3: #0f8a5f;
+  --chart-4: #a21caf;
+  --chart-5: #a16207;
+  --chart-6: #0e7490;
+  --chart-7: #be123c;
+  --chart-8: #4b5563;
 }
 
 /* ------------------------------------------------------------------- dark */
@@ -341,6 +351,15 @@
   --diff-inserted-mark: rgb(74 222 128 / 55%);
   --diff-removed-mark: rgb(248 113 113 / 55%);
   --diff-diagonal: rgb(255 255 255 / 4%);
+
+  --chart-1: #5b9cff;
+  --chart-2: #fb923c;
+  --chart-3: #34d399;
+  --chart-4: #e879f9;
+  --chart-5: #fbbf24;
+  --chart-6: #67e8f9;
+  --chart-7: #fb7185;
+  --chart-8: #a3acb9;
 }
 
 /* ------------------------------------------------- theme-independent scale */

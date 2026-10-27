@@ -1,0 +1,197 @@
+/* Chart view of a result set. Colours only through design tokens (series colours: --chart-1..8). */
+.chart-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-panel);
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.chart-panel.narrow {
+  flex-direction: column;
+}
+.chart-side {
+  flex-shrink: 0;
+  width: 248px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 8px 10px;
+}
+.chart-panel.narrow .chart-side {
+  width: auto;
+  max-height: 44%;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+.chart-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chart-panel.narrow .chart-builder {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.chart-panel.narrow .cb-field {
+  min-width: 150px;
+}
+.cb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cb-field > label {
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+}
+.cb-row {
+  display: flex;
+  gap: 6px;
+}
+.cb-row .cb-field {
+  flex: 1;
+}
+.cb-row .cb-narrow {
+  flex: 0 0 64px;
+}
+.cb-series {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cb-series > :first-child {
+  flex: 1.3;
+  min-width: 0;
+}
+.cb-series > :nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.cb-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+}
+.cb-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.chart-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+}
+.chart-stage-host {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+.chart-stage {
+  position: absolute;
+  inset: 0;
+}
+.chart-stage svg {
+  display: block;
+}
+.chart-stage svg:focus-visible,
+.chart-plot:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.chart-plot [data-mi]:focus {
+  outline: none;
+}
+.chart-cursor rect,
+.chart-cursor circle,
+.chart-cursor path {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  padding: 16px;
+  text-align: center;
+}
+.chart-notes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, calc(-100% - 12px));
+  min-width: 120px;
+  max-width: 240px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-popup);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+.chart-tip.below {
+  transform: translate(-50%, 14px);
+}
+.chart-tip-title {
+  font-weight: var(--weight-strong);
+  margin-bottom: 3px;
+  overflow-wrap: anywhere;
+}
+.chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+}
+.chart-tip-row.on {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.chart-tip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.chart-tip-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chart-tip-value {
+  font-variant-numeric: tabular-nums;
+}
