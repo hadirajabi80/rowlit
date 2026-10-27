@@ -107,6 +107,18 @@ public sealed class FederatedSessionTests : IAsyncLifetime
         Assert.Equal(["120.50", "120.50"], sink.Single()[0].Select(v => (string)v!));
     }
 
+    [Fact]
+    public async Task Builder_regex_filter_runs_in_duckdb()
+    {
+        // the SQL the builder compiles for a "matches regex" condition (parameters bound as the builder sends them)
+        var s = await _h.OpenAsync(_link);
+        var args = new[] { new DbStudio.Core.Params.QueryParam("fp1", "string", System.Text.Json.Nodes.JsonValue.Create("^a")) };
+        var sink = await FederationHarness.RunAsync(s, "SELECT c.name FROM crm.customers AS c WHERE regexp_matches(c.name, $fp1, 'i') ORDER BY c.name", parameters: args);
+        Assert.Equal(["Alice"], sink.Single().Select(r => (string)r[0]!));
+        var cs = await FederationHarness.RunAsync(s, "SELECT c.name FROM crm.customers AS c WHERE regexp_matches(c.name, $fp1) ORDER BY c.name", parameters: args);
+        Assert.Empty(cs.Single());
+    }
+
     private static object? Normalize(object? v) => v switch
     {
         int i => (long)i,
