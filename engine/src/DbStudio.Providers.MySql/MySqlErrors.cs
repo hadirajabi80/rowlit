@@ -116,10 +116,23 @@ public static partial class MySqlErrors
         return i < 0 ? text.Length : i;
     }
 
+    /// <summary>
+    /// "Unable to connect to any of the specified MySQL hosts." says nothing about why: add the socket error the driver
+    /// keeps as the inner exception ("No such host is known", "Connection refused" …).
+    /// </summary>
+    internal static string WithCause(MySqlException ex)
+    {
+        var inner = ex.InnerException;
+        while (inner is AggregateException { InnerException: { } deeper }) inner = deeper;
+        var cause = inner?.Message.Split('\n')[0].Trim();
+        if (string.IsNullOrEmpty(cause) || ex.Message.Contains(cause, StringComparison.OrdinalIgnoreCase)) return ex.Message;
+        return ex.Message.TrimEnd('.') + ": " + cause;
+    }
+
     /// <summary>The error of <c>POST /connections/test</c>: PROVIDER_ERROR with the error number / SQLSTATE in the detail.</summary>
     public static ErrorInfo ToProviderError(Exception ex) => ex switch
     {
-        MySqlException m => new ErrorInfo(Core.Services.ErrorCodes.ProviderError, m.Message,
+        MySqlException m => new ErrorInfo(Core.Services.ErrorCodes.ProviderError, WithCause(m),
             Detail: string.Join(" ", new[] { m.Number > 0 ? "Error " + m.Number.ToString(CultureInfo.InvariantCulture) : null, string.IsNullOrEmpty(m.SqlState) ? null : "SQLSTATE " + m.SqlState }
                 .Where(s => s is not null)), ProviderCode: m.Number),
         _ => new ErrorInfo(Core.Services.ErrorCodes.ProviderError, ex.Message, Detail: ex.GetType().Name),

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useConnections } from '../../store/connections';
 import { installMockEngine } from '../../test/mockServer';
 import { CONNECTION_PALETTE } from '../../theme/connColors';
+import { fileFilterExtensions } from '../../lib/fileFilter';
 import { ConnectionDialog } from './ConnectionDialog';
 
 const mock = installMockEngine();
@@ -12,6 +13,15 @@ async function loadStores() {
   useConnections.setState({ providers: [], connections: [], loaded: false, error: null });
   await useConnections.getState().load();
 }
+
+describe('fileFilterExtensions', () => {
+  it('reads the plain list and the "Label|*.ext|All files|*.*" dialog form', () => {
+    expect(fileFilterExtensions('*.db;*.sqlite;*.sqlite3')).toEqual(['db', 'sqlite', 'sqlite3']);
+    expect(fileFilterExtensions('Certificates|*.pem;*.crt;*.cer|All files|*.*')).toEqual(['pem', 'crt', 'cer']);
+    expect(fileFilterExtensions('Secure connect bundle|*.zip')).toEqual(['zip']);
+    expect(fileFilterExtensions(null)).toEqual([]);
+  });
+});
 
 describe('ConnectionDialog', () => {
   beforeEach(async () => {

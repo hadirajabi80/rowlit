@@ -200,7 +200,8 @@ function kindToParam(kind: ColumnKind, dialect: Dialect): ParamKind {
     case 'date': return dialect === 'sqlite' ? 'string' : 'date';
     case 'datetime': return dialect === 'sqlite' ? 'string' : 'datetime';
     case 'datetimeoffset': return dialect === 'sqlite' ? 'string' : 'datetimeoffset';
-    case 'time': return dialect === 'sqlite' || dialect === 'plsql' ? 'string' : 'time';
+    // MySQL TIME spans -838:59:59 to 838:59:59: the engine's time bind stops at 23:59:59, the server reads the text itself.
+    case 'time': return dialect === 'sqlite' || dialect === 'plsql' || dialect === 'mysql' ? 'string' : 'time';
     case 'guid': return dialect === 'tsql' || dialect === 'pgsql' ? 'guid' : 'string';
     case 'binary': return 'binary';
     default: return 'string';
@@ -232,11 +233,24 @@ function versionAtLeast(v: string | null | undefined, min: [number, number]): bo
   return a > min[0] || (a === min[0] && b >= min[1]);
 }
 
+/**
+ * MySQL / MariaDB BIT(n): the grid shows and edits the bits as text ("1010"), but a bound string is read as bytes (Data too
+ * long for column; `bit_col = '1010'` never matches), so such a value goes through CONV to the integer the column holds.
+ */
+export const isMysqlBit = (c: Pick<ColumnInfo, 'dbType'>, dialect: Dialect | null | undefined): boolean =>
+  dialect === 'mysql' && /^bit\b/i.test(c.dbType.trim());
+
+/** A bind placeholder for one cell value (the expression that turns it into the column's value where the dialect needs one). */
+function bindCell(pb: ParamBuilder, column: ColumnInfo, value: CellValue, dialect: Dialect): string {
+  const p = pb.add(paramKindFor(column.kind, value, dialect), bindValue(column.kind, value, dialect));
+  return isMysqlBit(column, dialect) && value !== null && value !== undefined ? `CAST(CONV(${p}, 2, 10) AS UNSIGNED)` : p;
+}
+
 function keyWhere(pb: ParamBuilder, key: ColumnValue[], dialect: Dialect): string {
   return key.map((k) => {
     const c = quoteIdent(k.column.name, dialect);
     if (isNullValue(k.value, dialect)) return `${c} IS NULL`;
-    return `${c} = ${pb.add(paramKindFor(k.column.kind, k.value, dialect), bindValue(k.column.kind, k.value, dialect))}`;
+    return `${c} = ${bindCell(pb, k.column, k.value, dialect)}`;
   }).join(' AND ');
 }
 
@@ -245,7 +259,7 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
   const pb = new ParamBuilder(dialect, 'p', 1, { positional: true });
   const table = tableSql(t, dialect);
   const q = (n: string) => quoteIdent(n, dialect);
-  const bind = (cv: ColumnValue) => pb.add(paramKindFor(cv.column.kind, cv.value, dialect), bindValue(cv.column.kind, cv.value, dialect));
+  const bind = (cv: ColumnValue) => bindCell(pb, cv.column, cv.value, dialect);
 
   if (change.kind === 'update') {
     const sets = change.set.map((s) => `${q(s.column.name)} = ${bind(s)}`).join(', ');
@@ -255,7 +269,7 @@ export function generateChange(change: RowChange, t: TableTarget, dialect: Diale
       // BINARY_FLOAT / real 0.1 read back as 0.1 is not the stored single-precision value): written, not verified.
       const checks = change.set
         .filter((s) => !change.key.some((k) => k.column.name === s.column.name) && isComparable({ column: s.column, value: s.old }, dialect))
-        .map((s) => (isNullValue(s.old, dialect) ? `${q(s.column.name)} IS NULL` : `${q(s.column.name)} = ${pb.add(paramKindFor(s.column.kind, s.old, dialect), bindValue(s.column.kind, s.old, dialect))}`));
+        .map((s) => (isNullValue(s.old, dialect) ? `${q(s.column.name)} IS NULL` : `${q(s.column.name)} = ${bindCell(pb, s.column, s.old, dialect)}`));
       if (checks.length) where += ` AND ${checks.join(' AND ')}`;
     }
     return { kind: 'update', ref: change.ref, sql: `UPDATE ${table} SET ${sets} WHERE ${where}`, params: pb.params, returning: [], expectOne: true };

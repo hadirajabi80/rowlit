@@ -25,7 +25,7 @@ public static class MySqlConnectionStrings
                 new FormOption("none", "None"), new FormOption("preferred", "Preferred"), new FormOption("required", "Required"),
                 new FormOption("verifyca", "Verify CA"), new FormOption("verifyfull", "Verify full"),
             ]),
-        new FormField("sslCa", "CA certificate", "file", FileFilter: "Certificates|*.pem;*.crt;*.cer|All files|*.*",
+        new FormField("sslCa", "CA certificate", "file", Placeholder: @"C:\certs\ca.pem", FileFilter: "*.pem;*.crt;*.cer",
             Help: "PEM file of the CA for Verify CA / Verify full."),
         new FormField("allowPublicKeyRetrieval", "Allow public key retrieval", "bool", Default: JsonValue.Create(false),
             Help: "caching_sha2_password / sha256_password without TLS: let the client fetch the server's RSA key."),

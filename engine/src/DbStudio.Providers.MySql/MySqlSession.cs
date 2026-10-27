@@ -134,9 +134,10 @@ public sealed class MySqlSession : AdoSessionBase
         context.Items[SentKey] = new SentBatch(list);
 
         // One command per statement on the session connection, run in order by the statement reader.
-        Task<MySqlDataReader> Execute(int index, CancellationToken token)
+        async Task<MySqlDataReader> Execute(int index, CancellationToken token)
         {
             context.Items[IndexKey] = index;
+            await ClearStaleDiagnosticsAsync(list[index], token).ConfigureAwait(false);
             MySqlCommand c;
             if (index == 0)
             {
@@ -149,11 +150,40 @@ public sealed class MySqlSession : AdoSessionBase
             }
             c.CommandText = list[index].SentText;
             _running = c;
-            return c.ExecuteReaderAsync(CommandBehavior.Default, token);
+            return await c.ExecuteReaderAsync(CommandBehavior.Default, token).ConfigureAwait(false);
         }
         var reader = await MySqlStatementReader.OpenAsync(list.Count, Execute, index => ReadWarningsAsync(list[index]), ct).ConfigureAwait(false);
         context.Items[ReaderKey] = reader;
         return reader;
+    }
+
+    /// <summary>
+    /// True when the last statement left warnings or an error in the server's diagnostics area. MariaDB only clears that
+    /// area for statements that use tables, so <c>SELECT 1</c> / <c>SET</c> / <c>USE</c> after a failed statement would
+    /// show the old error again as their own message (MySQL clears it for every statement).
+    /// </summary>
+    private volatile bool _diagnosticsMayBeStale;
+
+    private const string ClearDiagnosticsSql = "SELECT 1 FROM information_schema.ENGINES LIMIT 0";
+
+    /// <summary>Statements that read the diagnostics area themselves: they must see it untouched.</summary>
+    internal static bool ReadsDiagnostics(StatementClassification? c, string sentText)
+    {
+        if (c is { Kind: "SHOW" or "DESCRIBE" or "HELP" }) return true;
+        var first = MySqlSqlText.Scan(sentText, 0, Math.Min(sentText.Length, 40));
+        return first.Count > 0 && (first[0].IsWord("SHOW") || first[0].IsWord("GET"));
+    }
+
+    private async Task ClearStaleDiagnosticsAsync(SentStatement next, CancellationToken ct)
+    {
+        if (!Flavor.IsMariaDb || !_diagnosticsMayBeStale || ReadsDiagnostics(next.Class, next.SentText)) return;
+        _diagnosticsMayBeStale = false;
+        try
+        {
+            await using var clear = CreateCommand(ClearDiagnosticsSql);
+            await clear.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is MySqlException or InvalidOperationException) { /* the statement itself reports a broken connection */ }
     }
 
     /// <summary>SHOW WARNINGS after each statement: Note → info, Warning → warning, Error → error message.</summary>
@@ -176,6 +206,7 @@ public sealed class MySqlSession : AdoSessionBase
                 messages.Add((severity, text, code));
             }
         }
+        if (messages.Count > 0) _diagnosticsMayBeStale = true;
         foreach (var (severity, text, code) in messages)
             await EmitMessageAsync(severity, text, null, code, MessageSource.Server).ConfigureAwait(false);
     }
@@ -380,6 +411,7 @@ public sealed class MySqlSession : AdoSessionBase
         var my = exception as MySqlException ?? exception.InnerException as MySqlException;
         if (my is not null)
         {
+            _diagnosticsMayBeStale = true;
             var items = CurrentBatch?.Items;
             var sent = items?.TryGetValue(SentKey, out var s) == true ? s as SentBatch : null;
             var index = items?.TryGetValue(IndexKey, out var ix) == true && ix is int i ? i : 0;

@@ -236,6 +236,40 @@ public abstract class MySqlIntegrationTestsBase<TFixture>(TFixture fixture) : IC
     }
 
     [SkippableFact]
+    public async Task Time_BeyondADay_AndNegative_ReadLikeTheServerPrintsThem()
+    {
+        RequireAvailable();
+        await using var s = await Fixture.OpenSessionAsync();
+        var (summary, sink) = await RunAsync(s, null, "SELECT CAST('838:59:59' AS TIME) AS a, CAST('-838:59:59' AS TIME) AS b, CAST('-01:02:03.5' AS TIME(1)) AS c, CAST('25:00:00' AS TIME) AS d");
+        Assert.True(summary.Status == ExecutionStatus.Ok, Errors(sink));
+        var row = sink.ResultSets.Single().Rows.Single();
+        Assert.Equal(["838:59:59", "-838:59:59", "-01:02:03.5", "25:00:00"], row.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture)));
+    }
+
+    /// <summary>MariaDB keeps the last warning or error in the diagnostics area for statements that use no table.</summary>
+    [SkippableFact]
+    public async Task Messages_OfAnEarlierStatement_AreNotRepeated()
+    {
+        RequireAvailable();
+        await using var s = await Fixture.OpenSessionAsync();
+        var (failed, failedSink) = await RunAsync(s, null, "SELECT nmae FROM orders");
+        Assert.Equal(ExecutionStatus.Error, failed.Status);
+        Assert.Empty(failedSink.Messages);
+        var (_, plain) = await RunAsync(s, null, "SELECT 1", "SET @x = 1", "SELECT @x");
+        Assert.Empty(plain.Messages);
+
+        var (_, warned) = await RunAsync(s, null, "SELECT CAST('12abc' AS SIGNED) AS n");
+        Assert.Single(warned.Messages, m => m.Severity == MessageSeverity.Warning);
+        var (_, after) = await RunAsync(s, null, "SELECT 2", "USE shop");
+        Assert.Empty(after.Messages);
+
+        // A statement that asks for the diagnostics must still see them.
+        var (_, show) = await RunAsync(s, null, "SELECT CAST('12abc' AS SIGNED) AS n", "SHOW WARNINGS");
+        Assert.Equal(2, show.ResultSets.Count);
+        Assert.Single(show.ResultSets[1].Rows);
+    }
+
+    [SkippableFact]
     public async Task Transactions_UserTyped_AndDdlCommitsImplicitly()
     {
         RequireAvailable();

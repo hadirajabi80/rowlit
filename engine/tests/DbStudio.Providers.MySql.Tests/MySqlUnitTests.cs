@@ -260,6 +260,15 @@ public sealed class MySqlProviderUnitTests
         Assert.Equal(ColumnKinds.Date, MySqlTypes.KindFor("DATE", typeof(DateTime)));
         Assert.Equal(ColumnKinds.Decimal, MySqlTypes.KindFor("DECIMAL", typeof(decimal)));
         Assert.Equal(ColumnKinds.String, MySqlTypes.KindFor("ENUM", typeof(string)));
+        Assert.Equal("838:59:59", MySqlTypes.FormatTime(new TimeSpan(838, 59, 59)));
+        Assert.Equal("-838:59:59", MySqlTypes.FormatTime(-new TimeSpan(838, 59, 59)));
+        Assert.Equal("-01:02:03.5", MySqlTypes.FormatTime(-(new TimeSpan(1, 2, 3) + TimeSpan.FromMilliseconds(500))));
+        Assert.Equal("12:34:56.789", MySqlTypes.FormatTime(new TimeSpan(0, 12, 34, 56, 789)));
+        Assert.Equal("00:00:00", MySqlTypes.FormatTime(TimeSpan.Zero));
+        Assert.Equal("00:00:00.000001", MySqlTypes.FormatTime(TimeSpan.FromTicks(10)));
+        Assert.True(MySqlSession.ReadsDiagnostics(null, "SHOW WARNINGS"));
+        Assert.True(MySqlSession.ReadsDiagnostics(null, "  get diagnostics @n = NUMBER"));
+        Assert.False(MySqlSession.ReadsDiagnostics(null, "SELECT 1"));
         Assert.Equal("1010", MySqlTypes.BitString(10, 4));
         Assert.Equal("00000001", MySqlTypes.BitString(1, 8));
         Assert.Equal("18446744073709551615", MySqlTypes.Convert(ulong.MaxValue, new ColumnInfo("u", 0, "BIGINT UNSIGNED", ColumnKinds.Int, true)));

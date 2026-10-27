@@ -117,9 +117,31 @@ public static class MySqlTypes
                 return md.ToString();
             case MySqlDateTime mdt:
                 return mdt.IsValidDateTime ? ValueConverter.ToWire(mdt.GetDateTime()) : null;
+            case TimeSpan ts:
+                return FormatTime(ts);
             default:
                 return ValueConverter.ToWire(value);
         }
+    }
+
+    /// <summary>
+    /// A TIME value the way MySQL prints it: <c>[-]HH:MM:SS[.ffffff]</c> with hours up to 838 ("838:59:59", "-01:02:03.5").
+    /// The shared formatter would turn spans of 24 hours or more into "34.22:59:59" and negative ones into 7 decimals.
+    /// </summary>
+    public static string FormatTime(TimeSpan ts)
+    {
+        var ticks = ts.Ticks;
+        var negative = ticks < 0;
+        var abs = negative ? -ticks : ticks;
+        var totalSeconds = abs / TimeSpan.TicksPerSecond;
+        var fraction = abs % TimeSpan.TicksPerSecond;
+        var sb = new StringBuilder(16);
+        if (negative) sb.Append('-');
+        sb.Append((totalSeconds / 3600).ToString("00", CultureInfo.InvariantCulture)).Append(':')
+          .Append((totalSeconds / 60 % 60).ToString("00", CultureInfo.InvariantCulture)).Append(':')
+          .Append((totalSeconds % 60).ToString("00", CultureInfo.InvariantCulture));
+        if (fraction > 0) sb.Append('.').Append(fraction.ToString("0000000", CultureInfo.InvariantCulture).TrimEnd('0'));
+        return sb.ToString();
     }
 
     /// <summary>A BIT(n) value as its binary digits, zero-padded to the column width ("1010" for b'1010' in BIT(4)).</summary>
