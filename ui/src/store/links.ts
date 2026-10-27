@@ -5,8 +5,8 @@
 import { create } from 'zustand';
 import { errorMessage, isApiError } from '../api/client';
 import {
-  linksApi, type BuilderModel, type LinkCatalog, type LinkCatalogSchema, type LinkedView, type LinkedViewInput, type SourceColumn,
-  type SourceTable,
+  linksApi, type BuilderModel, type LinkBrowseResult, type LinkCatalog, type LinkCatalogSchema, type LinkedView, type LinkedViewInput,
+  type LinkTableRef, type SourceColumn, type SourceTable,
 } from '../api/links';
 import type { CatalogObject, ColumnKind } from '../api/types';
 import { dbKey, useCatalog } from './catalog';
@@ -40,11 +40,55 @@ export interface BuilderHistory {
 export const HISTORY_LIMIT = 100;
 const COALESCE_MS = 800;
 
+/** One level of a wide member (POST /links/{cid}/browse), by browseKey(alias, path). */
+export interface LinkBrowseEntry {
+  status: LinkLoadStatus;
+  result: LinkBrowseResult | null;
+  error: string | null;
+}
+
+/** State of a table resolved by engine name (POST /links/{cid}/resolve): found, not mounted, or the call failed. */
+export type LinkResolveStatus = 'loading' | 'ok' | 'missing' | 'error';
+
+/** Key of a member level in LinksState.browse (alias + path). */
+export const browseKey = (alias: string, path: readonly string[]) => [alias, ...path].join('\u0001');
+/** Key of a table in LinksState.resolved. */
+export const tableKey = (alias: string, table: string) => `${alias}\u0001${table}`;
+
+/**
+ * The catalog with the tables loaded on demand (`extra`, by alias) added to their member's schema (each engine name
+ * once): the builder, its compiler and the join inference then see them like any mounted table.
+ */
+export function withExtraTables(c: LinkCatalog, extra: Record<string, SourceTable[]> | undefined): LinkCatalog {
+  if (!extra) return c;
+  let changed = false;
+  const schemas = c.schemas.map((s) => {
+    const more = extra[s.alias];
+    if (!more?.length) return s;
+    const have = new Set(s.tables.map((t) => t.linkName.toLowerCase()));
+    const add = more.filter((t) => !have.has(t.linkName.toLowerCase()));
+    if (!add.length) return s;
+    changed = true;
+    return { ...s, tables: [...s.tables, ...add] };
+  });
+  return changed ? { ...c, schemas } : c;
+}
+
 interface LinksState {
   catalogs: Record<string, LinkCatalogEntry>;
   views: Record<string, LinkViewsEntry>;
   history: Record<string, BuilderHistory>;
+  /** Levels of wide members loaded so far, by link id then browseKey. */
+  browse: Record<string, Record<string, LinkBrowseEntry>>;
+  /** Tables of wide members loaded on demand (browse / resolve), by link id then alias; merged into `catalogs`. */
+  extra: Record<string, Record<string, SourceTable[]>>;
+  /** Tables asked for by engine name, by link id then tableKey. */
+  resolved: Record<string, Record<string, LinkResolveStatus>>;
   loadCatalog(linkId: string, refresh?: boolean): Promise<LinkCatalog | null>;
+  /** One level of a wide member (cached; `refresh` reads the source again). Its tables join the catalog. */
+  browseLevel(linkId: string, alias: string, path: readonly string[], refresh?: boolean): Promise<LinkBrowseResult | null>;
+  /** Loads the tables (engine names) the catalog does not have yet, e.g. the nested tables a saved model uses. */
+  resolveTables(linkId: string, refs: readonly LinkTableRef[]): Promise<void>;
   loadViews(linkId: string, force?: boolean): Promise<LinkedView[]>;
   saveView(linkId: string, id: string | null, input: LinkedViewInput): Promise<LinkedView>;
   deleteView(linkId: string, id: string): Promise<void>;
@@ -60,17 +104,31 @@ interface LinksState {
 
 const EMPTY_HISTORY: BuilderHistory = { past: [], future: [], lastKey: null, lastAt: 0 };
 const inflight = new Map<string, Promise<LinkCatalog | null>>();
+const browsing = new Map<string, Promise<LinkBrowseResult | null>>();
+
+/** Without `linkId`'s key. */
+const drop = <T>(r: Record<string, T>, linkId: string): Record<string, T> => {
+  if (!(linkId in r)) return r;
+  const out = { ...r };
+  delete out[linkId];
+  return out;
+};
 
 export const useLinks = create<LinksState>((set, get) => ({
   catalogs: {},
   views: {},
   history: {},
+  browse: {},
+  extra: {},
+  resolved: {},
 
   loadCatalog(linkId, refresh = false) {
     const cur = get().catalogs[linkId];
     if (!refresh && cur?.status === 'ready') return Promise.resolve(cur.catalog);
     const running = inflight.get(linkId);
     if (running && !refresh) return running;
+    // a refresh reads the wide members' levels and nested tables again too (on demand, as before)
+    if (refresh) set((s) => ({ browse: drop(s.browse, linkId), extra: drop(s.extra, linkId), resolved: drop(s.resolved, linkId) }));
     set((s) => ({ catalogs: { ...s.catalogs, [linkId]: { ...(cur ?? { catalog: null, source: null, loadedAt: null }), status: 'loading', error: null } } }));
     const p = (async () => {
       try {
@@ -85,8 +143,9 @@ export const useLinks = create<LinksState>((set, get) => ({
           catalog = await catalogFromExplorer(linkId, refresh);
           source = 'explorer';
         }
-        set((s) => ({ catalogs: { ...s.catalogs, [linkId]: { status: 'ready', catalog, error: null, source, loadedAt: Date.now() } } }));
-        return catalog;
+        const merged = withExtraTables(catalog, get().extra[linkId]);
+        set((s) => ({ catalogs: { ...s.catalogs, [linkId]: { status: 'ready', catalog: merged, error: null, source, loadedAt: Date.now() } } }));
+        return merged;
       } catch (e) {
         set((s) => ({ catalogs: { ...s.catalogs, [linkId]: { status: 'error', catalog: s.catalogs[linkId]?.catalog ?? null, error: errorMessage(e), source: null, loadedAt: null } } }));
         return null;
@@ -96,6 +155,55 @@ export const useLinks = create<LinksState>((set, get) => ({
     })();
     inflight.set(linkId, p);
     return p;
+  },
+
+  browseLevel(linkId, alias, path, refresh = false) {
+    const key = browseKey(alias, path);
+    const cur = get().browse[linkId]?.[key];
+    if (!refresh && cur?.status === 'ready') return Promise.resolve(cur.result);
+    const flight = `${linkId}\u0002${key}`;
+    const running = browsing.get(flight);
+    if (running && !refresh) return running;
+    const put = (e: LinkBrowseEntry) => set((s) => ({ browse: { ...s.browse, [linkId]: { ...s.browse[linkId], [key]: e } } }));
+    put({ status: 'loading', result: cur?.result ?? null, error: null });
+    const p = (async () => {
+      try {
+        const result = await linksApi.browse(linkId, { alias, path: [...path], ...(refresh ? { refresh } : {}) });
+        put({ status: 'ready', result, error: null });
+        if (result.tables.length) addExtra(linkId, alias, result.tables);
+        return result;
+      } catch (e) {
+        put({ status: 'error', result: cur?.result ?? null, error: errorMessage(e) });
+        return null;
+      } finally {
+        browsing.delete(flight);
+      }
+    })();
+    browsing.set(flight, p);
+    return p;
+  },
+
+  async resolveTables(linkId, refs) {
+    const known = get().resolved[linkId] ?? {};
+    const want = refs.filter((r, i) => !known[tableKey(r.alias, r.table)] && refs.findIndex((x) => x.alias === r.alias && x.table === r.table) === i);
+    if (!want.length) return;
+    const mark = (list: readonly LinkTableRef[], st: LinkResolveStatus) => set((s) => {
+      const next = { ...s.resolved[linkId] };
+      for (const r of list) next[tableKey(r.alias, r.table)] = st;
+      return { resolved: { ...s.resolved, [linkId]: next } };
+    });
+    mark(want, 'loading');
+    try {
+      const r = await linksApi.resolve(linkId, { tables: want.map((x) => ({ alias: x.alias, table: x.table })) });
+      const byAlias = new Map<string, SourceTable[]>();
+      for (const t of r.tables) byAlias.set(t.alias, [...(byAlias.get(t.alias) ?? []), t.table]);
+      for (const [alias, tables] of byAlias) addExtra(linkId, alias, tables);
+      const found = new Set(r.tables.map((t) => tableKey(t.alias, t.table.linkName).toLowerCase()));
+      mark(want.filter((x) => found.has(tableKey(x.alias, x.table).toLowerCase())), 'ok');
+      mark(want.filter((x) => !found.has(tableKey(x.alias, x.table).toLowerCase())), 'missing');
+    } catch {
+      mark(want, 'error');
+    }
   },
 
   async loadViews(linkId, force = false) {
@@ -133,7 +241,7 @@ export const useLinks = create<LinksState>((set, get) => ({
       const views = { ...s.views };
       delete catalogs[linkId];
       delete views[linkId];
-      return { catalogs, views };
+      return { catalogs, views, browse: drop(s.browse, linkId), extra: drop(s.extra, linkId), resolved: drop(s.resolved, linkId) };
     });
   },
 
@@ -172,6 +280,20 @@ export const useLinks = create<LinksState>((set, get) => ({
     });
   },
 }));
+
+/** Tables of a wide member loaded on demand: kept in `extra` (survives a catalog reload) and merged into the catalog. */
+function addExtra(linkId: string, alias: string, tables: readonly SourceTable[]): void {
+  useLinks.setState((s) => {
+    const mine = s.extra[linkId]?.[alias] ?? [];
+    const byName = new Map(mine.map((t) => [t.linkName.toLowerCase(), t]));
+    for (const t of tables) byName.set(t.linkName.toLowerCase(), t);
+    const extra = { ...s.extra, [linkId]: { ...s.extra[linkId], [alias]: [...byName.values()] } };
+    const entry = s.catalogs[linkId];
+    if (!entry?.catalog) return { extra };
+    const catalog = withExtraTables(entry.catalog, { [alias]: [...tables] });
+    return catalog === entry.catalog ? { extra } : { extra, catalogs: { ...s.catalogs, [linkId]: { ...entry, catalog } } };
+  });
+}
 
 // ---------------------------------------------------------------- explorer fallback
 

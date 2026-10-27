@@ -16,7 +16,8 @@
 //   Materialize and native scripts answer 501 (WP-D's).
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import {
-  isValidAlias, isValidTableName, linkDefinitionOf, linkTableName, RESERVED_ALIASES, LINK_VIEWS_SCHEMA,
+  isValidAlias, isValidTableName, isWideScope, linkDefinitionOf, linkTableName, LINK_SCOPES, memberScopeOf, RESERVED_ALIASES, LINK_VIEWS_SCHEMA,
+  type LinkBrowseRequest, type LinkBrowseResult, type LinkLevel, type LinkResolveRequest, type LinkResolveResult, type LinkScope, type LinkTableRef,
   type BuilderAggregate, type BuilderColumn, type BuilderJoin, type BuilderJoinCondition, type BuilderJoinType, type BuilderModel, type BuilderRef,
   type BuilderSort, type BuilderTable, type CompileRequest, type CompileResult, type LinkCatalog, type LinkCatalogSchema, type LinkDefinition,
   type LinkedView, type LinkedViewInput, type LinkMember, type LinkMemberStatus, type LinkProblem, type LinkValidateRequest, type ParseResult,
@@ -24,7 +25,7 @@ import {
   type VirtualRelation,
 } from '../../api/links';
 import type { CatalogObject, CellValue, ColumnInfo, ColumnKind, ConnectionProfile, Dialect, ProviderInfo, QueryParam } from '../../api/types';
-import { compileBuilder, type BuilderCatalog } from '../../components/Links/builder/compile';
+import { compileBuilder, type BuilderCatalog, type BuilderPaths } from '../../components/Links/builder/compile';
 import type { FilterCondition, FilterGroup, FilterNode, FilterOp, FilterValue } from '../../filter/model';
 import { inlineParams } from '../../filter/sql';
 import { quoteIdent } from '../../lib/sql';
@@ -109,10 +110,15 @@ export interface Mounted {
   connectionId: string;
   providerId: string;
   dialect: Dialect;
+  /** Database the table is read from (the member's; a wide member's container database). */
+  database: string | null;
   schema: string;
   /** Source table name (catalog spelling). */
   source: string;
+  /** Engine name (wide members' nested tables: "sales.orders"). */
   linkName: string;
+  /** Wide members' nested tables: the name parts queries write below the alias; null otherwise. */
+  path: string[] | null;
   fixture: FixtureTable;
   object: CatalogObject;
   columns: { name: string; nativeType: string; kind: ColumnKind; type: string; nullable: boolean; pk: boolean }[];
@@ -135,39 +141,232 @@ function dialectOfProvider(engine: MockEngine, providerId: string): Dialect {
   return (p?.dialect ?? 'sqlite') as Dialect;
 }
 
-/** Every table a link mounts (unknown members / tables are skipped; validate reports them). */
+// ---------------------------------------------------------------- wide members (scopes database / connection)
+
+/** Name levels a wide member spans (Runtime/MemberScopes.cs twin); null for tables / schema members. */
+export function levelsOf(providerId: string | null | undefined, scope: LinkScope): LinkLevel[] | null {
+  if (!isWideScope(scope)) return null;
+  switch (providerId) {
+    case 'sqlserver': case 'postgresql': case 'snowflake': return scope === 'database' ? ['schema'] : ['database', 'schema'];
+    case 'mysql': case 'mariadb': case 'clickhouse': case 'cassandra': case 'mongodb': return scope === 'database' ? [] : ['schema'];
+    case 'elasticsearch': return [];
+    default: return ['schema']; // oracle, sqlite (main + attached files), unknown
+  }
+}
+
+/** A wide member's shape: its levels and default container (database / schema). */
+interface WideInfo {
+  member: LinkMember;
+  memberIndex: number;
+  conn: ConnectionProfile;
+  levels: LinkLevel[];
+  /** One name per level. */
+  defaultPath: string[];
+  defaultDatabase: string | null;
+  defaultSchema: string;
+}
+
+function wideInfo(engine: MockEngine, m: LinkMember, memberIndex: number): WideInfo | null {
+  if (m.kind === 'files' || !m.connectionId) return null;
+  const scope = memberScopeOf(m);
+  if (!isWideScope(scope)) return null;
+  const conn = engine.conn(m.connectionId);
+  if (!conn || isLinkConn(conn)) return null;
+  const levels = levelsOf(conn.providerId, scope) ?? [];
+  const current = engine.databases(conn.id).current ?? null;
+  const defaultDatabase = levels[0] === 'database' || scope === 'connection' ? current : m.database ?? current;
+  // "whole database" of a provider without levels (MySQL…) is the member's schema
+  const defaultSchema = !levels.length ? m.schema ?? m.database ?? engine.defaultSchema(conn.id) : engine.defaultSchema(conn.id);
+  const defaultPath = levels.map((l) => (l === 'database' ? defaultDatabase ?? '' : defaultSchema));
+  return { member: m, memberIndex, conn, levels, defaultPath, defaultDatabase, defaultSchema };
+}
+
+const SYSTEM_DATABASES = new Set(['master', 'model', 'msdb', 'tempdb']);
+
+/** The children of a level: databases, or the schemas of `database`. */
+function containersOf(engine: MockEngine, w: WideInfo, level: LinkLevel, database: string | null): string[] {
+  if (level === 'database') return engine.databases(w.conn.id).databases.filter((d) => !SYSTEM_DATABASES.has(lc(d)));
+  return engine.schemas(w.conn.id, database ?? w.defaultDatabase).schemas.map((s) => s.name);
+}
+
+/** The container of a full path: database (null when the provider has no database level) + schema. */
+function containerOf(w: WideInfo, path: readonly string[]): { database: string | null; schema: string } {
+  const db = w.levels[0] === 'database' ? path[0] : w.defaultDatabase;
+  const schema = w.levels.length ? path[w.levels.length - 1] : w.defaultSchema;
+  return { database: db ?? null, schema };
+}
+
+const sameName = (a: string | null | undefined, b: string | null | undefined) => lc(a ?? '') === lc(b ?? '');
+
+/**
+ * Engine name + query path of a table in container `path` (one name per level): the default database / schema prefix is
+ * left out, so the default container's tables keep plain names (path null).
+ */
+function nestedName(w: WideInfo, path: readonly string[], table: string): { linkName: string; path: string[] | null } {
+  let start = 0;
+  while (start < w.levels.length && sameName(path[start], w.defaultPath[start])) start++;
+  // a prefix is left out only from the top: `shop.sales.orders` → `sales.orders`; a non-default database keeps its schema
+  if (start < w.levels.length) {
+    const parts = [...path.slice(start), table];
+    return { linkName: parts.join('.'), path: parts };
+  }
+  return { linkName: table, path: null };
+}
+
+/** The container + table an engine (or natural) name below the alias stands for, or null. */
+function splitNested(w: WideInfo, parts: readonly string[]): { path: string[]; table: string } | null {
+  const n = w.levels.length;
+  if (!parts.length || parts.length > n + 1) return null;
+  const full = [...w.defaultPath.slice(0, n + 1 - parts.length), ...parts];
+  return { path: full.slice(0, n), table: full[n] };
+}
+
+function schemaState(engine: MockEngine, connId: string, schema: string): SchemaStateLike | undefined {
+  const states = (engine as unknown as EngineInternals).schemasFor(connId);
+  return states.get(schema) ?? [...states.values()].find((s) => lc(s.name) === lc(schema));
+}
+
+/** One mounted table (null when the source has no such table). */
+function mountOne(engine: MockEngine, m: LinkMember, memberIndex: number, conn: ConnectionProfile, st: SchemaStateLike, name: string,
+  linkName: string | null, database: string | null, path: string[] | null): Mounted | null {
+  const fixture = st.tables.get(lc(name));
+  const object = st.objects.find((o) => lc(o.n) === lc(name) && (o.t === 'table' || o.t === 'view'));
+  if (!fixture || !object) return null;
+  const columns = fixture.columns.map((c, i) => {
+    const tuple = object.c?.[i];
+    const nativeType = tuple?.[1] ?? c.type;
+    return { name: tuple?.[0] ?? c.name, nativeType, kind: c.kind, type: duckType(c.kind, nativeType), nullable: c.nullable, pk: !!c.pk };
+  });
+  return {
+    alias: m.alias, member: m, memberIndex, connectionId: conn.id, providerId: conn.providerId, dialect: dialectOfProvider(engine, conn.providerId),
+    database, schema: st.name, source: object.n, linkName: linkName ?? object.n, path, fixture, object, columns,
+  };
+}
+
+/** Tables of one container of a wide member (default container: plain names, renames applied). */
+function containerTables(engine: MockEngine, w: WideInfo, path: readonly string[]): Mounted[] | null {
+  const { database, schema } = containerOf(w, path);
+  const st = schemaState(engine, w.conn.id, schema);
+  if (!st) return null;
+  const renames = new Map(w.member.tables.map((t) => [lc(t.name), t]));
+  const out: Mounted[] = [];
+  for (const t of st.tables.values()) {
+    const n = nestedName(w, path, t.name);
+    const mt = n.path ? undefined : renames.get(lc(t.name));
+    const one = mountOne(engine, w.member, w.memberIndex, w.conn, st, t.name, mt ? linkTableName(mt) : n.path ? n.linkName : null, database, n.path);
+    if (one) out.push(one);
+  }
+  return out;
+}
+
+/** A nested table of a wide member by engine name ("sales.orders") or natural parts, or null. */
+function nestedTable(engine: MockEngine, link: ConnectionProfile, alias: string, name: string): Mounted | null {
+  const def = linkDefinitionOf(link);
+  const i = def.members.findIndex((m) => lc(m.alias) === lc(alias));
+  const w = i >= 0 ? wideInfo(engine, def.members[i], i) : null;
+  if (!w) return null;
+  const split = splitNested(w, name.split('.'));
+  if (!split) return null;
+  return containerTables(engine, w, split.path)?.find((t) => lc(t.source) === lc(split.table) || (!t.path && lc(t.linkName) === lc(split.table))) ?? null;
+}
+
+/** Every table a link mounts (unknown members / tables are skipped; validate reports them). Wide members: the default container. */
 export function mountedTables(engine: MockEngine, link: ConnectionProfile): Mounted[] {
-  const eng = engine as unknown as EngineInternals;
   const def = linkDefinitionOf(link);
   const out: Mounted[] = [];
   def.members.forEach((m, memberIndex) => {
     if (!m.connectionId) return;
     const conn = engine.conn(m.connectionId);
     if (!conn || isLinkConn(conn)) return;
-    const states = eng.schemasFor(conn.id);
-    const schema = m.schema ?? engine.defaultSchema(conn.id);
-    const st = states.get(schema) ?? [...states.values()].find((s) => lc(s.name) === lc(schema));
+    const scope = memberScopeOf(m);
+    const w = wideInfo(engine, m, memberIndex);
+    if (w) {
+      out.push(...(containerTables(engine, w, w.defaultPath) ?? []));
+      return;
+    }
+    const st = schemaState(engine, conn.id, m.schema ?? engine.defaultSchema(conn.id));
     if (!st) return;
     const renames = new Map(m.tables.map((t) => [lc(t.name), t]));
-    const wanted = m.allTables ? [...st.tables.values()].map((t) => t.name) : m.tables.map((t) => t.name);
+    const wanted = scope !== 'tables' ? [...st.tables.values()].map((t) => t.name) : m.tables.map((t) => t.name);
     for (const name of wanted) {
-      const fixture = st.tables.get(lc(name));
-      const object = st.objects.find((o) => lc(o.n) === lc(name) && (o.t === 'table' || o.t === 'view'));
-      if (!fixture || !object) continue;
       const mt = renames.get(lc(name));
-      const linkName = mt ? linkTableName(mt) : object.n;
-      const columns = fixture.columns.map((c, i) => {
-        const tuple = object.c?.[i];
-        const nativeType = tuple?.[1] ?? c.type;
-        return { name: tuple?.[0] ?? c.name, nativeType, kind: c.kind, type: duckType(c.kind, nativeType), nullable: c.nullable, pk: !!c.pk };
-      });
-      out.push({
-        alias: m.alias, member: m, memberIndex, connectionId: conn.id, providerId: conn.providerId, dialect: dialectOfProvider(engine, conn.providerId),
-        schema: st.name, source: object.n, linkName, fixture, object, columns,
-      });
+      const one = mountOne(engine, m, memberIndex, conn, st, name, mt ? linkTableName(mt) : null, m.database ?? null, null);
+      if (one) out.push(one);
     }
   });
   return out;
+}
+
+/** A mounted table as the link catalog / browse / resolve answer it. */
+function sourceTableOf(t: Mounted): SourceTable {
+  return {
+    name: t.source, linkName: t.linkName, database: t.database, schema: t.schema, type: t.fixture.kind,
+    columns: t.columns.map((c) => ({ name: c.name, sourceType: c.nativeType, kind: c.kind, nullable: c.nullable, isPk: c.pk })),
+    primaryKey: t.columns.filter((c) => c.pk).map((c) => c.name),
+    foreignKeys: (t.object.fk ?? []).map((fk) => ({ name: fk.n, columns: fk.cols, refSchema: fk.rs, refTable: fk.rt, refColumns: fk.rcols })),
+    rowEstimate: t.fixture.rowCount, comment: t.object.cm ?? null,
+    ...(t.path ? { path: t.path } : {}),
+  };
+}
+
+/** POST /links/{cid}/browse (throws a {status, code, message} for the handler). */
+export function browseLink(engine: MockEngine, link: ConnectionProfile, req: LinkBrowseRequest): LinkBrowseResult {
+  const def = linkDefinitionOf(link);
+  const i = def.members.findIndex((m) => lc(m.alias) === lc(req.alias ?? ''));
+  if (i < 0) throw { status: 404, code: 'NOT_FOUND', message: `The link has no source '${req.alias}'.` };
+  const path = req.path ?? [];
+  const m = def.members[i];
+  const w = wideInfo(engine, m, i);
+  const alias = m.alias;
+  if (!w || !w.levels.length) {
+    if (path.length) throw { status: 400, code: 'VALIDATION', message: `${alias} has no levels to browse.` };
+    return { alias, path: [], level: null, children: [], tables: mountedTables(engine, link).filter((t) => t.alias === alias).map(sourceTableOf), warnings: [] };
+  }
+  if (path.length > w.levels.length) throw { status: 400, code: 'VALIDATION', message: `${alias} has ${w.levels.length} level(s) below the alias.` };
+  // every name of the path must exist
+  for (let k = 0; k < path.length; k++) {
+    const names = containersOf(engine, w, w.levels[k], w.levels[0] === 'database' && k > 0 ? path[0] : null);
+    if (!names.some((n) => sameName(n, path[k]))) throw { status: 404, code: 'NOT_FOUND', message: `${w.levels[k] === 'database' ? 'Database' : 'Schema'} '${path[k]}' was not found in ${w.conn.name}.` };
+  }
+  if (path.length < w.levels.length) {
+    const level = w.levels[path.length];
+    const names = containersOf(engine, w, level, w.levels[0] === 'database' && path.length > 0 ? path[0] : null);
+    const onDefault = path.every((p, k) => sameName(p, w.defaultPath[k]));
+    return {
+      alias, path: [...path], level,
+      children: names.map((name) => ({ name, isDefault: onDefault && sameName(name, w.defaultPath[path.length]) })),
+      tables: [], warnings: [],
+    };
+  }
+  return { alias, path: [...path], level: null, children: [], tables: (containerTables(engine, w, path) ?? []).map(sourceTableOf), warnings: [] };
+}
+
+/** POST /links/{cid}/resolve. */
+export function resolveLinkTables(engine: MockEngine, link: ConnectionProfile, req: LinkResolveRequest): LinkResolveResult {
+  const mounted = mountedTables(engine, link);
+  const tables: LinkResolveResult['tables'] = [];
+  const missing: LinkTableRef[] = [];
+  for (const ref of req.tables ?? []) {
+    const t = mounted.find((x) => lc(x.alias) === lc(ref.alias) && lc(x.linkName) === lc(ref.table)) ?? nestedTable(engine, link, ref.alias, ref.table);
+    if (t) tables.push({ alias: t.alias, table: sourceTableOf(t) });
+    else missing.push(ref);
+  }
+  return { tables, missing };
+}
+
+/** The catalog + natural-name paths the compiler needs for a model (the nested tables it names included). */
+export function compileCatalogFor(engine: MockEngine, link: ConnectionProfile, model: BuilderModel | null | undefined): { catalog: BuilderCatalog; paths: BuilderPaths } {
+  const catalog = builderCatalogOf(linkCatalog(engine, link));
+  const paths: BuilderPaths = {};
+  for (const t of model?.tables ?? []) {
+    const key = `${t.alias}.${t.table}`;
+    if (catalog[key]) continue;
+    const n = nestedTable(engine, link, t.alias, t.table);
+    if (!n) continue;
+    catalog[key] = n.columns.map((c) => ({ name: c.name, kind: c.kind, dbType: c.type }));
+    if (n.path) paths[key] = n.path;
+  }
+  return { catalog, paths };
 }
 
 /** The link's explorer catalog: one schema per alias (+ `views`). */
@@ -198,20 +397,17 @@ function linkSchemas(engine: MockEngine, link: ConnectionProfile): Map<string, S
 export function linkCatalog(engine: MockEngine, link: ConnectionProfile): LinkCatalog {
   const def = linkDefinitionOf(link);
   const mounted = mountedTables(engine, link);
-  const schemas: LinkCatalogSchema[] = def.members.map((mem) => {
+  const schemas: LinkCatalogSchema[] = def.members.map((mem, i) => {
     const conn = mem.connectionId ? engine.conn(mem.connectionId) : undefined;
     const own = mounted.filter((t) => t.alias === mem.alias);
-    const warnings = mem.allTables ? [] : mem.tables.filter((t) => !own.some((o) => lc(o.source) === lc(t.name))).map((t) => `${t.name} was not found in ${conn?.name ?? 'the source'}.`);
-    const tables: SourceTable[] = own.map((t) => ({
-      name: t.source, linkName: t.linkName, database: mem.database ?? null, schema: t.schema, type: t.fixture.kind,
-      columns: t.columns.map((c) => ({ name: c.name, sourceType: c.nativeType, kind: c.kind, nullable: c.nullable, isPk: c.pk })),
-      primaryKey: t.columns.filter((c) => c.pk).map((c) => c.name),
-      foreignKeys: (t.object.fk ?? []).map((fk) => ({ name: fk.n, columns: fk.cols, refSchema: fk.rs, refTable: fk.rt, refColumns: fk.rcols })),
-      rowEstimate: t.fixture.rowCount, comment: t.object.cm ?? null,
-    }));
+    const scope = memberScopeOf(mem);
+    const warnings = scope !== 'tables' ? [] : mem.tables.filter((t) => !own.some((o) => lc(o.source) === lc(t.name))).map((t) => `${t.name} was not found in ${conn?.name ?? 'the source'}.`);
+    const w = wideInfo(engine, mem, i);
     return {
-      alias: mem.alias, kind: mem.kind ?? 'connection', connectionId: mem.connectionId ?? null, providerId: conn?.providerId ?? null, tables, warnings,
+      alias: mem.alias, kind: mem.kind ?? 'connection', connectionId: mem.connectionId ?? null, providerId: conn?.providerId ?? null,
+      tables: own.map(sourceTableOf), warnings,
       error: !conn ? 'The connection of this source no longer exists.' : null,
+      ...(isWideScope(scope) && mem.kind !== 'files' ? { scope, levels: w?.levels ?? [], defaultPath: w?.defaultPath ?? [] } : {}),
     };
   });
   return { schemas, relations: def.relations };
@@ -231,7 +427,7 @@ function fakeSession(engine: MockEngine, t: Mounted): Session {
   const conn = engine.conn(t.connectionId)!;
   return {
     sessionId: `link_fetch_${t.connectionId}`, connectionId: t.connectionId, serverInfo: engine.serverInfo(conn.providerId, conn.props),
-    database: t.member.database ?? null, txMode: 'auto', txOpen: false, state: 'idle', dialect: t.dialect, cancel: false, lastResults: null,
+    database: t.database, txMode: 'auto', txOpen: false, state: 'idle', dialect: t.dialect, cancel: false, lastResults: null,
   } as unknown as Session;
 }
 
@@ -347,7 +543,11 @@ type Body<T> = T extends unknown ? Omit<T, 's' | 'e'> : never;
 type ExprBody = Body<Expr>;
 
 type SelectItem = { s: number; e: number } & ({ star: true; table: string | null } | { star: false; expr: Expr; alias: string | null });
-interface Src { schema: string | null; table: string; alias: string | null; s: number; e: number }
+/**
+ * A FROM / JOIN table: `schema.table`, where a wide member's 3- / 4-part name (`crm.sales.orders`) keeps the alias as
+ * schema and the rest as table ("sales.orders"); `label` names the source when it has no alias (its last name part).
+ */
+interface Src { schema: string | null; table: string; alias: string | null; label: string; s: number; e: number }
 interface JoinAst { type: BuilderJoinType; src: Src; on: Expr | null; comma: boolean }
 interface OrderAst { expr: Expr; dir: 'asc' | 'desc'; nulls: 'first' | 'last' | null }
 export interface SelectAst {
@@ -478,12 +678,12 @@ class Parser {
     const parts = [this.ident()];
     while (this.acceptOp('.')) parts.push(this.ident());
     if (this.isOp('(')) throw unsupported('Table functions');
-    const table = parts[parts.length - 1];
-    const schema = parts.length > 1 ? parts[parts.length - 2] : null;
+    const table = parts.length > 2 ? parts.slice(1).join('.') : parts[parts.length - 1];
+    const schema = parts.length > 1 ? parts[0] : null;
     let alias: string | null = null;
     if (this.acceptKw('AS')) alias = this.ident();
     else if (this.aliasCandidate()) alias = this.ident();
-    return { schema, table, alias, s, e: this.toks[this.p - 1].e };
+    return { schema, table, alias, label: parts[parts.length - 1], s, e: this.toks[this.p - 1].e };
   }
 
   private item(): SelectItem {
@@ -1138,6 +1338,9 @@ function bindSources(engine: MockEngine, link: ConnectionProfile, sel: SelectAst
   const srcs = sel.from ? [sel.from, ...sel.joins.map((j) => j.src)] : [];
   return srcs.map((src) => {
     let cands = mounted.filter((t) => lc(t.linkName) === lc(src.table) && (!src.schema || lc(t.alias) === lc(src.schema)));
+    // a wide member's other containers (crm.sales.orders, crm."sales.orders", crm.shop.dbo.orders) load on demand
+    const nested = !cands.length && src.schema ? nestedTable(engine, link, src.schema, src.table) : null;
+    if (nested) cands = [nested];
     if (!cands.length) {
       const name = src.schema ? `${src.schema}.${src.table}` : src.table;
       const known = mounted.map((t) => `${t.alias}.${t.linkName}`);
@@ -1158,7 +1361,7 @@ export function evaluate(state: PackState, link: ConnectionProfile, sql: string)
   const fetched: EvalResult['fetched'] = [];
   const bound = bindSources(state.engine, link, sel);
   const bindings: Binding[] = bound.map(({ src, t }) => ({
-    name: src.alias ?? src.table, t, cols: t.columns.map((c) => c.name),
+    name: src.alias ?? src.label, t, cols: t.columns.map((c) => c.name),
     rows: sourceRows(state, link.id, t, (m, rows, ms) => fetched.push({ table: `${m.alias}.${m.linkName}`, rows, ms, connection: state.engine.conn(m.connectionId)?.name ?? m.connectionId })),
   }));
   const names = new Set<string>();
@@ -1447,13 +1650,13 @@ function toModel(engine: MockEngine, link: ConnectionProfile, sel: SelectAst, sq
   const raw = (e: Expr) => sql.slice(e.s, e.e).trim();
 
   const bound = bindSources(engine, link, sel);
-  const tables: BuilderTable[] = bound.map(({ src, t }, i) => ({ id: `t${i + 1}`, alias: t.alias, table: t.linkName, as: src.alias ?? src.table, x: 40 + i * 320, y: 40, collapsed: false }));
+  const tables: BuilderTable[] = bound.map(({ src, t }, i) => ({ id: `t${i + 1}`, alias: t.alias, table: t.linkName, as: src.alias ?? src.label, x: 40 + i * 320, y: 40, collapsed: false }));
   const asSeen = new Set<string>();
   for (const t of tables) {
     if (asSeen.has(lc(t.as))) throw nb(`The table alias "${t.as}" is used twice.`);
     asSeen.add(lc(t.as));
   }
-  const bindings: Binding[] = bound.map(({ src, t }) => ({ name: src.alias ?? src.table, t, cols: t.columns.map((c) => c.name), rows: [] }));
+  const bindings: Binding[] = bound.map(({ src, t }) => ({ name: src.alias ?? src.label, t, cols: t.columns.map((c) => c.name), rows: [] }));
   const scope = new Scope(bindings, bindings.length);
   const colOf = (e: Expr): { tableId: string; column: string } | null => {
     if (e.k !== 'col') return null;
@@ -1737,7 +1940,7 @@ export function planOf(state: PackState, link: ConnectionProfile, sql: string, p
   } catch (e) {
     return { engine: 'duckdb', parsed: true, sources: [], warnings: [{ code: 'fallback', message: e instanceof Error ? e.message : String(e) }] };
   }
-  const bindings: Binding[] = bound.map(({ src, t }) => ({ name: src.alias ?? src.table, t, cols: t.columns.map((c) => c.name), rows: [] }));
+  const bindings: Binding[] = bound.map(({ src, t }) => ({ name: src.alias ?? src.label, t, cols: t.columns.map((c) => c.name), rows: [] }));
   const scope = new Scope(bindings, bindings.length);
   const used = bindings.map(() => new Set<string>());
   const all = bindings.map(() => false);
@@ -1850,22 +2053,30 @@ export function validateDefinition(engine: MockEngine, def: LinkDefinition, id: 
     else aliases.set(lc(m.alias), i);
     const conn = m.connectionId ? engine.conn(m.connectionId) : undefined;
     let tables: number | null = null;
+    const rawScope = typeof m.scope === 'string' && m.scope.trim() ? lc(m.scope.trim()) : null;
+    const scope = memberScopeOf(m);
+    if (rawScope && !LINK_SCOPES.includes(rawScope as LinkScope)) err('scopeInvalid', `“${m.scope}” is not a scope: tables, schema, database or connection.`);
+    else if (m.kind === 'files' && rawScope && rawScope !== 'tables') err('scopeInvalid', 'A files source mounts its files one by one; it has no wider scope.');
     if (m.kind !== 'files') {
       if (!conn) err('memberMissing', 'The connection of this source does not exist (any more).');
       else if (conn.id === id || isLinkConn(conn)) err('memberLinked', 'A linked database cannot be a source of another one.');
       else if ((engine.providers().find((p) => p.id === conn.providerId)?.kind ?? 'relational') !== 'relational') err('memberUnsupported', `${conn.name} (${conn.providerId}) cannot be a source yet.`);
-      else {
-        const eng = engine as unknown as EngineInternals;
-        const schema = m.schema ?? engine.defaultSchema(conn.id);
-        const st = eng.schemasFor(conn.id).get(schema);
+      else if (isWideScope(scope)) {
+        const w = wideInfo(engine, m, i);
+        tables = w ? containerTables(engine, w, w.defaultPath)?.length ?? 0 : 0;
+        if (w && !w.levels.length) {
+          warn('scopeNarrowed', `${conn.name} has nothing wider to span: ${m.alias} mounts the tables of ${w.defaultSchema}, like a whole schema.`);
+        }
+      } else {
+        const st = schemaState(engine, conn.id, m.schema ?? engine.defaultSchema(conn.id));
         const available = st ? [...st.tables.values()].map((t) => t.name) : [];
-        tables = m.allTables ? available.length : m.tables.length;
-        if (!m.allTables) {
+        tables = scope !== 'tables' ? available.length : m.tables.length;
+        if (scope === 'tables') {
           for (const t of m.tables) if (!available.some((a) => lc(a) === lc(t.name))) warn('tableMissing', `${t.name} was not found in ${conn.name}.`, t.name);
         }
       }
     }
-    if (!m.allTables && !m.tables.length) err('noTables', 'Choose at least one table, or mount all tables.');
+    if (scope === 'tables' && !m.tables.length) err('noTables', 'Choose at least one table, or mount all tables.');
     const names = new Set<string>();
     for (const t of m.tables) {
       const n = linkTableName(t);
@@ -2019,7 +2230,8 @@ function createLinkedHandlers(ctx: M2MockContext): RequestHandler[] {
       if (!c) return notLink(String(params.cid));
       const b = (await request.json()) as CompileRequest;
       if (!b.model?.tables?.length) return err(400, 'VALIDATION', 'The query has no table.', { field: 'tables' });
-      const r: CompileResult = compileBuilder(b.model, builderCatalogOf(linkCatalog(engine, c)));
+      const cc = compileCatalogFor(engine, c, b.model);
+      const r: CompileResult = compileBuilder(b.model, cc.catalog, cc.paths);
       if (b.plan) r.plan = planOf(state, c, r.sql, r.params);
       return ok(r as never);
     }),
@@ -2079,6 +2291,24 @@ function createLinkedHandlers(ctx: M2MockContext): RequestHandler[] {
         cache.clear();
       }
       return ok({ invalidated });
+    }),
+    http.post(`${P}/:cid/browse`, async ({ params, request }) => {
+      const c = link(String(params.cid));
+      if (!c) return notLink(String(params.cid));
+      const b = (await request.json().catch(() => ({}))) as LinkBrowseRequest;
+      try {
+        return ok(browseLink(engine, c, b) as never);
+      } catch (e) {
+        const x = e as { status?: number; code?: string; message?: string };
+        if (typeof x.status === 'number') return err(x.status, x.code ?? 'VALIDATION', x.message ?? 'Cannot browse.');
+        throw e;
+      }
+    }),
+    http.post(`${P}/:cid/resolve`, async ({ params, request }) => {
+      const c = link(String(params.cid));
+      if (!c) return notLink(String(params.cid));
+      const b = (await request.json().catch(() => ({}))) as LinkResolveRequest;
+      return ok(resolveLinkTables(engine, c, b) as never);
     }),
     http.post(`${P}/:cid/materialize/preview`, () => err(501, 'NOT_SUPPORTED', 'Materialize is not available in the mock engine yet.')),
     http.post(`${P}/:cid/materialize`, () => err(501, 'NOT_SUPPORTED', 'Materialize is not available in the mock engine yet.')),

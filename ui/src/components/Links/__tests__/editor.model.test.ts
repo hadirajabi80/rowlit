@@ -5,7 +5,7 @@ import { linkProps, type LinkDefinition } from '../../../api/links';
 import type { ConnectionProfile, ProviderId } from '../../../api/types';
 import {
   addMembers, addSourceTables, aliasProblem, draftFromProfile, draftSignature, emptyDraft, newMember, renameTable, setAlias, setAllTables, setConnection, setPlace,
-  setTables, toConnectionInput, toDefinition, validateDraft, type LinkDraft,
+  setScope, setTables, toConnectionInput, toDefinition, validateDraft, type LinkDraft,
 } from '../editor/model';
 
 const conn = (id: string, name: string, providerId: ProviderId = 'postgresql'): ConnectionProfile => ({
@@ -53,13 +53,13 @@ describe('link draft', () => {
     d = setTables(d, key, [{ name: 'customers' }], false);
     const def = toDefinition(d);
     expect(def.members).toEqual([{
-      alias: 'postgres_shop', kind: 'connection', connectionId: 'c_pg', database: 'shop', schema: 'public', allTables: false,
+      alias: 'postgres_shop', kind: 'connection', connectionId: 'c_pg', database: 'shop', schema: 'public', scope: 'tables', allTables: false,
       tables: [{ name: 'orders', as: 'sales_orders', type: 'table' }],
     }]);
     // all tables: only renamed tables are listed
     d = setTables(d, key, [{ name: 'customers', type: 'table' }], true);
     d = setAllTables(d, key, true);
-    expect(toDefinition(d).members[0]).toMatchObject({ allTables: true, tables: [{ name: 'orders', as: 'sales_orders' }] });
+    expect(toDefinition(d).members[0]).toMatchObject({ scope: 'schema', allTables: true, tables: [{ name: 'orders', as: 'sales_orders' }] });
   });
 
   it('validates names, connections, schemas, tables and renames', () => {
@@ -111,6 +111,86 @@ describe('link draft', () => {
     expect(input.props).toEqual({ ...linkProps(def), note: 'keep me' });
     expect(draftFromProfile(p, 'duplicate').name).toBe('Sales (copy)');
     expect(draftSignature(draftFromProfile(p, 'edit'))).toBe(draftSignature(d));
+  });
+});
+
+describe('member scopes', () => {
+  const MY = conn('c_my', 'Shop MySQL', 'mysql');
+  const MONGO = conn('c_mongo', 'Docs', 'mongodb');
+  const ALL = [...CONNS, MY, MONGO];
+
+  it('migrates stored members: allTables → schema, else tables; a scope wins; files stay tables', () => {
+    const p = {
+      ...conn('c_link', 'Old', 'linked'),
+      props: {
+        linkVersion: 1, relations: [], options: {},
+        members: [
+          { alias: 'a', connectionId: 'c_pg', schema: 'public', allTables: true, tables: [] },
+          { alias: 'b', connectionId: 'c_pg', schema: 'public', tables: [{ name: 'x' }] },
+          { alias: 'c', connectionId: 'c_pg', database: 'shop', scope: 'database', allTables: false, tables: [] },
+          { alias: 'f', kind: 'files', tables: [{ name: 'a.csv' }] },
+        ],
+      },
+    };
+    const d = draftFromProfile(p, 'edit');
+    expect(d.members.map((m) => m.scope)).toEqual(['schema', 'tables', 'database', 'tables']);
+    const def = toDefinition(d);
+    expect(def.version).toBe(2);
+    expect(def.members.map((m) => [m.scope, m.allTables])).toEqual([['schema', true], ['tables', false], ['database', true], [undefined, false]]);
+    expect(linkProps(def).linkVersion).toBe(2);
+  });
+
+  it('writes only the place a scope uses (whole database: no schema; whole connection: neither)', () => {
+    let { d, key } = withMember();
+    d = setConnection(d, key, PG);
+    d = setPlace(d, key, { database: 'shop', schema: 'public' }, PG);
+    d = setScope(d, key, 'database');
+    expect(toDefinition(d).members[0]).toMatchObject({ scope: 'database', database: 'shop', schema: null, allTables: true, tables: [] });
+    d = setScope(d, key, 'connection');
+    expect(toDefinition(d).members[0]).toMatchObject({ scope: 'connection', database: null, schema: null, allTables: true });
+    // the draft keeps the place: back to tables, the schema is there again
+    d = setScope(d, key, 'tables');
+    expect(d.members[0]).toMatchObject({ database: 'shop', schema: 'public' });
+    // MySQL: the whole database is the member's schema (its database level)
+    const my = withMember();
+    let m = setConnection(my.d, my.key, { ...MY, providerId: 'mysql' });
+    m = setPlace(m, my.key, { schema: 'shop' }, MY);
+    m = setScope(m, my.key, 'database');
+    expect(toDefinition(m).members[0]).toMatchObject({ scope: 'database', database: null, schema: 'shop' });
+  });
+
+  it('validates per scope: schema for tables / schema, tables only for tables, a database for a whole database', () => {
+    let { d, key } = withMember();
+    d = setConnection(d, key, PG);
+    d = setScope(d, key, 'connection');
+    expect(validateDraft(d, ALL)).toEqual([]);
+    d = setScope(d, key, 'database');
+    expect(validateDraft(d, ALL).map((p) => p.field)).toEqual(['database']);
+    d = setPlace(d, key, { database: 'shop' }, PG);
+    expect(validateDraft(d, ALL)).toEqual([]);
+    d = setScope(d, key, 'schema');
+    expect(validateDraft(d, ALL).map((p) => p.field)).toEqual(['schema']);
+    d = setPlace(d, key, { schema: 'public' }, PG);
+    expect(validateDraft(d, ALL)).toEqual([]);
+    d = setScope(d, key, 'tables');
+    expect(validateDraft(d, ALL).map((p) => p.field)).toEqual(['tables']);
+    // MongoDB offers whole database / whole connection only and starts with the database
+    const mg = withMember();
+    const md = setConnection(mg.d, mg.key, { ...MONGO, providerId: 'mongodb' });
+    expect(md.members[0].scope).toBe('database');
+    expect(validateDraft(md, ALL).map((p) => p.field)).toEqual(['schema']);
+    expect(validateDraft(setScope(md, mg.key, 'tables'), ALL).map((p) => p.field)).toContain('scope');
+  });
+
+  it('explorer tables a wide member already spans are not added again', () => {
+    let { d, key } = withMember();
+    d = setConnection(d, key, PG);
+    d = setScope(setPlace(d, key, { database: 'shop' }, PG), key, 'database');
+    const r = addSourceTables(d, [{ connectionId: 'c_pg', database: 'shop', schema: 'sales', name: 'orders', type: 'table' }], CONNS);
+    expect(r.draft.members).toHaveLength(1);
+    expect(r.select).toBe(key);
+    const other = addSourceTables(d, [{ connectionId: 'c_pg', database: 'analytics', schema: 'public', name: 'events', type: 'table' }], CONNS);
+    expect(other.draft.members).toHaveLength(2);
   });
 });
 

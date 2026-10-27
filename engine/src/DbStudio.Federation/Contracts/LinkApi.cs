@@ -20,6 +20,8 @@ namespace DbStudio.Federation.Contracts;
 //   POST   /links/{cid}/materialize               MaterializeRequest   → 202 JobStarted (job.progress; job.done result MaterializeResult)
 //   POST   /links/{cid}/native-script             NativeScriptRequest  → NativeScriptResult
 //   POST   /links/{cid}/refresh-sources           RefreshSourcesRequest → RefreshSourcesResult
+//   POST   /links/{cid}/browse                    LinkBrowseRequest    → LinkBrowseResult   (wide members, lazy)
+//   POST   /links/{cid}/resolve                   LinkResolveRequest   → LinkResolveResult
 //
 // Errors use the usual envelope: 404 NOT_FOUND (link/view), 400 VALIDATION, 403 READ_ONLY (materialize into a read-only
 // target), 501 NOT_SUPPORTED (no federation engine), 503 SOURCE_UNAVAILABLE (a member cannot connect).
@@ -46,8 +48,39 @@ public static class LinkProblemCodes
         MemberMissing = "memberMissing", MemberUnsupported = "memberUnsupported", MemberLinked = "memberLinked",
         MemberUnreachable = "memberUnreachable",
         TableInvalid = "tableInvalid", TableDuplicate = "tableDuplicate", TableMissing = "tableMissing", NoTables = "noTables",
-        RelationInvalid = "relationInvalid";
+        RelationInvalid = "relationInvalid",
+        /// <summary>An unknown scope token, or a scope the member's kind cannot have (files mount files one by one).</summary>
+        ScopeInvalid = "scopeInvalid",
+        /// <summary>Warning: the provider has nothing wider to span; the member mounts what a narrower scope would.</summary>
+        ScopeNarrowed = "scopeNarrowed";
 }
+
+// ---- wide members (scopes database / connection)
+
+/// <summary>One level of a member.</summary>
+/// <param name="Alias">The member.</param>
+/// <param name="Path">
+/// Names from the member root down (each level of <see cref="LinkCatalogSchema.Levels"/> in turn): empty lists the first
+/// level, a full path (one name per level) lists that container's tables. A member without levels lists its tables at [].
+/// </param>
+/// <param name="Refresh">Read the source again instead of the cached copy.</param>
+public sealed record LinkBrowseRequest(string Alias, IReadOnlyList<string>? Path = null, bool Refresh = false);
+
+/// <param name="Level">"database" | "schema": what <see cref="Children"/> are; null when <see cref="Tables"/> are listed.</param>
+/// <param name="Children">Databases or schemas at <see cref="Path"/> (the default one flagged).</param>
+/// <param name="Tables">Tables of the container at <see cref="Path"/>, with columns; <see cref="SourceTable.LinkName"/> is the engine name.</param>
+public sealed record LinkBrowseResult(string Alias, IReadOnlyList<string> Path, string? Level, IReadOnlyList<LinkBrowseNode> Children,
+    IReadOnlyList<SourceTable> Tables, IReadOnlyList<string> Warnings);
+
+public sealed record LinkBrowseNode(string Name, bool IsDefault);
+
+public sealed record LinkResolveRequest(IReadOnlyList<LinkTableRef> Tables);
+
+/// <param name="Tables">The tables found (engine names in <see cref="LinkResolvedTable.Table"/>.LinkName).</param>
+/// <param name="Missing">Names no member mounts.</param>
+public sealed record LinkResolveResult(IReadOnlyList<LinkResolvedTable> Tables, IReadOnlyList<LinkTableRef> Missing);
+
+public sealed record LinkResolvedTable(string Alias, SourceTable Table);
 
 /// <param name="Reachable">Null when not probed.</param>
 /// <param name="Tables">Mounted tables found (after resolving AllTables), null when not probed.</param>

@@ -102,6 +102,24 @@ interface Doc {
   diags: Diagnostic[] | null;
 }
 
+/** Completion sources a feature package adds to every editor of a dialect (registerCompletionSource). */
+const GLOBAL_SOURCES = new Map<Dialect, ExtraCompletionSource[]>();
+
+/**
+ * A package's completion source for every Intel of `dialect` (after the dialect's own DialectSpec.complete, before the
+ * editor's snippets / postfix templates), e.g. the links package: the multi-part names of whole-database members in
+ * linked consoles. Returns an unregister function.
+ */
+export function registerCompletionSource(dialect: Dialect, source: ExtraCompletionSource): () => void {
+  const list = GLOBAL_SOURCES.get(dialect) ?? [];
+  list.push(source);
+  GLOBAL_SOURCES.set(dialect, list);
+  return () => {
+    const i = list.indexOf(source);
+    if (i >= 0) list.splice(i, 1);
+  };
+}
+
 function modelKey(st: SplitStatement): string {
   return st.start + '\u0000' + st.text;
 }
@@ -406,7 +424,8 @@ class IntelImpl implements Intel {
     const index = this.indexAt(d, offset);
     const binder = this.binderFor(d, st, index);
     const ctx = detectContext(model, offset, this.spec, d.text);
-    return runComplete(ctx, { spec: this.spec, index, binder, opts: this.opts, usage: this.usage, text: d.text, statementEnd: st?.end ?? offset, extraSources: this.spec.complete ? [this.spec.complete, ...this.extraSources] : this.extraSources });
+    const extraSources = [...(this.spec.complete ? [this.spec.complete] : []), ...(GLOBAL_SOURCES.get(this.dialect) ?? []), ...this.extraSources];
+    return runComplete(ctx, { spec: this.spec, index, binder, opts: this.opts, usage: this.usage, text: d.text, statementEnd: st?.end ?? offset, extraSources });
   }
 
   resolveItem(item: CompletionItem): CompletionItem { return item; }

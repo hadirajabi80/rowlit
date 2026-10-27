@@ -3,7 +3,7 @@
 // validate, plan, refresh-sources and linked views.
 import { describe, expect, it } from 'vitest';
 import { api } from '../../../api/client';
-import { linksApi, type BuilderModel, type LinkDefinition } from '../../../api/links';
+import { linkProps, linksApi, type BuilderModel, type LinkDefinition } from '../../../api/links';
 import type { CellValue, WsEvent } from '../../../api/types';
 import { inlineParams } from '../../../filter/sql';
 import { builderCatalogOf, linkCatalog, linkedMockState, sqlToModel } from '../../../mocks/packs/linked';
@@ -265,6 +265,113 @@ describe('linked mock pack', () => {
     const r = await linksApi.compile('c_link', { model: model3, plan: true });
     expect(r.sql).toBe(compileBuilder(model3, builderCatalogOf(linkCatalog(engine(), link()))).sql);
     expect(r.plan!.sources.map((s) => `${s.table.alias}.${s.table.table}`)).toEqual(['shop.orders', 'shop.order_lines', 'erp.products', 'crm.customers']);
+  });
+
+  describe('wide members (scopes database / connection)', () => {
+    /** A link with a whole PostgreSQL database (c_pg: shop › public, sales) and a whole SQL Server connection (c_prod). */
+    const wide = async () => {
+      const def: LinkDefinition = {
+        version: 2, relations: [], options: {},
+        members: [
+          { alias: 'pg', kind: 'connection', connectionId: 'c_pg', database: 'shop', schema: null, scope: 'database', allTables: true, tables: [] },
+          { alias: 'ms', kind: 'connection', connectionId: 'c_prod', database: null, schema: null, scope: 'connection', allTables: true, tables: [] },
+          { alias: 'shop', kind: 'connection', connectionId: 'c_shop', database: null, schema: 'main', scope: 'tables', allTables: false, tables: [{ name: 'orders' }] },
+        ],
+      };
+      const p = await api.createConnection({ name: 'Wide', providerId: 'linked', color: null, folder: null, readOnly: true, props: linkProps(def), savePassword: false, password: null });
+      return p.id;
+    };
+
+    it('lists the default container only, with levels and the default path', async () => {
+      const id = await wide();
+      const cat = await linksApi.catalog(id);
+      const [pg, ms, shop] = cat.schemas;
+      expect(pg).toMatchObject({ scope: 'database', levels: ['schema'], defaultPath: ['public'] });
+      expect(pg.tables.map((t) => t.linkName)).toContain('customers');
+      expect(pg.tables.every((t) => !t.path)).toBe(true);
+      expect(ms).toMatchObject({ scope: 'connection', levels: ['database', 'schema'], defaultPath: ['Shop', 'dbo'] });
+      expect(ms.tables.map((t) => t.linkName)).toContain('products');
+      expect(shop.levels).toBeUndefined();
+      expect(shop.tables.map((t) => t.linkName)).toEqual(['orders']);
+    });
+
+    it('browses levels lazily: databases, schemas, then a container\'s tables with engine names', async () => {
+      const id = await wide();
+      const dbs = await linksApi.browse(id, { alias: 'ms', path: [] });
+      expect(dbs.level).toBe('database');
+      expect(dbs.children).toEqual([{ name: 'Shop', isDefault: true }, { name: 'Staging', isDefault: false }]);
+      const schemas = await linksApi.browse(id, { alias: 'ms', path: ['Shop'] });
+      expect(schemas.level).toBe('schema');
+      expect(schemas.children.find((c) => c.isDefault)?.name).toBe('dbo');
+      expect(schemas.children.map((c) => c.name)).toContain('Sales');
+      const sales = await linksApi.browse(id, { alias: 'ms', path: ['Shop', 'Sales'] });
+      expect(sales.level).toBeNull();
+      const orders = sales.tables.find((t) => t.name === 'orders')!;
+      expect(orders).toMatchObject({ linkName: 'Sales.orders', path: ['Sales', 'orders'], schema: 'Sales' });
+      expect(orders.columns.length).toBeGreaterThan(0);
+      const staging = await linksApi.browse(id, { alias: 'ms', path: ['Staging', 'dbo'] });
+      expect(staging.tables.find((t) => t.name === 'orders')).toMatchObject({ linkName: 'Staging.dbo.orders', path: ['Staging', 'dbo', 'orders'] });
+      const dflt = await linksApi.browse(id, { alias: 'pg', path: ['public'] });
+      expect(dflt.tables.find((t) => t.name === 'customers')).toMatchObject({ linkName: 'customers' });
+      expect(dflt.tables.find((t) => t.name === 'customers')!.path).toBeUndefined();
+      // a member without levels lists its tables at []
+      expect((await linksApi.browse(id, { alias: 'shop', path: [] })).tables.map((t) => t.linkName)).toEqual(['orders']);
+      await expect(linksApi.browse(id, { alias: 'nope', path: [] })).rejects.toThrow(/no source/);
+      await expect(linksApi.browse(id, { alias: 'ms', path: ['Nope'] })).rejects.toThrow(/not found/);
+    });
+
+    it('resolves engine names of nested and normal tables', async () => {
+      const id = await wide();
+      const r = await linksApi.resolve(id, { tables: [{ alias: 'pg', table: 'sales.orders' }, { alias: 'shop', table: 'orders' }, { alias: 'ms', table: 'Staging.dbo.orders' }, { alias: 'pg', table: 'ghost.x' }] });
+      expect(r.tables.map((t) => `${t.alias}:${t.table.linkName}`)).toEqual(['pg:sales.orders', 'shop:orders', 'ms:Staging.dbo.orders']);
+      expect(r.tables[0].table.path).toEqual(['sales', 'orders']);
+      expect(r.missing).toEqual([{ alias: 'pg', table: 'ghost.x' }]);
+    });
+
+    it('runs queries over nested tables in 3- and 4-part and quoted engine form', async () => {
+      const id = await wide();
+      const q = (sql: string) => {
+        const r = engine().interpret(session(id), sql);
+        expect(r.error, r.error ?? '').toBeNull();
+        return r.sets[0];
+      };
+      const total = memberRows('c_pg', 'sales.orders').length;
+      expect(q('SELECT count(*) FROM pg.sales.orders').rows[0][0]).toBe(total);
+      expect(q('SELECT count(*) FROM pg."sales.orders" o').rows[0][0]).toBe(total);
+      expect(q('SELECT o.id FROM pg.sales.orders o JOIN pg.customers c ON c.id = o.customer_id LIMIT 3').rows.length).toBe(3);
+      expect(q('SELECT orders.id FROM ms.Shop.Sales.orders LIMIT 2').rows.length).toBe(2);
+      expect(q('SELECT count(*) FROM ms.Shop.dbo.products').rows[0][0]).toBe(memberRows('c_prod', 'dbo.products').length);
+    });
+
+    it('compiles nested tables in their natural form', async () => {
+      const id = await wide();
+      const model: BuilderModel = {
+        version: 1, tables: [{ id: 't1', alias: 'pg', table: 'sales.orders', as: 'o', x: 0, y: 0 }], joins: [],
+        columns: [{ id: 'c1', tableId: 't1', column: 'id' }], filter: null, groupBy: [], sort: [], limit: 5,
+      };
+      const r = await linksApi.compile(id, { model });
+      expect(r.sql).toBe('SELECT o.id\nFROM pg.sales.orders AS o\nLIMIT 5');
+      expect(engine().interpret(session(id), r.sql).error).toBeNull();
+    });
+
+    it('validates scopes', async () => {
+      const def: LinkDefinition = {
+        version: 2, relations: [], options: {},
+        members: [
+          { alias: 'a', connectionId: 'c_pg', database: 'shop', scope: 'database', allTables: true, tables: [] },
+          { alias: 'b', connectionId: 'c_prod', scope: 'connection', allTables: true, tables: [] },
+          { alias: 'c', connectionId: 'c_shop', schema: 'main', scope: 'galaxy' as never, tables: [{ name: 'orders' }] },
+          { alias: 'd', kind: 'files', scope: 'database', tables: [{ name: 'x.csv' }] },
+          { alias: 'e', connectionId: 'c_shop', schema: 'main', scope: 'schema', tables: [] },
+        ],
+      };
+      const r = await linksApi.validate({ definition: def });
+      const codes = r.problems.map((p) => `${p.member}:${p.code}`);
+      expect(codes).toEqual(expect.arrayContaining(['2:scopeInvalid', '3:scopeInvalid']));
+      expect(codes.filter((c) => /^(0|1|4):/.test(c))).toEqual([]);
+      expect(r.members[0].tables).toBeGreaterThan(0);
+      expect(r.members[1].tables).toBeGreaterThan(0);
+    });
   });
 
   it('stores linked views and mirrors them into the link\'s saved queries', async () => {

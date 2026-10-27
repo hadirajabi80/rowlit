@@ -48,6 +48,25 @@ public interface ISourceFetcher
     Task<FetchResult> FetchAsync(SourceContext context, FetchRequest request, IFederationAppender target, IProgress<long>? progress, CancellationToken ct);
 }
 
+/// <summary>
+/// A fetcher that can enumerate what a wide member spans (<see cref="LinkScopes.Database"/> / <see cref="LinkScopes.Connection"/>).
+/// The runtime reads a wide member container by container: it lists the databases / schemas here, then calls
+/// <see cref="ISourceFetcher.LoadCatalogAsync"/> with a schema-scoped copy of the member for each container a query (or
+/// the builder, the explorer) names. Names are listed, never their tables, so a server with thousands of tables costs
+/// nothing until one is used.
+/// </summary>
+public interface IScopedSourceFetcher
+{
+    /// <summary>The connection's default database (null where the provider has no database level) and schema (null when none).</summary>
+    Task<(string? Database, string? Schema)> DefaultsAsync(SourceContext context, CancellationToken ct);
+
+    /// <summary>Databases the connection can read (system databases left out); empty where the provider has no database level.</summary>
+    Task<IReadOnlyList<string>> ListDatabasesAsync(SourceContext context, CancellationToken ct);
+
+    /// <summary>Schemas of <paramref name="database"/> (null = the connection's), system schemas left out.</summary>
+    Task<IReadOnlyList<string>> ListSchemasAsync(SourceContext context, string? database, CancellationToken ct);
+}
+
 /// <summary>Fetcher keys that are not provider ids.</summary>
 public static class FetcherKeys
 {
@@ -101,6 +120,12 @@ public sealed record SourceCatalog(IReadOnlyList<SourceTable> Tables, IReadOnlyL
 /// <param name="ForeignKeys">Same-source foreign keys whose referenced table is mounted in the same member (source names; RefTable = source name).</param>
 /// <param name="RowEstimate">Server row estimate, when cheap to get.</param>
 /// <param name="Options">The mounted table's <see cref="MountedTable.Options"/>.</param>
+/// <param name="Path">
+/// Members of a wide scope (<see cref="LinkScopes.IsWide"/>): the name parts below the alias as queries write them
+/// (<c>["sales", "orders"]</c> for <c>crm.sales.orders</c>, <c>["shop", "dbo", "orders"]</c> for a whole connection);
+/// <see cref="LinkName"/> is then the engine name (those parts joined with ".", the default database / schema left out).
+/// Null for the tables of a tables / schema member and of a wide member's default schema.
+/// </param>
 public sealed record SourceTable(
     string Name,
     string LinkName,
@@ -112,7 +137,8 @@ public sealed record SourceTable(
     IReadOnlyList<ForeignKeyRef> ForeignKeys,
     long? RowEstimate = null,
     JsonObject? Options = null,
-    string? Comment = null);
+    string? Comment = null,
+    IReadOnlyList<string>? Path = null);
 
 /// <summary>A source column.</summary>
 /// <param name="SourceType">Type text as the source reports it ("nvarchar(50)", "NUMBER(10,2)", "Nullable(String)"…).</param>

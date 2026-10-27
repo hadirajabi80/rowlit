@@ -24,6 +24,7 @@ import { objectTargetOf, targetOf } from '../../commands/core';
 import { extendContextMenu, registerContextMenu, type ContextEntry } from '../../commands/menuModel';
 import { registerCommands, type Command } from '../../commands/registry';
 import { isSavedQueryTarget, type ObjectTarget } from '../../commands/types';
+import type { ExtraCompletionSource } from '../../intel';
 import { getConnection } from '../../store/connections';
 import { useUi, toast } from '../../store/ui';
 import { registerTabView } from '../layout/tabViews';
@@ -242,6 +243,22 @@ export const BUILDER_JOIN_MENU: ContextEntry[] = [
   h('builder.joinInner'), h('builder.joinLeft'), h('builder.joinRight'), h('builder.joinFull'), h('builder.joinCross'), 'separator', c('builder.editJoin'), c('builder.removeJoin'),
 ];
 
+// ---- IntelliSense of linked consoles: multi-part names of whole-database / whole-connection members
+// (intel/wideNames.ts, a lazy chunk loaded on the first completion in a linked console)
+
+let wideNames: typeof import('./intel/wideNames') | null = null;
+let wideLoading = false;
+
+const wideNameSource: ExtraCompletionSource = (c, env) => {
+  if (wideNames) return wideNames.wideNameItems(c, env);
+  const id = env.index.snapshot?.connectionId;
+  // any completion in a linked console loads the source, so it is there by the time a qualifier is typed
+  if (!id || wideLoading || !isLink(id)) return null;
+  wideLoading = true;
+  void import('./intel/wideNames').then((m) => { wideNames = m; }, () => { wideLoading = false; });
+  return null;
+};
+
 let registered = false;
 
 export function registerLinksCommands(): void {
@@ -256,6 +273,7 @@ export function registerLinksCommands(): void {
   registerContextMenu('builder.column', BUILDER_COLUMN_MENU);
   registerContextMenu('builder.join', BUILDER_JOIN_MENU);
   extendContextMenu('explorer.savedQuery', [o('links.openView')]);
+  void import('../../intel').then(({ registerCompletionSource }) => registerCompletionSource('duckdb', wideNameSource));
   // LINKS-WPD begin
   registerMaterializeCommands();
   registerNativeLinkCommands();

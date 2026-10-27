@@ -19,11 +19,12 @@ import { Select, type SelectOption } from '../../common/Select';
 import { openBuilder } from '../open';
 import {
   addMembers, addSourceTables, draftFromProfile, draftSignature, emptyDraft, isSelected, linkNameOf, newMember, removeMember, renameTable,
-  setAlias, setAllTables, setConnection, setTables, toConnectionInput, toDefinition, updateMember, validateDraft, type DraftMember, type DraftProblem,
+  setAlias, setConnection, setScope, setTables, toConnectionInput, toDefinition, updateMember, validateDraft, type DraftMember, type DraftProblem,
   type LinkDraft,
 } from './model';
 import type { LinkEditorRequest } from './open';
 import { engineProblems, saveLinkProfile } from './save';
+import { databaseScopeField, isSourceProvider, mountsAll, SCOPE_LABELS, scopeNaming, scopesFor } from './scopes';
 import './editor.css';
 
 const TABULAR = new Set(['table', 'view', 'mview']);
@@ -50,7 +51,8 @@ function fromEngine(problems: readonly LinkProblem[], d: LinkDraft): DraftProble
   return problems.map((p) => ({
     severity: p.severity, message: p.message,
     member: typeof p.member === 'number' ? d.members[p.member]?.key ?? null : null,
-    field: p.code.startsWith('alias') ? 'alias' : p.code.startsWith('table') || p.code === 'noTables' ? 'tables' : p.code.startsWith('member') ? 'connection' : null,
+    field: p.code.startsWith('alias') ? 'alias' : p.code.startsWith('table') || p.code === 'noTables' ? 'tables' : p.code.startsWith('member') ? 'connection'
+      : p.code.startsWith('scope') ? 'scope' : null,
     table: p.table ?? null,
   }));
 }
@@ -315,10 +317,23 @@ export function LinkEditorDialog({ req, onClose }: { req: LinkEditorRequest; onC
 
 function summary(d: LinkDraft): string {
   const sources = d.members.filter((m) => m.connectionId).length;
-  const tables = d.members.reduce((a, m) => a + (m.allTables ? 0 : m.tables.length), 0);
-  const all = d.members.filter((m) => m.allTables).length;
+  const tables = d.members.reduce((a, m) => a + (mountsAll(m.scope) ? 0 : m.tables.length), 0);
+  const all = d.members.filter((m) => mountsAll(m.scope)).length;
   if (!sources) return 'No source yet';
   return `${sources} source${sources === 1 ? '' : 's'} · ${tables} table${tables === 1 ? '' : 's'}${all ? ` + every table of ${all} source${all === 1 ? '' : 's'}` : ''}`;
+}
+
+/** "3 tables", "whole schema"… of a member (sources list). */
+function memberCount(m: DraftMember): string {
+  if (m.scope === 'tables') return `${m.tables.length} table${m.tables.length === 1 ? '' : 's'}`;
+  return SCOPE_LABELS[m.scope].toLowerCase();
+}
+
+/** "Postgres Shop · public" / "· shop" (whole database) / nothing more (whole connection). */
+function memberPlace(m: DraftMember): string {
+  if (m.scope === 'connection') return '';
+  if (m.scope === 'database') return m.database ? ` · ${m.database}` : m.schema ? ` · ${m.schema}` : '';
+  return m.schema ? ` · ${m.schema}` : '';
 }
 
 // ---------------------------------------------------------------- members list
@@ -342,7 +357,7 @@ function MemberList({ draft, connections, selected, problems, onSelect, onAdd, o
         {draft.members.map((m, i) => {
           const conn = connections.find((c) => c.id === m.connectionId);
           const bad = problems.some((p) => p.member === m.key && p.severity === 'error');
-          const count = m.allTables ? 'all tables' : `${m.tables.length} table${m.tables.length === 1 ? '' : 's'}`;
+          const count = memberCount(m);
           return (
             <li key={m.key} className={`lke-member-item${m.key === selected ? ' selected' : ''}${bad ? ' invalid' : ''}`}>
               <button
@@ -364,7 +379,7 @@ function MemberList({ draft, connections, selected, problems, onSelect, onAdd, o
                 {conn ? <ProviderLogo providerId={conn.providerId} size={18} /> : <Database size={18} className="muted" aria-hidden />}
                 <span className="lke-member-text">
                   <span className="lke-member-alias mono">{m.alias || 'new source'}</span>
-                  <span className="lke-member-conn">{conn ? `${conn.name}${m.schema ? ` · ${m.schema}` : ''}` : 'Choose a connection'}</span>
+                  <span className="lke-member-conn">{conn ? `${conn.name}${memberPlace(m)}` : 'Choose a connection'}</span>
                 </span>
                 <span className="lke-member-count">{m.connectionId ? count : ''}</span>
                 {bad && <CircleAlert size={14} className="lke-member-bad" aria-label="Has problems" />}
@@ -392,13 +407,21 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
   onChange(fn: (d: LinkDraft) => LinkDraft): void;
 }) {
   const conn = connections.find((c) => c.id === m.connectionId);
-  const cid = conn?.id ?? null;
-  const withDb = !!conn && hasDatabaseLevel(conn.providerId);
+  const files = m.rest?.kind === 'files';
+  // MongoDB / Elasticsearch members mount without the explorer's table catalog: no schema or table pickers
+  const catalogBacked = !!conn && !isSourceProvider(conn.providerId);
+  const cid = conn && catalogBacked ? conn.id : null;
+  const scope = m.scope;
+  const dbField = conn ? databaseScopeField(conn.providerId) : null;
+  /** The scope picks a schema (tables / schema; a whole database where the database is the provider's schema level). */
+  const pickSchema = scope === 'tables' || scope === 'schema' || (scope === 'database' && dbField === 'schema');
+  const withDb = !!conn && hasDatabaseLevel(conn.providerId) && scope !== 'connection';
   const db = withDb ? m.database : null;
   const conns = useCatalog((s) => (cid ? s.conns[cid] : undefined));
   const dbEntry = useCatalog((s) => (cid ? s.dbs[dbKey(cid, db)] : undefined));
   const schemaLabel = conn && schemaIsDatabase(conn.providerId) ? cap(schemaLevelLabel(conn.providerId)) : 'Schema';
   const problem = (field: DraftProblem['field']) => problems.find((p) => p.field === field);
+  const scopes = conn ? scopesFor(conn.providerId, files ? 'files' : 'connection') : scopesFor(null, files ? 'files' : 'connection');
 
   // the place loads step by step: databases → (default database) → schemas → (default schema) → tables
   useEffect(() => {
@@ -411,7 +434,7 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
     // filling in an empty place keeps the tables (Add to link… may have given them without a database)
     if (pick) onChange((d) => updateMember(d, m.key, (x) => ({ ...x, database: pick })));
   }, [cid, withDb, m.database, databases]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ready = !!cid && (!withDb || !!m.database);
+  const ready = !!cid && (!withDb || !!m.database) && pickSchema;
   useEffect(() => {
     if (ready && cid) void useCatalog.getState().loadSchemas(cid, db);
   }, [ready, cid, db]);
@@ -421,18 +444,19 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
     const pick = defaultSchemaOf(schemasResp.defaultSchema, schemasResp.schemas);
     if (pick) onChange((d) => updateMember(d, m.key, (x) => ({ ...x, schema: pick })));
   }, [ready, m.schema, schemasResp]); // eslint-disable-line react-hooks/exhaustive-deps
+  const listTables = ready && (scope === 'tables' || scope === 'schema');
   useEffect(() => {
-    if (ready && cid && m.schema) void useCatalog.getState().loadSchema(cid, db, m.schema);
-  }, [ready, cid, db, m.schema]);
+    if (listTables && cid && m.schema) void useCatalog.getState().loadSchema(cid, db, m.schema);
+  }, [listTables, cid, db, m.schema]);
 
   const connOptions = useMemo<SelectOption[]>(() => connections
     .filter((c) => c.providerId !== LINK_PROVIDER_ID)
     .map((c) => {
-      const relational = providerKind(c.providerId) === 'relational';
+      const ok = providerKind(c.providerId) === 'relational' || isSourceProvider(c.providerId);
       return {
         value: c.id, label: c.name, group: c.folder ?? 'Connections', icon: <ProviderLogo providerId={c.providerId} size={14} />,
-        disabled: !relational, hint: relational ? undefined : 'Not supported yet',
-        title: relational ? undefined : 'Linked databases mount relational tables; this kind of source comes later.',
+        disabled: !ok, hint: ok ? undefined : 'Not supported yet',
+        title: ok ? undefined : 'Linked databases mount relational tables; this kind of source comes later.',
       };
     })
     .sort((a, b) => (a.group ?? '').localeCompare(b.group ?? '') || a.label.localeCompare(b.label)), [connections]);
@@ -449,7 +473,10 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
   const schemaError = m.schema ? dbEntry?.schemaError[m.schema] : undefined;
   const aliasErr = problem('alias');
   const aliasLive = aliasErr?.message ?? null;
-  const example = m.tables[0] ? linkNameOf(m.tables[0]) : objects?.find((o) => TABULAR.has(o.t))?.n ?? 'table';
+  const example = scope === 'database' && dbField !== 'schema' ? 'schema.table'
+    : scope === 'connection' ? (hasDatabaseLevel(conn?.providerId) ? 'database.schema.table' : conn && dbField === 'schema' ? 'database.table' : conn?.providerId === 'elasticsearch' ? 'index' : 'schema.table')
+      : m.tables[0] ? linkNameOf(m.tables[0]) : objects?.find((o) => TABULAR.has(o.t))?.n ?? 'table';
+  const sourceDb = !!conn && !catalogBacked && scope === 'database' && dbField === 'schema';
 
   return (
     <section className="lke-editor" aria-label={`Source ${m.alias || index + 1}`}>
@@ -472,6 +499,35 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
           {problem('connection') && <div className="form-error" role="alert">{problem('connection')!.message}</div>}
         </div>
 
+        {conn && !files && (
+          <>
+            <span className="form-label" id={`lke-scope-${m.key}`}>Mount</span>
+            <div className="form-control">
+              <div className="segmented lke-scope" role="radiogroup" aria-labelledby={`lke-scope-${m.key}`}>
+                {scopes.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="radio"
+                    aria-checked={scope === s}
+                    className={scope === s ? 'on' : undefined}
+                    title={scopeTitle(s)}
+                    onClick={() => onChange((d) => setScope(d, m.key, s))}
+                  >
+                    {SCOPE_LABELS[s]}
+                  </button>
+                ))}
+              </div>
+              {problem('scope') && <div className="form-error" role="alert">{problem('scope')!.message}</div>}
+              {mountsAll(scope) && scope !== 'schema' && (
+                <div className="form-help lke-scope-note">
+                  {scopeNaming(scope, conn.providerId, m.alias)} Its tables load when a query or the builder uses them.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {withDb && (
           <>
             <span className="form-label" id={`lke-db-${m.key}`}>Database</span>
@@ -481,14 +537,32 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
                 value={m.database}
                 placeholder={conns?.status === 'loading' ? 'Loading databases…' : 'Choose a database…'}
                 options={dbOptions}
-                onChange={(v) => onChange((d) => updateMember(d, m.key, (x) => ({ ...x, database: v, schema: null, tables: [], allTables: false })))}
+                onChange={(v) => onChange((d) => updateMember(d, m.key, (x) => ({ ...x, database: v, schema: null, tables: [] })))}
               />
               {conns?.status === 'error' && <div className="form-error">{conns.error}</div>}
+              {problem('database') && <div className="form-error" role="alert">{problem('database')!.message}</div>}
             </div>
           </>
         )}
 
-        {cid && (
+        {sourceDb && (
+          <>
+            <label className="form-label" htmlFor={`lke-sdb-${m.key}`}>Database</label>
+            <div className="form-control">
+              <input
+                id={`lke-sdb-${m.key}`}
+                className={`input mono${problem('schema') ? ' invalid' : ''}`}
+                value={m.schema ?? ''}
+                spellCheck={false}
+                placeholder="Database name"
+                onChange={(e) => onChange((d) => updateMember(d, m.key, (x) => ({ ...x, schema: e.target.value || null })))}
+              />
+              {problem('schema') && <div className="form-error" role="alert">{problem('schema')!.message}</div>}
+            </div>
+          </>
+        )}
+
+        {cid && pickSchema && (
           <>
             <span className="form-label" id={`lke-schema-${m.key}`}>{schemaLabel}</span>
             <div className="form-control">
@@ -498,7 +572,7 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
                 value={m.schema}
                 placeholder={dbEntry?.schemasStatus === 'loading' ? 'Loading…' : `Choose a ${schemaLabel.toLowerCase()}…`}
                 options={schemaOptions}
-                onChange={(v) => onChange((d) => updateMember(d, m.key, (x) => ({ ...x, schema: v, tables: [], allTables: false })))}
+                onChange={(v) => onChange((d) => updateMember(d, m.key, (x) => ({ ...x, schema: v, tables: [] })))}
               />
               {dbEntry?.schemasStatus === 'error' && <div className="form-error">{dbEntry.schemasError}</div>}
               {problem('schema') && <div className="form-error" role="alert">{problem('schema')!.message}</div>}
@@ -525,7 +599,9 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
             </span>
           </div>
           <div className={aliasLive ? 'form-error' : 'form-help'} id={`lke-alias-help-${m.key}`} role={aliasLive ? 'alert' : undefined}>
-            {aliasLive ?? 'The schema name of this source inside the link: queries name its tables alias.table.'}
+            {aliasLive ?? (mountsAll(scope) && scope !== 'schema'
+              ? `The name of this source inside the link: queries name its tables ${m.alias || 'alias'}.${example}.`
+              : 'The schema name of this source inside the link: queries name its tables alias.table.')}
           </div>
         </div>
 
@@ -541,7 +617,7 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
         </div>
       </div>
 
-      {cid && m.schema && (
+      {listTables && cid && m.schema && (
         <TableList
           member={m}
           objects={objects}
@@ -557,6 +633,15 @@ function MemberEditor({ member: m, index, connections, problems, onChange }: {
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function scopeTitle(s: DraftMember['scope']): string {
+  switch (s) {
+    case 'tables': return 'The tables you pick below';
+    case 'schema': return 'Every table and view of the schema, including ones created later';
+    case 'database': return 'Every schema of the database (tables load when used)';
+    default: return 'Every database of the connection (tables load when used)';
+  }
+}
 
 // ---------------------------------------------------------------- tables of a member
 
@@ -598,7 +683,8 @@ function TableList({ member: m, objects, status, error, problems, onChange, onRe
   const missing = m.tables.filter((t) => objects && !tables.some((o) => o.n === t.name));
   const filtered = useMemo(() => fuzzyFilter(tables, q.trim(), (o) => o.n), [tables, q]);
   const shown = filtered.slice(0, LIST_LIMIT);
-  const selectedCount = m.allTables ? tables.length : m.tables.length;
+  const all = mountsAll(m.scope);
+  const selectedCount = all ? tables.length : m.tables.length;
   const tablesProblem = problems.find((p) => p.field === 'tables');
   const set = (list: readonly CatalogObject[], on: boolean) => onChange((d) => setTables(d, m.key, list.map((o) => ({ name: o.n, type: o.t })), on));
 
@@ -623,18 +709,15 @@ function TableList({ member: m, objects, status, error, problems, onChange, onRe
             }}
           />
         </span>
-        <label className="check sm" title="Every table and view of the schema, including ones created later">
-          <input type="checkbox" checked={m.allTables} onChange={(e) => onChange((d) => setAllTables(d, m.key, e.target.checked))} />
-          Mount all tables (including future ones)
-        </label>
+        {all && <span className="muted lke-all-note">Whole schema: every table and view, including future ones. Rename any of them below.</span>}
         <div className="flex-1" />
-        <button className="link-btn" disabled={m.allTables || !filtered.length} onClick={() => set(filtered.map((f) => f.item), true)}>
+        <button className="link-btn" disabled={all || !filtered.length} onClick={() => set(filtered.map((f) => f.item), true)}>
           Select {q.trim() ? 'matching' : 'all'}
         </button>
-        <button className="link-btn" disabled={m.allTables || !m.tables.length} onClick={() => set(q.trim() ? filtered.map((f) => f.item) : tables, false)}>
+        <button className="link-btn" disabled={all || !m.tables.length} onClick={() => set(q.trim() ? filtered.map((f) => f.item) : tables, false)}>
           Select none
         </button>
-        <span className="lke-count muted" aria-live="polite">{selectedCount} of {tables.length} selected</span>
+        <span className="lke-count muted" aria-live="polite">{selectedCount} of {tables.length} {all ? 'mounted' : 'selected'}</span>
       </div>
       {tablesProblem && <div className="form-error lke-tables-error" role="alert">{tablesProblem.message}</div>}
       <div className="lke-tables" role="group" aria-label={`Tables of ${m.alias || 'the source'}`}>
@@ -659,7 +742,7 @@ function TableList({ member: m, objects, status, error, problems, onChange, onRe
                 <input
                   type="checkbox"
                   checked={on}
-                  disabled={m.allTables}
+                  disabled={all}
                   aria-label={`Mount ${o.n}`}
                   onChange={(e) => set([o], e.target.checked)}
                 />

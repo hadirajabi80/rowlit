@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '../../../api/client';
-import { linksApi, type BuilderJoinType, type BuilderModel, type BuilderTable, type LinkedView } from '../../../api/links';
+import { isWideSchema, linksApi, type BuilderJoinType, type BuilderModel, type BuilderTable, type LinkedView } from '../../../api/links';
 import { newConsole } from '../../../app/actions';
 import { contextMenuEntries } from '../../../commands/menuModel';
 import { displayShortcut } from '../../../commands/keys';
@@ -16,7 +16,7 @@ import { inlineParams } from '../../../filter/sql';
 import { formatCount } from '../../../lib/format';
 import type { RowlitObjectDrag } from '../../../lib/dragObject';
 import { useConnection } from '../../../store/connections';
-import { useLinks } from '../../../store/links';
+import { tableKey, useLinks } from '../../../store/links';
 import { useTabExecution } from '../../../store/results';
 import { isRunning } from '../../../store/resultsReducer';
 import { useSavedQueries } from '../../../store/savedQueries';
@@ -32,7 +32,7 @@ import { cancelBuilderQuery, refreshSources, runBuilderQuery } from './actions';
 import { BottomPanel } from './BottomPanel';
 import type { CardColumnState } from './BuilderCard';
 import { Canvas, type CanvasHandle } from './Canvas';
-import { builderCatalogOf, columnsOf, memberColor, tableOf } from './catalog';
+import { builderCatalogOf, builderPathsOf, columnsOf, memberColor, tableOf } from './catalog';
 import { compileBuilder } from './compile';
 import { registerBuilder, type BuilderController } from './controller';
 import { cardSize, placeCard, type CardSize } from './geometry';
@@ -124,13 +124,25 @@ export function BuilderView({ tab, theme, visible }: TabViewProps) {
 
   // ---------------------------------------------------------------- derived
   const bcat = useMemo(() => builderCatalogOf(catalog), [catalog]);
-  const compiled = useMemo(() => compileBuilder(model, bcat), [model, bcat]);
+  const bpaths = useMemo(() => builderPathsOf(catalog), [catalog]);
+  const compiled = useMemo(() => compileBuilder(model, bcat, bpaths), [model, bcat, bpaths]);
+  // tables of wide members the catalog does not have yet (a saved view, pendingAdd, undo): load them by engine name
+  const resolved = useLinks((s) => s.resolved[linkId]);
+  const unresolved = useMemo(() => (entry?.status === 'ready' ? model.tables.filter((t) => !tableOf(catalog, t.alias, t.table) && isWideSchema(catalog?.schemas.find((s) => s.alias === t.alias))) : []), [model.tables, catalog, entry?.status]);
+  useEffect(() => {
+    if (unresolved.length) void useLinks.getState().resolveTables(linkId, unresolved.map((t) => ({ alias: t.alias, table: t.table })));
+  }, [unresolved, linkId]);
   const sizes = useMemo(() => {
     const out = new Map<string, CardSize>();
     for (const t of model.tables) out.set(t.id, cardSize(t, columnsOf(catalog, t).map((c) => ({ name: c.name, type: c.sourceType }))));
     return out;
   }, [model.tables, catalog]);
-  const missing = useMemo(() => new Set(entry?.status === 'ready' ? model.tables.filter((t) => !tableOf(catalog, t.alias, t.table)).map((t) => t.id) : []), [model.tables, catalog, entry?.status]);
+  const missing = useMemo(() => new Set(entry?.status === 'ready' ? model.tables.filter((t) => {
+    if (tableOf(catalog, t.alias, t.table)) return false;
+    // a wide member's table is missing only once the engine said so
+    const st = isWideSchema(catalog?.schemas.find((s) => s.alias === t.alias)) ? resolved?.[tableKey(t.alias, t.table)] : 'missing';
+    return st === 'missing' || st === 'error';
+  }).map((t) => t.id) : []), [model.tables, catalog, entry?.status, resolved]);
   const columnStates = useMemo(() => {
     const filtered = new Set<string>();
     const walk = (n: NonNullable<BuilderModel['filter']> | NonNullable<BuilderModel['filter']>['items'][number]) => {

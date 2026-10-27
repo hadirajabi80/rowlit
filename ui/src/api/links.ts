@@ -17,7 +17,8 @@ export const LINK_DEFAULT_FOLDER = 'Linked databases';
 export const LINK_VIEWS_SCHEMA = 'views';
 /** Keys of a link profile's props. */
 export const LINK_PROPS = { members: 'members', relations: 'relations', options: 'options', version: 'linkVersion' } as const;
-export const LINK_VERSION = 1;
+/** 2: members carry `scope` (version 1 links are read with allTables → scope 'schema'; LinkDefinition.Normalized). */
+export const LINK_VERSION = 2;
 
 /**
  * Context menu ids of the query builder tab (registered by WP-C with registerContextMenu). The explorer ones
@@ -38,6 +39,21 @@ export const BUILDER_MENU_IDS = {
 
 export type LinkMemberKind = 'connection' | 'files';
 
+/**
+ * How much of its connection a member mounts (Contracts/LinkModels.cs LinkScopes):
+ * - tables: the explicit `tables` of one schema (`alias.table`);
+ * - schema: every table and view of one schema (the former allTables; `alias.table`);
+ * - database: every schema of one database (`alias.schema.table`; the default schema also `alias.table`);
+ * - connection: every database of the connection (`alias.database.schema.table`; the default database also
+ *   `alias.schema.table`, its default schema `alias.table`).
+ * What a level means depends on the provider (the engine decides; the catalog's `levels` say what a wide member spans).
+ */
+export type LinkScope = 'tables' | 'schema' | 'database' | 'connection';
+export const LINK_SCOPES: readonly LinkScope[] = ['tables', 'schema', 'database', 'connection'];
+
+/** Spans more than one schema (lazy containers, multi-part names). */
+export const isWideScope = (s: LinkScope | string | null | undefined): s is 'database' | 'connection' => s === 'database' || s === 'connection';
+
 /** A mounted table: source `name`, shown in the link as `as ?? name`. */
 export interface MountedTable {
   name: string;
@@ -55,10 +71,35 @@ export interface LinkMember {
   connectionId?: string | null;
   database?: string | null;
   schema?: string | null;
-  /** Mount every table and view of the schema; `tables` then only carries renames. */
+  /**
+   * LinkScope (version 2); null / missing in version 1 links (allTables then decides: memberScopeOf). 'database' ignores
+   * `schema`, 'connection' ignores `database` and `schema` (both stored null). Files members have no scope.
+   */
+  scope?: LinkScope | null;
+  /**
+   * Mount every table and view of the schema; `tables` then only carries renames. Version 2 keeps it for older builds:
+   * true for every scope but 'tables' (they then still mount the member's schema).
+   */
   allTables?: boolean;
   tables: MountedTable[];
   label?: string | null;
+}
+
+/** The scope a member mounts: `scope`, else 'schema' when allTables, else 'tables' (files members: always 'tables'). */
+export function memberScopeOf(m: Pick<LinkMember, 'kind' | 'scope' | 'allTables'>): LinkScope {
+  if (m.kind === 'files') return 'tables';
+  const s = typeof m.scope === 'string' ? (m.scope.trim().toLowerCase() as LinkScope) : null;
+  if (s && LINK_SCOPES.includes(s)) return s;
+  return m.allTables ? 'schema' : 'tables';
+}
+
+/** A member at version 2: `scope` set (connection members), allTables following it. Unknown scope tokens are kept. */
+export function normalizeMember(m: LinkMember): LinkMember {
+  if (m.kind === 'files') return m;
+  const raw = typeof m.scope === 'string' && m.scope.trim() ? m.scope : null;
+  if (raw && !LINK_SCOPES.includes(raw.trim().toLowerCase() as LinkScope)) return m; // validation reports it (scopeInvalid)
+  const scope = memberScopeOf(m);
+  return { ...m, scope, allTables: scope !== 'tables' };
 }
 
 export interface LinkTableRef {
@@ -95,23 +136,30 @@ export function linkTableName(t: MountedTable): string {
   return t.as ? t.as : t.name;
 }
 
-/** Reads a link profile's definition (tolerant, like LinkDefinition.FromProfile). */
+/**
+ * Reads a link profile's definition (tolerant, like LinkDefinition.FromProfile), migrated to LINK_VERSION: every
+ * connection member gets its scope (a version 1 member with allTables → 'schema', else 'tables').
+ */
 export function linkDefinitionOf(profile: Pick<ConnectionProfile, 'props'>): LinkDefinition {
   const p = profile.props ?? {};
   const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  const version = typeof p[LINK_PROPS.version] === 'number' ? (p[LINK_PROPS.version] as number) : 1;
   return {
-    version: typeof p[LINK_PROPS.version] === 'number' ? (p[LINK_PROPS.version] as number) : LINK_VERSION,
-    members: arr<LinkMember>(p[LINK_PROPS.members]).map((m) => ({ ...m, tables: arr<MountedTable>(m.tables) })),
+    version: Math.max(version, LINK_VERSION),
+    members: arr<LinkMember>(p[LINK_PROPS.members]).map((m) => normalizeMember({ ...m, tables: arr<MountedTable>(m.tables) })),
     relations: arr<VirtualRelation>(p[LINK_PROPS.relations]),
     options: (p[LINK_PROPS.options] && typeof p[LINK_PROPS.options] === 'object' ? p[LINK_PROPS.options] : {}) as LinkOptions,
   };
 }
 
-/** The props a link profile is saved with (merge into ConnectionInput.props; other keys are kept by the caller). */
+/**
+ * The props a link profile is saved with (merge into ConnectionInput.props; other keys are kept by the caller): always
+ * LINK_VERSION, members normalized (scope set, allTables = scope !== 'tables').
+ */
 export function linkProps(def: LinkDefinition): Record<string, unknown> {
   return {
-    [LINK_PROPS.version]: def.version,
-    [LINK_PROPS.members]: def.members,
+    [LINK_PROPS.version]: Math.max(def.version, LINK_VERSION),
+    [LINK_PROPS.members]: def.members.map(normalizeMember),
     [LINK_PROPS.relations]: def.relations,
     [LINK_PROPS.options]: def.options,
   };
@@ -335,7 +383,16 @@ export interface SourceTable {
   rowEstimate?: number | null;
   options?: Record<string, unknown> | null;
   comment?: string | null;
+  /**
+   * Wide members: the name parts below the alias as queries write them (["sales", "orders"] for crm.sales.orders,
+   * ["shop", "dbo", "orders"] for a whole connection); `linkName` is then the engine name (the parts joined with ".",
+   * the default database / schema left out: "sales.orders"). Null for normal tables and the default container's tables.
+   */
+  path?: string[] | null;
 }
+
+/** A name level of a wide member, outermost first. */
+export type LinkLevel = 'database' | 'schema';
 
 export interface LinkCatalogSchema {
   alias: string;
@@ -345,7 +402,19 @@ export interface LinkCatalogSchema {
   tables: SourceTable[];
   warnings: string[];
   error?: string | null;
+  /** The member's LinkScope token. */
+  scope?: LinkScope | string | null;
+  /**
+   * Wide scopes: the name levels between the alias and a table, outermost first; [] when the provider has nothing to
+   * span (the member behaves like a schema member). Null for tables / schema members.
+   */
+  levels?: LinkLevel[] | null;
+  /** Wide scopes: the default container, one name per level (["shop", "dbo"]); its tables are `tables`. */
+  defaultPath?: string[] | null;
 }
+
+/** A member that spans containers to browse (database / connection scope with levels). */
+export const isWideSchema = (s: Pick<LinkCatalogSchema, 'levels'> | null | undefined): boolean => !!s?.levels?.length;
 
 export interface LinkCatalog {
   schemas: LinkCatalogSchema[];
@@ -359,7 +428,11 @@ export interface FederationEngineInfo { engine: 'duckdb' | 'sqlite'; version: st
 export interface LinkValidateRequest { definition: LinkDefinition; id?: string | null; probe?: boolean }
 export type LinkProblemCode =
   | 'empty' | 'aliasInvalid' | 'aliasDuplicate' | 'aliasReserved' | 'memberMissing' | 'memberUnsupported' | 'memberLinked'
-  | 'memberUnreachable' | 'tableInvalid' | 'tableDuplicate' | 'tableMissing' | 'noTables' | 'relationInvalid';
+  | 'memberUnreachable' | 'tableInvalid' | 'tableDuplicate' | 'tableMissing' | 'noTables' | 'relationInvalid'
+  /** Error: an unknown scope token, or a scope the member's kind cannot have (files). */
+  | 'scopeInvalid'
+  /** Warning: the provider has nothing wider to span; the member mounts what a narrower scope would. */
+  | 'scopeNarrowed';
 export interface LinkProblem {
   severity: 'error' | 'warning';
   code: LinkProblemCode | string;
@@ -428,6 +501,34 @@ export interface NativeScriptResult {
 export interface RefreshSourcesRequest { sessionId?: string | null; tables?: LinkTableRef[] | null }
 export interface RefreshSourcesResult { invalidated: number }
 
+// ---- wide members (scopes database / connection), lazy
+
+/**
+ * One level of a member: `path` [] lists the first level (databases or schemas), a full path (one name per level) lists
+ * that container's tables with columns. A member without levels lists its tables at [].
+ */
+export interface LinkBrowseRequest { alias: string; path?: string[]; refresh?: boolean }
+export interface LinkBrowseNode { name: string; isDefault: boolean }
+export interface LinkBrowseResult {
+  alias: string;
+  path: string[];
+  /** What `children` are; null when `tables` are listed. */
+  level: LinkLevel | null;
+  children: LinkBrowseNode[];
+  /** Tables of the container at `path`, with columns; linkName = engine name, path = the parts queries write. */
+  tables: SourceTable[];
+  warnings: string[];
+}
+/** `table` is the engine name ({alias: 'crm', table: 'sales.orders'}). */
+export interface LinkResolveRequest { tables: LinkTableRef[] }
+export interface LinkResolvedTable { alias: string; table: SourceTable }
+export interface LinkResolveResult { tables: LinkResolvedTable[]; missing: LinkTableRef[] }
+
+/** `crm.sales.orders` of a table: alias + its path (else its link name), each part quoted for DuckDB when needed. */
+export function linkQualifiedName(alias: string, t: Pick<SourceTable, 'linkName' | 'path'>, quote: (name: string) => string): string {
+  return [alias, ...(t.path?.length ? t.path : [t.linkName])].map(quote).join('.');
+}
+
 // ---------------------------------------------------------------- client
 
 /** `/links/*` endpoints (route table: Contracts/LinkApi.cs). */
@@ -449,6 +550,10 @@ export function createLinksApi(h: M2Http) {
     materialize: (cid: string, body: MaterializeRequest) => json<JobStarted>('POST', p(cid, '/materialize'), { body }),
     nativeScript: (cid: string, body: NativeScriptRequest) => json<NativeScriptResult>('POST', p(cid, '/native-script'), { body }),
     refreshSources: (cid: string, body: RefreshSourcesRequest = {}) => json<RefreshSourcesResult>('POST', p(cid, '/refresh-sources'), { body }),
+    /** One level of a wide member (databases / schemas, or a container's tables with columns). */
+    browse: (cid: string, body: LinkBrowseRequest, signal?: AbortSignal) => json<LinkBrowseResult>('POST', p(cid, '/browse'), { body, signal }),
+    /** Mounted tables by engine name, loading the containers of wide members they live in. */
+    resolve: (cid: string, body: LinkResolveRequest, signal?: AbortSignal) => json<LinkResolveResult>('POST', p(cid, '/resolve'), { body, signal }),
   };
 }
 

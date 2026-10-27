@@ -248,6 +248,46 @@
   padding: 6px 8px;
   border-top: 1px solid var(--border-subtle);
 }
+/* wide members (whole database / connection): databases → schemas → tables, loaded on expand */
+.lkb-list-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 calc(14px + var(--depth, 0) * 14px);
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.lkb-list-node:hover {
+  background: var(--bg-hover);
+}
+.lkb-list-node:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.lkb-list-node > svg {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.lkb-list-node .lkb-list-name {
+  font-family: var(--font-mono);
+}
+.lkb-list-default {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+.lkb-list-item.nested {
+  padding-left: calc(28px + var(--depth, 0) * 14px);
+}
+.lkb-list-note.nested {
+  padding: 4px 8px 4px calc(28px + var(--depth, 0) * 14px);
+}
 .lkb-warn-icon {
   color: var(--warning);
 }

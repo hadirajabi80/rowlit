@@ -39,10 +39,23 @@ import { quoteIdent } from '../../../lib/sql';
 /** Columns of the mounted tables the model uses, keyed "alias.table" (kinds drive the filter SQL). */
 export type BuilderCatalog = Record<string, readonly Pick<ColumnInfo, 'name' | 'kind' | 'dbType'>[]>;
 
+/**
+ * Tables of wide members (SourceTable.path), keyed like BuilderCatalog ("alias.table", table = the engine name
+ * "sales.orders"): the name parts queries write below the alias. Such a table is emitted in its natural form
+ * (`crm.sales.orders`); every other table stays `alias.table`. Goldens carry it as an optional "paths" object.
+ */
+export type BuilderPaths = Record<string, readonly string[]>;
+
 const q = (name: string) => quoteIdent(name, 'duckdb');
 
 /** `alias.table` key of a builder table in a BuilderCatalog. */
 export const catalogKey = (t: Pick<BuilderTable, 'alias' | 'table'>) => `${t.alias}.${t.table}`;
+
+/** The table's name in FROM / JOIN: `alias.part.part` for a table with a path, else `alias.table`. */
+export function tableSql(t: Pick<BuilderTable, 'alias' | 'table'>, paths?: BuilderPaths | null): string {
+  const path = paths?.[catalogKey(t)];
+  return path?.length ? [t.alias, ...path].map(q).join('.') : `${q(t.alias)}.${q(t.table)}`;
+}
 
 /** `<as>.<column>` of a table column. */
 export function columnSql(t: Pick<BuilderTable, 'as'>, column: string): string {
@@ -135,8 +148,8 @@ function kindOfColumn(t: BuilderTable, column: string, catalog: BuilderCatalog):
   return (catalog[catalogKey(t)] ?? []).find((c) => c.name === column)?.kind;
 }
 
-/** Compiles the model (a model without tables gives sql ''). */
-export function compileBuilder(input: BuilderModel, catalog: BuilderCatalog): CompileResult {
+/** Compiles the model (a model without tables gives sql ''). `paths`: the wide members' tables (natural names). */
+export function compileBuilder(input: BuilderModel, catalog: BuilderCatalog, paths?: BuilderPaths | null): CompileResult {
   // the wire form may leave out empty lists (the engine's defaults)
   const model: BuilderModel = {
     ...input, tables: input.tables ?? [], joins: (input.joins ?? []).map((j) => ({ ...j, on: j.on ?? [] })), columns: input.columns ?? [],
@@ -158,7 +171,7 @@ export function compileBuilder(input: BuilderModel, catalog: BuilderCatalog): Co
 
   // FROM + joins
   const from = model.tables[0];
-  const ref = (t: BuilderTable) => `${q(t.alias)}.${q(t.table)} AS ${q(t.as)}`;
+  const ref = (t: BuilderTable) => `${tableSql(t, paths)} AS ${q(t.as)}`;
   lines.push(`FROM ${ref(from)}`);
   const attached = new Set<string>([from.id]);
   for (const j of model.joins) {

@@ -64,8 +64,10 @@ export interface AddTableOptions {
 /** Adds a mounted table (alias.table) to the canvas; returns the model and the new table's id. */
 export function addTable(m: BuilderModel, alias: string, table: string, opts: AddTableOptions = {}): { model: BuilderModel; id: string } {
   const id = opts.id ?? nextId('t', m.tables.map((t) => t.id));
+  // a wide member's nested table ("sales.orders") is called by its own name ("orders")
+  const base = table.includes('.') && !table.endsWith('.') ? table.slice(table.lastIndexOf('.') + 1) : table;
   const t: BuilderTable = {
-    id, alias, table, as: uniqueAs(table, m.tables.map((x) => x.as)),
+    id, alias, table, as: uniqueAs(base, m.tables.map((x) => x.as)),
     x: Math.round(opts.x ?? 40 + (m.tables.length % 4) * 300), y: Math.round(opts.y ?? 40 + Math.floor(m.tables.length / 4) * 280), collapsed: false,
   };
   return { model: { ...m, tables: [...m.tables, t] }, id };

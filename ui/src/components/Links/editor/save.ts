@@ -1,6 +1,8 @@
 // Saving link profiles (through /connections, like any connection) and the caches that must reload afterwards.
 import { errorMessage } from '../../../api/client';
-import { linkDefinitionOf, linkProps, linkTableName, linksApi, type LinkDefinition, type LinkProblem } from '../../../api/links';
+import {
+  isWideScope, linkDefinitionOf, linkProps, linkTableName, linksApi, memberScopeOf, type LinkDefinition, type LinkProblem,
+} from '../../../api/links';
 import type { ConnectionInput, ConnectionProfile } from '../../../api/types';
 import { dbKey, useCatalog } from '../../../store/catalog';
 import { getConnection, useConnections } from '../../../store/connections';
@@ -64,7 +66,12 @@ export async function unmountTable(linkId: string, alias: string, linkName: stri
   if (idx < 0) throw new Error(`The link has no source “${alias}”.`);
   const m = def.members[idx];
   let tables = m.tables;
-  if (m.allTables) {
+  const scope = memberScopeOf(m);
+  if (isWideScope(scope)) {
+    toast('warning', `${alias} mounts a whole ${scope}`, 'Edit the link to narrow it to a list of tables instead.');
+    return;
+  }
+  if (scope === 'schema') {
     if (!m.connectionId || !m.schema) {
       toast('warning', `${alias} mounts every table of its source`, 'Edit the link to choose the tables to keep instead.');
       return;
@@ -79,7 +86,7 @@ export async function unmountTable(linkId: string, alias: string, linkName: stri
   }
   const left = tables.filter((t) => linkTableName(t) !== linkName);
   if (left.length === tables.length) throw new Error(`${alias}.${linkName} is not part of the link.`);
-  let members = def.members.map((x, i) => (i === idx ? { ...x, allTables: false, tables: left } : x));
+  let members = def.members.map((x, i) => (i === idx ? { ...x, scope: 'tables' as const, allTables: false, tables: left } : x));
   if (!left.length) {
     const ok = await useUi.getState().askConfirm({
       title: `Remove the source “${alias}”?`,

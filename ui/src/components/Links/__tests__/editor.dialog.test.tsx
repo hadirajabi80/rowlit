@@ -71,9 +71,10 @@ describe('link editor', () => {
     const p = createdProfile();
     expect(p).toMatchObject({ name: 'Sales', providerId: 'linked', readOnly: true, folder: 'Linked databases' });
     expect(p.props.members).toEqual([{
-      alias: 'postgres_shop', kind: 'connection', connectionId: 'c_pg', database: 'shop', schema: 'public', allTables: false,
+      alias: 'postgres_shop', kind: 'connection', connectionId: 'c_pg', database: 'shop', schema: 'public', scope: 'tables', allTables: false,
       tables: [{ name: 'customers', type: 'table' }, { name: 'orders', type: 'table' }],
     }]);
+    expect(p.props.linkVersion).toBe(2);
     expect(linksApi.validate).toHaveBeenCalledTimes(1);
   });
 
@@ -181,14 +182,64 @@ describe('link editor', () => {
     expect(await screen.findByText(/would be called “customers”/)).toBeInTheDocument();
     fireEvent.change(rename, { target: { value: 'sales' } });
     await waitFor(() => expect(screen.queryByText(/would be called/)).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('checkbox', { name: /Mount all tables/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole schema' }));
+    expect(screen.getByRole('radio', { name: 'Whole schema' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('checkbox', { name: 'Mount products' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Mount products' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Create linked database' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(createdProfile().props.members).toEqual([expect.objectContaining({
-      alias: 'shop_sqlite', connectionId: 'c_shop', schema: 'main', allTables: true, tables: [{ name: 'orders', as: 'sales', type: 'table' }],
+      alias: 'shop_sqlite', connectionId: 'c_shop', schema: 'main', scope: 'schema', allTables: true, tables: [{ name: 'orders', as: 'sales', type: 'table' }],
     })]);
+  });
+
+  it('whole database / whole connection: no schema or table pickers, the naming note, nulls in the saved place', async () => {
+    const { onClose } = open({ mode: 'new', connectAfter: false });
+    await pickPgShopPublic();
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole database' }));
+    expect(screen.queryByRole('combobox', { name: 'Schema' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Database' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Mount customers' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Query as postgres_shop\.schema\.table; postgres_shop\.table for the default schema/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole connection' }));
+    expect(screen.queryByRole('combobox', { name: 'Database' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Schema' })).not.toBeInTheDocument();
+    expect(document.querySelector('.lke-scope-note')?.textContent).toMatch(/postgres_shop\.database\.schema\.table; postgres_shop\.schema\.table for the default database/);
+    // back to a whole database: the database comes back, schema stays out of the saved member
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole database' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create linked database' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(createdProfile().props.members).toEqual([expect.objectContaining({
+      alias: 'postgres_shop', connectionId: 'c_pg', database: 'shop', schema: null, scope: 'database', allTables: true, tables: [],
+    })]);
+  });
+
+  it('a whole connection saves no database or schema; tables return with the Tables scope', async () => {
+    const { onClose } = open({ mode: 'new', connectAfter: false });
+    chooseOption(combo('Connection'), 'Shop (SQLite)');
+    await screen.findByRole('checkbox', { name: 'Mount orders' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Mount orders' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole connection' }));
+    expect(screen.queryByRole('checkbox', { name: 'Mount orders' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Tables' }));
+    expect(await screen.findByRole('checkbox', { name: 'Mount orders' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'Whole connection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create linked database' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(createdProfile().props.members).toEqual([expect.objectContaining({
+      connectionId: 'c_shop', database: null, schema: null, scope: 'connection', allTables: true, tables: [],
+    })]);
+  });
+
+  it('reads a version 1 link: allTables shows as Whole schema', async () => {
+    const saved = await useConnections.getState().save({
+      name: 'Old', providerId: 'linked', color: null, folder: null, readOnly: true, savePassword: false, password: null,
+      props: { linkVersion: 1, relations: [], options: {}, members: [{ alias: 'shop', connectionId: 'c_shop', schema: 'main', allTables: true, tables: [] }] },
+    });
+    open({ mode: 'edit', connectionId: saved.id });
+    await screen.findByRole('checkbox', { name: 'Mount orders' });
+    expect(screen.getByRole('radio', { name: 'Whole schema' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('option', { name: /whole schema/ })).toBeInTheDocument();
   });
 
   it('asks before discarding changes', async () => {
@@ -246,6 +297,7 @@ describe('unmountTable', () => {
     const members = mock.ctx.engine.conn(saved.id)!.props.members as LinkDefinition['members'];
     expect(members[0].tables).toEqual([{ name: 'customers' }]);
     expect(members[1].allTables).toBe(false);
+    expect(members[1].scope).toBe('tables');
     const names = members[1].tables.map((t) => t.as ?? t.name);
     expect(names).toContain('items');
     expect(names).toContain('customers');

@@ -53,7 +53,8 @@ export const BuilderCard = memo(function BuilderCard(p: Props) {
     if (allRef.current) allRef.current.indeterminate = some;
   }, [some]);
   const linkingFromHere = p.linking?.tableId === t.id;
-  const title = t.as !== t.table ? `${t.alias}.${t.table} as ${t.as}` : `${t.alias}.${t.table}`;
+  // a wide member's nested table (sales.orders) is called by its last part without saying so
+  const title = t.as !== t.table && t.as !== t.table.slice(t.table.lastIndexOf('.') + 1) ? `${t.alias}.${t.table} as ${t.as}` : `${t.alias}.${t.table}`;
 
   return (
     <div

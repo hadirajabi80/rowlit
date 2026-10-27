@@ -1,6 +1,7 @@
 using System.Data.Common;
 using DbStudio.Core.Models;
 using DbStudio.Core.Params;
+using DbStudio.Core.Services;
 
 namespace DbStudio.Federation.Contracts;
 
@@ -38,6 +39,24 @@ public interface ILinkRuntime
 
     /// <summary>DuckDB's <c>json_serialize_sql</c> of <paramref name="sql"/> on a short-lived engine (the builder's SQL → model parse).</summary>
     Task<SqlAst> SerializeSqlAsync(string sql, CancellationToken ct);
+
+    /// <summary>
+    /// One level of a member (<c>POST /links/{cid}/browse</c>): the databases or schemas a wide member spans, or the tables of
+    /// one container (with columns). Loaded on demand and cached like the catalog.
+    /// </summary>
+    Task<LinkBrowseResult> BrowseAsync(string linkId, LinkBrowseRequest request, CancellationToken ct) =>
+        throw new EngineException(501, ErrorCodes.NotSupported, "Browsing link members is not supported by this runtime.");
+
+    /// <summary>Mounted tables by link name, loading the containers of wide members they live in (<c>POST /links/{cid}/resolve</c>).</summary>
+    Task<LinkResolveResult> ResolveTablesAsync(string linkId, IReadOnlyList<LinkTableRef> tables, CancellationToken ct) =>
+        throw new EngineException(501, ErrorCodes.NotSupported, "Resolving link tables is not supported by this runtime.");
+
+    /// <summary>
+    /// <paramref name="sql"/> with the multi-part names of wide members rewritten to engine names, and the catalog extended
+    /// with the tables it names (builder parse, plans).
+    /// </summary>
+    async Task<LinkSqlResolution> ResolveSqlAsync(string linkId, string sql, CancellationToken ct) =>
+        new(sql, await CatalogAsync(linkId, false, ct).ConfigureAwait(false));
 }
 
 /// <param name="SessionId">Reuse (and fill) the source cache of this federated session.</param>
@@ -70,5 +89,20 @@ public sealed record LinkCatalog(IReadOnlyList<LinkCatalogSchema> Schemas, IRead
 
 /// <summary>One member as a schema of the link.</summary>
 /// <param name="Error">Why the member's catalog could not load (unreachable, missing connection…); Tables is then empty.</param>
+/// <param name="Scope">The member's <see cref="LinkScopes"/> token.</param>
+/// <param name="Levels">
+/// Wide scopes: the name levels between the alias and a table, outermost first ("database", "schema"): empty when the
+/// provider has nothing to span (the member then behaves like a schema member). Null for tables / schema members.
+/// </param>
+/// <param name="DefaultPath">
+/// Wide scopes: the default container, one name per level (<c>["shop", "dbo"]</c>); its tables are <see cref="Tables"/>
+/// and answer to <c>alias.table</c>. Other containers load on demand (<c>POST /links/{cid}/browse</c>, queries).
+/// </param>
 public sealed record LinkCatalogSchema(string Alias, string Kind, string? ConnectionId, string? ProviderId, IReadOnlyList<SourceTable> Tables,
-    IReadOnlyList<string> Warnings, string? Error = null);
+    IReadOnlyList<string> Warnings, string? Error = null, string? Scope = null, IReadOnlyList<string>? Levels = null,
+    IReadOnlyList<string>? DefaultPath = null);
+
+/// <summary>A link statement with its multi-part names resolved (Runtime/LinkNames.cs).</summary>
+/// <param name="Sql">The statement as the engine runs it (<c>crm.sales.orders</c> → <c>crm."sales.orders"</c>).</param>
+/// <param name="Catalog">The link catalog plus every table of a wide member the statement names.</param>
+public sealed record LinkSqlResolution(string Sql, LinkCatalog Catalog);

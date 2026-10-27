@@ -3,13 +3,20 @@ import type { BuilderTable, LinkCatalog, SourceColumn, SourceTable } from '../..
 import type { ColumnKind } from '../../../api/types';
 import { getConnection } from '../../../store/connections';
 import { CONNECTION_PALETTE, connColorCss } from '../../../theme/connColors';
-import type { BuilderCatalog } from './compile';
+import type { BuilderCatalog, BuilderPaths } from './compile';
 
 export function builderCatalogOf(c: LinkCatalog | null | undefined): BuilderCatalog {
   const out: BuilderCatalog = {};
   for (const s of c?.schemas ?? []) {
     for (const t of s.tables) out[`${s.alias}.${t.linkName}`] = t.columns.map((x) => ({ name: x.name, kind: x.kind as ColumnKind, dbType: x.sourceType }));
   }
+  return out;
+}
+
+/** The name parts of the wide members' nested tables (compileBuilder's natural `crm.sales.orders`), keyed "alias.table". */
+export function builderPathsOf(c: LinkCatalog | null | undefined): BuilderPaths {
+  const out: BuilderPaths = {};
+  for (const s of c?.schemas ?? []) for (const t of s.tables) if (t.path?.length) out[`${s.alias}.${t.linkName}`] = t.path;
   return out;
 }
 

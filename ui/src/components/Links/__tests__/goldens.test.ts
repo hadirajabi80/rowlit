@@ -16,6 +16,8 @@ const DIR = `${cwd}/../engine/tests/DbStudio.Federation.Tests/Goldens/Builder`;
 interface Golden {
   name: string;
   catalog: Record<string, { name: string; kind: string; type: string }[]>;
+  /** Optional: the name parts of wide members' tables ("alias.table" → ["sales", "orders"]), emitted as alias.sales.orders. */
+  paths?: Record<string, string[]>;
   model: BuilderModel;
   sql: string;
   params: { name: string; kind: string; value: unknown }[];
@@ -43,7 +45,7 @@ describe('builder goldens (shared with the engine)', () => {
   });
 
   it.each(goldens)('%s compiles to the golden SQL, params and warnings', (_f, g) => {
-    const r = compileBuilder(g.model, catalogOf(g));
+    const r = compileBuilder(g.model, catalogOf(g), g.paths);
     expect(r.sql).toBe(g.sql);
     expect(r.params.map((p) => ({ name: p.name, kind: p.kind, value: p.value }))).toEqual(g.params);
     // compared as a sorted list, like the engine's BuilderGoldenTests
