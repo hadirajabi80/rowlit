@@ -11,9 +11,13 @@ public sealed class ClusterService
         var rootTask = t.GetAsync("", ct);
         var healthTask = t.GetAsync("_cluster/health", ct);
         var statsTask = t.TryGetAsync("_cluster/stats?filter_path=indices.count,indices.docs.count,indices.store.size_in_bytes,nodes.jvm.mem,nodes.fs", ct);
+        // `_cluster/stats` docs.count is the Lucene count (every nested object is a document): `_count` gives the documents users see,
+        // the same numbers as the index list
+        var countTask = t.TryGetAsync("_count?expand_wildcards=open,hidden&ignore_unavailable=true", ct);
         var root = await rootTask.ConfigureAwait(false);
         var h = await healthTask.ConfigureAwait(false);
         var stats = await statsTask.ConfigureAwait(false);
+        var count = await countTask.ConfigureAwait(false) is { } cnt ? cnt.Long("count") : null;
         var s = stats ?? default;
         long? L(string path) => stats is null ? null : s.Path(path) is { } v ? EsJson.AsLong(v) : null;
         return new EsCluster(
@@ -34,7 +38,7 @@ public sealed class ClusterService
             ActiveShardsPercent: h.Double("active_shards_percent_as_number") ?? 0,
             PendingTasks: h.Int("number_of_pending_tasks"),
             Indices: L("indices.count"),
-            Docs: L("indices.docs.count"),
+            Docs: count ?? L("indices.docs.count"),
             StoreBytes: L("indices.store.size_in_bytes"),
             JvmHeapUsedBytes: L("nodes.jvm.mem.heap_used_in_bytes"),
             JvmHeapMaxBytes: L("nodes.jvm.mem.heap_max_in_bytes"),

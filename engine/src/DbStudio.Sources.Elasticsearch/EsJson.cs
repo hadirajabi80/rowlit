@@ -82,6 +82,13 @@ internal static class EsJson
 
     public static JsonNode? Node(JsonElement? e) => e is { } v && v.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null) ? JsonNode.Parse(v.GetRawText()) : null;
 
+    /// <summary>
+    /// A query object for reindex / export / alias filters. A whole search body pasted from the Search tab
+    /// (<c>{ "query": { … } }</c>) is unwrapped: there is no query clause called "query", so the intent is unambiguous.
+    /// </summary>
+    public static JsonNode? UnwrapQuery(JsonNode? node) =>
+        node is JsonObject o && o.Count == 1 && o["query"] is JsonObject inner ? inner.DeepClone() : node;
+
     public static string Text(JsonNode? node) => node?.ToJsonString(Relaxed) ?? "null";
 
     public static string? Iso(long? epochMillis) =>

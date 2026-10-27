@@ -98,8 +98,15 @@ export function isSearchPath(path: string): boolean {
 
 /** Index (or pattern) a path targets: its first segment unless it starts with `_`. */
 export function indexOfPath(path: string): string | null {
-  const seg = path.replace(/^\//, '').split(/[/?]/)[0];
-  return seg && !seg.startsWith('_') ? decodeURIComponent(seg) : null;
+  const bare = path.replace(/^\//, '');
+  if (bare.startsWith('<')) return null; // date math name (<logs-{now/d}>): no concrete index to read fields from
+  const seg = bare.split(/[/?]/)[0];
+  if (!seg || seg.startsWith('_')) return null;
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return seg; // a stray '%' while typing must not break completion
+  }
 }
 
 /** Body ready to send: NDJSON bodies keep one compact JSON per line; JSON bodies are sent as typed. */

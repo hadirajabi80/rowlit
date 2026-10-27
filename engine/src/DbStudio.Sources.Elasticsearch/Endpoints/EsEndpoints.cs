@@ -210,10 +210,22 @@ public static class EsEndpoints
             {
                 return Started(StartJob(jobs, clients, http, "es.export", cid, async (ctx, jct) =>
                 {
-                    long n;
-                    await using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
-                        n = await svc.ExportAsync(c, plan, file, ctx, jct);
-                    return new EsExportResult(path, n);
+                    // written next to the target and moved over it when complete: a failed or cancelled export must not leave a
+                    // truncated file (or wipe the one the user chose to overwrite)
+                    var partial = $"{path}.{Guid.NewGuid():N}.part";
+                    try
+                    {
+                        long n;
+                        await using (var file = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
+                            n = await svc.ExportAsync(c, plan, file, ctx, jct);
+                        File.Move(partial, path, overwrite: true);
+                        return new EsExportResult(path, n);
+                    }
+                    catch
+                    {
+                        try { File.Delete(partial); } catch (IOException) { /* best effort */ } catch (UnauthorizedAccessException) { /* best effort */ }
+                        throw;
+                    }
                 }));
             }
             // Browser mode: the file itself, buffered in a temp file so a failure still answers with an error envelope.

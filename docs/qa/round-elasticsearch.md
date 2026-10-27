@@ -1,0 +1,52 @@
+# QA round: Elasticsearch / OpenSearch
+
+Area: engine `DbStudio.Sources.Elasticsearch`, UI `components/Elasticsearch` + `es/`. Method: real Elasticsearch 8.15.3 (compose
+profile `search`, seeded) driven through the engine REST surface (PowerShell helpers) and the UI (headless Edge via
+`ui/scripts/shot.mjs`, dark and light), plus a read of the whole source. OpenSearch: the image is available, but the container
+did not become reachable under the machine load of this round (Docker stopped answering), so OpenSearch was **not** re-verified
+live; the flavor-specific paths (SQL `_plugins/_sql`, `cluster_manager`, templates) were reviewed only. The engine live suite
+(`OpenSearchLiveTests`, `DBSTUDIO_ES_OPENSEARCH=1`) is the check to run on an unloaded machine.
+
+| # | Area | Severity | Finding | Status | Where | Test |
+|---|------|----------|---------|--------|-------|------|
+| 1 | Create index | wrong data | The form's shards / replicas (the UI always sent `shards: 1`) silently overrode `number_of_shards` / `number_of_replicas` typed into the settings JSON: `{"settings":{"number_of_shards":3}}` created a 1-shard index. The engine now merges into `settings.index`, accepts nested / flat (`index.number_of_shards`) forms and answers a validation error on a conflicting value; the dialog disables the field and defers to the JSON | fixed | `IndexService.cs:305` (`ApplySetting`), `dialogs.tsx` CreateIndexDialog, `es/json.ts` `bodyIndexSetting` | `Create_index_does_not_override_settings_of_the_body`, `QA round fixes` (logic), `create index lets shards typed into the settings JSON win` (views) |
+| 2 | Export CSV | wrong data (data loss) | The CSV header was taken from the first scroll page (1,000 documents): fields that first appear later were dropped silently (a 1,101-document index lost `late_field` and `obj.deep`). Rows are now spooled to a temp file and the header is the union of all documents (an explicit field list still streams) | fixed | `JobsService.cs:440` (spool), `:524` (`WriteSpooledCsvAsync`) | `Csv_export_header_covers_fields_that_appear_after_the_first_page` |
+| 3 | Import CSV | wrong data | 16 to 23 character integers went through `double`: `12345678901234567` was stored as `12345678901234568`. Integers up to a long are exact; an integer beyond a long stays text instead of becoming a rounded double | fixed | `JobsService.cs:330` (`CsvValue`) | `Csv_import_keeps_long_ids_exact_and_oversized_integers_as_text` |
+| 4 | Document editor | wrong data | `_source` is parsed with `JSON.parse` and saved with `JSON.stringify`, so Save rounded every integer past 2^53 (snowflake ids, nanosecond timestamps, unsigned longs) without a word. A document holding such numbers is now opened from its exact text (`GET /{index}/_source/{id}` through the console) and, like any text with such a literal (new / clone included), saved as text through the console with the same `if_seq_no` / `if_primary_term` guard; saving waits until the exact text is loaded and is disabled when it cannot be read. Reload latest follows the same path | fixed | `DocumentsPanel.tsx` (`startEdit`, `save`, `reloadLatest`), new `rawDoc.ts`, `es/json.ts` (`hasUnsafeNumber`, `hasUnsafeIntegerLiteral`) | `rawDoc.test.ts` (5 tests) |
+| 5 | Dev Tools | failed operation | Date-math index names (`GET /<logs-{now/d}>/_search`) answered "no handler found": the `/` inside the name was sent raw. The path sanitiser now sends it as `%2F` (the way Kibana's console does) | fixed | `ConsoleService.cs:70` | `Sanitizes_paths` (2 new rows); verified live (now `index_not_found_exception` instead of "no handler") |
+| 6 | Overview | wrong data | The Documents tile came from `_cluster/stats` (Lucene documents: every nested object counts): 8,680 for a cluster whose index list showed 3,820. It now uses `_count` (stats stay the fallback) | fixed | `ClusterService.cs:16` | `Cluster_document_count_is_the_top_level_count_not_the_lucene_one`; verified live (3,820) |
+| 7 | Index Stats tab | UX | The "Documents (primaries)" tile showed the Lucene count (6,860 for a 2,000-document index) next to a header saying 2,000. Relabelled "Lucene documents (primaries)" with "nested objects included" | fixed | `IndexView.tsx:289` | covered by the views suite |
+| 8 | DSL completion | UX | No clause completion inside a single-object bool clause (`"filter": { "` / `"must": { "`), only inside arrays | fixed | `es/dsl.ts:356` | `QA round fixes` (logic) |
+| 9 | Formatting | UX | `formatCount(99,950)` read "100.0k", `999,950` read "1000k"; `formatMs(119,600)` read "1 min 60 s" | fixed | `es/format.ts:15`, `:26` | `QA round fixes` (logic) |
+| 10 | Document record | UX | The editor header read "version —" and the record panel had no `_version` because the grid search did not ask for it (`version: true`) | fixed | `es/docs.ts:52` | `gridBody` expectation updated |
+| 11 | Search | broken workflow | A search with `size: 10000` mounted 10,000 expandable hit rows (frozen tab). Hits render in pages of 200 with "Show N more" | fixed | `SearchView.tsx:157` | views suite |
+| 12 | Dev Tools / Search | UX | Run was disabled while a request ran (requests may take minutes) with no way out. Run becomes Cancel (stops waiting; the cluster may still finish) | fixed | `ConsoleView.tsx:111`, `SearchView.tsx` | views suite |
+| 13 | Import | wrong data | `idField` read top-level keys only and a document without it silently got a generated id (a re-import duplicated it). Dotted paths work now (and literal `a.b` CSV headers); a document without the id is reported as failed | fixed | `JobsService.cs:164`, `:187` (`IdOf`) | `Import_takes_ids_from_nested_fields_and_reports_documents_without_one` |
+| 14 | Export to file | failed operation | The target file was created (truncating an existing one) before the search ran: a failing or cancelled export left an empty / truncated file. It is written to `<path>.<guid>.part` and moved over the target when complete; the partial file is deleted on failure | fixed | `EsEndpoints.cs:213` | `Failed_export_keeps_the_existing_file_and_leaves_no_partial_one` |
+| 15 | Read-only | UX | ES|QL (`POST /_query`), `_knn_search`, `_rank_eval`, `_mvt` are read APIs but were refused on read-only connections | fixed | `ConsoleService.cs:22` | `Read_only_matrix` (+2 rows) |
+| 16 | Reindex / export / alias filter | UX | A whole search body pasted into the "query" box (`{ "query": { … } }`) failed with `unknown query [query]`; a body whose only key is `query` is unwrapped (no clause is called `query`) | fixed | `EsJson.cs:89`, used in `JobsService.cs:33`, `:408`, `IndexService.cs:372` | `A_search_body_pasted_as_the_query_is_unwrapped` |
+| 17 | Connection test | UX | `https://` against a plain-HTTP server reported ".NET: Cannot determine the frame size…" with the self-signed-certificate hint; it now says the server does not answer TLS and to use `http://` | fixed | `EsTransport.cs:190` | verified live |
+| 18 | Indices list | UX / a11y | Rows opened an index on click only (no keyboard route to the row); rows are focusable and Enter opens | fixed | `IndicesView.tsx:88`, `es.css` | views suite |
+| 19 | Console completion | UX | `indexOfPath` threw on a stray `%` while typing (`URIError` in the completion provider) and tried to read fields of a date-math name | fixed | `es/console.ts:100` | `reads the index of a console path…` |
+| 20 | Create index | UX | Replicas defaulted to 1 on a single-data-node cluster (every new index started yellow); the default is 0 when the cluster is known to have one data node | fixed | `dialogs.tsx` CreateIndexDialog | views suite (3-node mock keeps 1) |
+| 25 | Dev Tools | failed operation | Cross-cluster names (`GET /remote:logs-*/_search`) were turned into a request with URI scheme `remote:` instead of reaching the cluster (the transport resolved the path relative to the node URL, and a `name:` first segment reads as a scheme). Paths are now resolved as `./path` | fixed | `EsTransport.cs:129` | `Console_paths_keep_cross_cluster_and_date_math_names_intact` (fails without the fix) |
+| 21 | Import dialog | UX | The picked file is read into the renderer in full (for the preview) even when the engine reads it from the path: a multi-GB NDJSON freezes the dialog. Lives in the shared platform `openTextFile` | not fixed | `platform/*`, `dialogs.tsx` ImportDialog | n/a |
+| 22 | Document ids | UX | A literal `%2F` inside an id is indistinguishable from an encoded `/` (the route keeps `%2F` for slashes) | not fixed (rare) | `EsNames.cs:53` | n/a |
+| 23 | Cursor SQL | UX | Leaving the SQL tab does not close an open cursor (it expires server-side) | not fixed | `SqlView.tsx` | n/a |
+| 24 | Reindex / import / export dialogs | UX | Closing the dialog with the Cancel button while the job runs leaves the job running (only "Cancel job" stops it) | not fixed (by design: the Tasks tab shows it) | `dialogs.tsx` | n/a |
+
+## Checked and fine (real cluster)
+
+Connection test (wrong port, bad scheme, empty URL, apiKey/basic validation, failover list, TLS), document ids with
+`/ ? # % space + : ; &` and Arabic text (create / get / edit conflict / delete conflict), optimistic concurrency answers,
+data stream browse / edit / delete through the backing index, closed index handling, alias with filter, settings (dynamic vs
+static answers), mappings update (type change refused with the server message), SQL (cursor paging, translate, errors,
+`SHOW TABLES`), search (size cap 10,000 with `capped`, `track_total_hits`, aggregations, explain, errors with root cause),
+console (text, HEAD, NDJSON `_bulk` with comments, PATCH rejected), read-only matrix on a read-only connection (writes, jobs,
+task cancel, scroll delete refused; read POSTs allowed), a profile switched to read-only blocks writes immediately,
+reindex job lifecycle, CSV / NDJSON import with errors, UI in both themes (overview, documents with Persian names, record
+panel, editor, create dialog, Dev Tools, SQL, Tasks).
+
+## Shared files touched
+
+None outside the area. `ui/src/components/Elasticsearch/*`, `ui/src/es/*`, engine `DbStudio.Sources.Elasticsearch` only.

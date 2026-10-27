@@ -40,6 +40,28 @@ export function stripJsonExtras(text: string): string {
 
 export type ParseResult = { ok: true; value: unknown } | { ok: false; error: string; offset: number };
 
+/** A number a JavaScript double cannot hold exactly (an integer past 2^53: snowflake ids, nanosecond timestamps, unsigned longs). */
+export function isUnsafeNumber(n: number): boolean {
+  return Number.isFinite(n) && Math.abs(n) > Number.MAX_SAFE_INTEGER;
+}
+
+/** True when a parsed value holds a number that has lost digits on its way through `JSON.parse`. */
+export function hasUnsafeNumber(v: unknown): boolean {
+  if (typeof v === 'number') return isUnsafeNumber(v);
+  if (Array.isArray(v)) return v.some(hasUnsafeNumber);
+  if (v && typeof v === 'object') return Object.values(v).some(hasUnsafeNumber);
+  return false;
+}
+
+/** True when JSON text (comments allowed) has an integer literal past 2^53 outside strings: `JSON.stringify` would round it. */
+export function hasUnsafeIntegerLiteral(text: string): boolean {
+  const bare = stripJsonExtras(text).replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  for (const m of bare.matchAll(/(?<![\w.])-?\d{16,}(?![\w.])/g)) {
+    if (BigInt(m[0]) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(m[0]) < -BigInt(Number.MAX_SAFE_INTEGER)) return true;
+  }
+  return false;
+}
+
 /** Parses editor JSON (comments/trailing commas allowed). Empty text is `undefined`. */
 export function parseLenient(text: string): ParseResult {
   if (!text.trim()) return { ok: true, value: undefined };
@@ -76,6 +98,20 @@ export function getPath(obj: unknown, path: string): unknown {
     else return undefined;
   }
   return cur;
+}
+
+/**
+ * An index setting (`number_of_shards`) the create-index body already carries, as text, or null. Settings may be nested
+ * (`{ settings: { index: { number_of_shards: 3 } } }`) or flat (`"index.number_of_shards"`, `"number_of_shards"`).
+ */
+export function bodyIndexSetting(body: unknown, name: string): string | null {
+  const settings = isPlainObject(body) ? body.settings : undefined;
+  if (!isPlainObject(settings)) return null;
+  const nested = isPlainObject(settings.index) ? settings.index : undefined;
+  for (const v of [nested?.[name], settings[name], settings[`index.${name}`]]) {
+    if (v !== undefined && v !== null && typeof v !== 'object') return String(v);
+  }
+  return null;
 }
 
 /** One-line preview of a value for grid cells. */

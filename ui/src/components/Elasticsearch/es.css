@@ -385,6 +385,10 @@
 .es-table-hover tbody tr {
   cursor: pointer;
 }
+.es-table-hover tbody tr:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .es-row-closed td {
   color: var(--fg-muted);
 }

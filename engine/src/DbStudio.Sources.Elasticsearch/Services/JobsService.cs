@@ -30,7 +30,7 @@ public sealed class JobsService
         var dest = EsNames.Index(req?.Dest, "dest");
         if (string.Equals(source, dest, StringComparison.Ordinal)) throw EngineException.Validation("The destination must differ from the source.", new { field = "dest" });
         var src = new JsonObject { ["index"] = new JsonArray(source.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => (JsonNode?)s).ToArray()) };
-        if (EsJson.Node(req!.Query) is { } q)
+        if (EsJson.UnwrapQuery(EsJson.Node(req!.Query)) is { } q)
         {
             if (q is not JsonObject) throw EngineException.Validation("query must be a query DSL object.", new { field = "query" });
             src["query"] = q;
@@ -161,7 +161,14 @@ public sealed class JobsService
             await foreach (var doc in ReadDocsAsync(input, plan, ct).ConfigureAwait(false))
             {
                 read++;
-                var id = plan.IdField is not null && doc.Source[plan.IdField] is JsonValue idv ? idv.ToString() : doc.Id;
+                var id = plan.IdField is null ? doc.Id : IdOf(doc.Source, plan.IdField) ?? doc.Id;
+                if (plan.IdField is not null && id is null)
+                {
+                    // generating an id here would make a re-import duplicate the document: report it instead
+                    failed++;
+                    if (errors.Count < MaxErrors) errors.Add($"document {read}: no value in the id field '{plan.IdField}'");
+                    continue;
+                }
                 var action = id is null ? """{"index":{}}""" : JsonSerializer.Serialize(new { index = new { _id = id } });
                 var line = Encoding.UTF8.GetBytes(action + "\n" + doc.Source.ToJsonString(EsJson.Relaxed) + "\n");
                 if (inBatch > 0 && bulk.Length + line.Length > MaxBulkBytes) await FlushAsync().ConfigureAwait(false);
@@ -174,6 +181,22 @@ public sealed class JobsService
         await c.Transport.SendAsync(HttpMethod.Post, $"{EsTransport.Seg(plan.Index)}/_refresh", null, null, ct).ConfigureAwait(false);
         job?.Report(read, read, $"{indexed:N0} indexed{(failed > 0 ? $", {failed:N0} failed" : "")}", force: true);
         return new EsImportResult(indexed, failed, errors, sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>The document id from <paramref name="field"/>: a top-level key (also a literal "a.b" key, as CSV headers give) or a dotted path into nested objects.</summary>
+    internal static string? IdOf(JsonObject source, string field)
+    {
+        JsonNode? node = source.TryGetPropertyValue(field, out var direct) ? direct : null;
+        if (node is null && field.Contains('.', StringComparison.Ordinal))
+        {
+            node = source;
+            foreach (var part in field.Split('.'))
+            {
+                node = node is JsonObject o && o.TryGetPropertyValue(part, out var next) ? next : null;
+                if (node is null) break;
+            }
+        }
+        return node is JsonValue v && v.ToString() is { Length: > 0 } s ? s : null;
     }
 
     internal static (long Ok, long Failed) CountBulk(JsonElement res, List<string> errors)
@@ -308,9 +331,10 @@ public sealed class JobsService
     {
         if (s == "true") return JsonValue.Create(true);
         if (s == "false") return JsonValue.Create(false);
-        if (s.Length < 16 && (s[0] is '-' or (>= '0' and <= '9')) && !(s.Length > 1 && s[0] == '0' && s[1] != '.')
+        if (s.Length <= 20 && (s[0] is '-' or (>= '0' and <= '9')) && !(s.Length > 1 && s[0] == '0' && s[1] != '.')
             && long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var l)) return JsonValue.Create(l);
-        if (s.Length < 24 && (s[0] is '-' or (>= '0' and <= '9')) && !(s.Length > 1 && s[0] == '0' && s[1] != '.')
+        // an integer that does not fit a long (a 20-digit id) stays text: as a double it would lose its last digits
+        if (s.Length < 24 && (s[0] is '-' or (>= '0' and <= '9')) && !(s.Length > 1 && s[0] == '0' && s[1] != '.') && s.AsSpan().IndexOfAny('.', 'e', 'E') >= 0
             && double.TryParse(s, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var d)
             && double.IsFinite(d)) return JsonValue.Create(d);
         return JsonValue.Create(s);
@@ -381,7 +405,7 @@ public sealed class JobsService
     {
         var index = EsNames.Target(req?.Index);
         var format = Format(req?.Format);
-        var query = EsJson.Node(req!.Query);
+        var query = EsJson.UnwrapQuery(EsJson.Node(req!.Query));
         if (query is not null and not JsonObject) throw EngineException.Validation("query must be a query DSL object.", new { field = "query" });
         if (req.Max is < 1) throw EngineException.Validation("max must be ≥ 1.", new { field = "max" });
         var path = string.IsNullOrWhiteSpace(req.Path) ? null : req.Path.Trim();
@@ -409,6 +433,12 @@ public sealed class JobsService
         if (plan.Max is { } max && (total is null || total > max)) total = max;
         await using var writer = new StreamWriter(output, new UTF8Encoding(plan.Format == "csv"), 64 * 1024, leaveOpen: true);
         List<string>? columns = null;
+        // CSV without a field list: documents may bring new fields at any page, so the rows are spooled to a temp file and
+        // the header (the union of every document's fields) is written once the scroll is over.
+        var spoolColumns = new List<string>();
+        var spoolSeen = new HashSet<string>(StringComparer.Ordinal);
+        var spoolPath = plan.Format == "csv" && plan.Fields is null ? Path.GetTempFileName() : null;
+        StreamWriter? spool = spoolPath is null ? null : new StreamWriter(spoolPath, false, new UTF8Encoding(false), 64 * 1024);
         try
         {
             if (plan.Format == "json") await writer.WriteAsync("[").ConfigureAwait(false);
@@ -417,9 +447,9 @@ public sealed class JobsService
                 if (page.Str("_scroll_id") is { } sid) scrollIds.Add(sid);
                 var hits = page.Path("hits.hits").Items().ToList();
                 if (hits.Count == 0) break;
-                if (plan.Format == "csv" && columns is null)
+                if (plan.Format == "csv" && spool is null && columns is null)
                 {
-                    columns = plan.Fields?.ToList() ?? CsvColumns(hits);
+                    columns = plan.Fields!.ToList();
                     await writer.WriteLineAsync(string.Join(',', new[] { "_id" }.Concat(columns).Select(CsvEscape))).ConfigureAwait(false);
                 }
                 foreach (var h in hits)
@@ -439,8 +469,16 @@ public sealed class JobsService
                         default:
                             var flat = new Dictionary<string, string>(StringComparer.Ordinal);
                             Flatten(source, "", flat);
-                            await writer.WriteLineAsync(string.Join(',', new[] { h.Str("_id") ?? "" }.Concat(columns!.Select(col => flat.GetValueOrDefault(col, ""))).Select(CsvEscape)))
-                                .ConfigureAwait(false);
+                            if (spool is not null)
+                            {
+                                foreach (var k in flat.Keys) if (spoolSeen.Add(k)) spoolColumns.Add(k);
+                                await spool.WriteLineAsync(JsonSerializer.Serialize(new Dictionary<string, object?> { ["_id"] = h.Str("_id") ?? "", ["f"] = flat })).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await writer.WriteLineAsync(string.Join(',', new[] { h.Str("_id") ?? "" }.Concat(columns!.Select(col => flat.GetValueOrDefault(col, ""))).Select(CsvEscape)))
+                                    .ConfigureAwait(false);
+                            }
                             break;
                     }
                     written++;
@@ -453,10 +491,18 @@ public sealed class JobsService
                     .ConfigureAwait(false);
             }
             if (plan.Format == "json") await writer.WriteAsync(written == 0 ? "]\n" : "\n]\n").ConfigureAwait(false);
+            if (spool is not null)
+            {
+                await spool.DisposeAsync().ConfigureAwait(false);
+                spool = null;
+                if (written > 0) await WriteSpooledCsvAsync(writer, spoolPath!, spoolColumns, ct).ConfigureAwait(false);
+            }
             await writer.FlushAsync(ct).ConfigureAwait(false);
         }
         finally
         {
+            if (spool is not null) await spool.DisposeAsync().ConfigureAwait(false);
+            if (spoolPath is not null) try { File.Delete(spoolPath); } catch (IOException) { /* temp file */ }
             if (scrollIds.Count > 0)
             {
                 try
@@ -472,6 +518,21 @@ public sealed class JobsService
         }
         job?.Report(written, written, $"{written:N0} documents", force: true);
         return written;
+    }
+
+    /// <summary>Header (the union of the spooled documents' fields) and the spooled rows.</summary>
+    private static async Task WriteSpooledCsvAsync(StreamWriter writer, string spoolPath, List<string> columns, CancellationToken ct)
+    {
+        await writer.WriteLineAsync(string.Join(',', new[] { "_id" }.Concat(columns).Select(CsvEscape))).ConfigureAwait(false);
+        using var reader = new StreamReader(spoolPath, new UTF8Encoding(false), false, 64 * 1024);
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+        {
+            using var doc = JsonDocument.Parse(line);
+            var fields = doc.RootElement.GetProperty("f");
+            var cells = new List<string> { doc.RootElement.GetProperty("_id").GetString() ?? "" };
+            foreach (var col in columns) cells.Add(fields.TryGetProperty(col, out var v) ? v.GetString() ?? "" : "");
+            await writer.WriteLineAsync(string.Join(',', cells.Select(CsvEscape))).ConfigureAwait(false);
+        }
     }
 
     private static string DocText(JsonElement hit, JsonElement source, bool meta) => meta
