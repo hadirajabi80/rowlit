@@ -385,6 +385,8 @@ export class Layout {
       const cur = this.S(j)!, prev = this.S(j - 1)!;
       if (prev.t.end !== cur.t.start) return false;
       if (prev.kind === 'op' && prev.text === '@') return true;
+      // PUT file:///tmp/a.csv @~: a URL written without blanks (the colon directly followed by a slash)
+      if (prev.kind === 'op' && prev.text === ':' && cur.kind === 'op' && cur.text === '/') return true;
     }
     return false;
   }

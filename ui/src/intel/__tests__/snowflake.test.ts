@@ -121,6 +121,21 @@ describe('Snowflake formatter', () => {
     expect(out).toContain('f.value:sku::string');
   });
 
+  it('stage references and file URLs stay in one piece; their case is kept; // comments survive', () => {
+    const a = formatSql("select $1:sku from @my_stage/path (file_format => 'csv') t", 'snowflake');
+    expect(a.warnings).toEqual([]);
+    expect(a.text).toContain("FROM @my_stage/path(file_format => 'csv') t");
+    const b = formatSql("copy into t from @db.s.Stage/Table/x.csv file_format = (type = csv)", 'snowflake').text;
+    expect(b).toContain('@db.s.Stage/Table/x.csv');
+    const c = formatSql('list @~/a/b; list @%orders; put file:///tmp/a.csv @~/up; select 1', 'snowflake').text;
+    expect(c).toContain('list @~/a/b;');
+    expect(c).toContain('@%orders');
+    expect(c).toContain('file:///tmp/a.csv @~/up;');
+    const d = formatSql('remove @s/old // note; here\nselect 2 // another', 'snowflake').text;
+    expect(d).toBe('REMOVE @s/old // note; here\nSELECT 2 // another');
+    expect(formatSql(d, 'snowflake').text).toBe(d);
+  });
+
   it('QUALIFY is a clause line of its own, broken at AND / OR like WHERE', () => {
     const out = formatSql('select * from t qualify row_number() over (partition by a order by b) = 1 and x > 0', 'snowflake');
     expect(out.warnings).toEqual([]);

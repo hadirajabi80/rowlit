@@ -300,6 +300,13 @@ public sealed class SqlTextTests
     }
 
     [Fact]
+    public void SplitStatements_SlashSlashInAUrlOrStagePathIsNotAComment()
+    {
+        var st = SnowflakeSql.SplitStatements("PUT file:///tmp/a.csv @~/up;\nLIST @s//x;\nSELECT 1");
+        Assert.Equal(["PUT file:///tmp/a.csv @~/up", "LIST @s//x", "SELECT 1"], st.Select(s => s.Text));
+    }
+
+    [Fact]
     public void SplitStatements_SlashSlashIsALineComment()
     {
         var st = SnowflakeSql.SplitStatements("// it's; a note\nSELECT 1; // x; y\nSELECT 2");
