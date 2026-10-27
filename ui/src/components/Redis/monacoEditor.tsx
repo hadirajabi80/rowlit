@@ -52,6 +52,17 @@ export default function MonacoCodeEditor(props: CodeEditorProps) {
       padding: { top: 6, bottom: 6 },
     });
     ed.current = e;
+    const apiRef = p.apiRef;
+    if (apiRef) {
+      apiRef.current = {
+        selectionOrLine: () => {
+          const sel = e.getSelection();
+          const m = e.getModel();
+          if (!sel || !m) return null;
+          return { text: sel.isEmpty() ? m.getLineContent(sel.positionLineNumber) : m.getValueInRange(sel), line: sel.startLineNumber };
+        },
+      };
+    }
     remeasureAfterFonts();
     const unbind = bindRedisModel(uri.toString(), { keys: () => latest.current.keys?.() ?? [] });
     const sub = model.onDidChangeContent(() => {
@@ -75,6 +86,7 @@ export default function MonacoCodeEditor(props: CodeEditorProps) {
     e.addAction({ id: 'dbstudio.redis.save', label: 'Save', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => latest.current.onSave?.() });
     if (p.autoFocus) e.focus();
     return () => {
+      if (apiRef) apiRef.current = null;
       sub.dispose();
       unbind();
       e.dispose();

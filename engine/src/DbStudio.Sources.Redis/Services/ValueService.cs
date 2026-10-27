@@ -25,10 +25,11 @@ public sealed class ValueService
     public async Task<RedisKeyValue> GetAsync(RedisClient c, int db, string key, RedisKeyQuery q)
     {
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         var batch = d.CreateBatch();
-        var typeTask = batch.ExecuteAsync("TYPE", (RedisKey)key);
-        var ttlTask = batch.ExecuteAsync("TTL", (RedisKey)key);
-        var encTask = batch.ExecuteAsync("OBJECT", "ENCODING", (RedisKey)key);
+        var typeTask = batch.ExecuteAsync("TYPE", rk);
+        var ttlTask = batch.ExecuteAsync("TTL", rk);
+        var encTask = batch.ExecuteAsync("OBJECT", "ENCODING", rk);
         batch.Execute();
         var type = Resp.WireType((string?)await RedisErrors.Guard(() => typeTask, "type").ConfigureAwait(false));
         if (type == "none") throw EngineException.NotFound($"Key '{key}'");
@@ -46,23 +47,23 @@ public sealed class ValueService
 
         return type switch
         {
-            "string" => await StringAsync(d, db, key, ttl, encoding, memory).ConfigureAwait(false),
-            "hash" => await HashAsync(d, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
-            "list" => await ListAsync(d, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
-            "set" => await SetAsync(d, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
-            "zset" => await ZsetAsync(d, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
-            "stream" => await StreamAsync(c, d, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
-            "rejson" => await JsonAsync(d, db, key, ttl, encoding, memory).ConfigureAwait(false),
+            "string" => await StringAsync(d, rk, db, key, ttl, encoding, memory).ConfigureAwait(false),
+            "hash" => await HashAsync(d, rk, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
+            "list" => await ListAsync(d, rk, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
+            "set" => await SetAsync(d, rk, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
+            "zset" => await ZsetAsync(d, rk, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
+            "stream" => await StreamAsync(c, d, rk, db, key, ttl, encoding, memory, q).ConfigureAwait(false),
+            "rejson" => await JsonAsync(d, rk, db, key, ttl, encoding, memory).ConfigureAwait(false),
             _ => throw new EngineException(400, ErrorCodes.NotSupported, $"Key '{key}' has a module type Rowlit cannot display yet; use the Workbench."),
         };
     }
 
-    private static async Task<RedisStringValue> StringAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory)
+    private static async Task<RedisStringValue> StringAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory)
     {
-        var len = Resp.Long(await Exec(d, "strlen", "STRLEN", (RedisKey)key).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "strlen", "STRLEN", rk).ConfigureAwait(false));
         var reply = len > StringLimit
-            ? await Exec(d, "getrange", "GETRANGE", (RedisKey)key, 0, StringLimit - 1).ConfigureAwait(false)
-            : await Exec(d, "get", "GET", (RedisKey)key).ConfigureAwait(false);
+            ? await Exec(d, "getrange", "GETRANGE", rk, 0, StringLimit - 1).ConfigureAwait(false)
+            : await Exec(d, "get", "GET", rk).ConfigureAwait(false);
         var bytes = Resp.Bytes(reply) ?? [];
         var binary = RedisArgs.IsBinary(bytes);
         var text = binary ? Convert.ToHexString(bytes).ToLowerInvariant() : Encoding.UTF8.GetString(bytes);
@@ -103,17 +104,17 @@ public sealed class ValueService
 
     private static string? Match(string? field) => string.IsNullOrEmpty(field) ? null : field;
 
-    private static async Task<RedisHashValue> HashAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
+    private static async Task<RedisHashValue> HashAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
     {
         var count = Page(q.Count, DefaultPage);
-        var args = new List<object> { (RedisKey)key, Cursor(q.Cursor) };
+        var args = new List<object> { rk, Cursor(q.Cursor) };
         if (Match(q.Field) is { } m) { args.Add("MATCH"); args.Add(m); }
         args.Add("COUNT"); args.Add(count);
         var reply = Resp.Arr(await Exec(d, "hscan", "HSCAN", [.. args]).ConfigureAwait(false));
         var items = reply.Length > 1 ? Resp.Arr(reply[1]) : [];
         var fields = new List<RedisHashField>(items.Length / 2);
         for (var i = 0; i + 1 < items.Length; i += 2) fields.Add(new RedisHashField(Resp.Text(items[i]), Resp.Text(items[i + 1])));
-        var len = Resp.Long(await Exec(d, "hlen", "HLEN", (RedisKey)key).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "hlen", "HLEN", rk).ConfigureAwait(false));
         return new RedisHashValue(key, db, ttl, enc, memory, fields, (string?)reply[0] ?? "0", len);
     }
 
@@ -125,27 +126,27 @@ public sealed class ValueService
         return n;
     }
 
-    private static async Task<RedisListValue> ListAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
+    private static async Task<RedisListValue> ListAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
     {
         var start = ParseIndex(q.Start, 0, "start");
         var stop = ParseIndex(q.Stop, start + Page(q.Count, DefaultPage) - 1, "stop");
         if (stop - start >= 5000) throw EngineException.Validation("At most 5000 list items per page.", new { field = "stop" });
-        var len = Resp.Long(await Exec(d, "llen", "LLEN", (RedisKey)key).ConfigureAwait(false));
-        var items = Resp.Arr(await Exec(d, "lrange", "LRANGE", (RedisKey)key, start, stop).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "llen", "LLEN", rk).ConfigureAwait(false));
+        var items = Resp.Arr(await Exec(d, "lrange", "LRANGE", rk, start, stop).ConfigureAwait(false));
         var first = start < 0 ? Math.Max(0, len + start) : start;
         var list = items.Select((v, i) => new RedisListItem(first + i, Resp.Text(v))).ToList();
         return new RedisListValue(key, db, ttl, enc, memory, list, len, first, first + list.Count - 1);
     }
 
-    private static async Task<RedisSetValue> SetAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
+    private static async Task<RedisSetValue> SetAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
     {
         var count = Page(q.Count, DefaultPage);
-        var args = new List<object> { (RedisKey)key, Cursor(q.Cursor) };
+        var args = new List<object> { rk, Cursor(q.Cursor) };
         if (Match(q.Field) is { } m) { args.Add("MATCH"); args.Add(m); }
         args.Add("COUNT"); args.Add(count);
         var reply = Resp.Arr(await Exec(d, "sscan", "SSCAN", [.. args]).ConfigureAwait(false));
         var members = (reply.Length > 1 ? Resp.Arr(reply[1]) : []).Select(Resp.Text).ToList();
-        var len = Resp.Long(await Exec(d, "scard", "SCARD", (RedisKey)key).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "scard", "SCARD", rk).ConfigureAwait(false));
         return new RedisSetValue(key, db, ttl, enc, memory, members, (string?)reply[0] ?? "0", len);
     }
 
@@ -153,23 +154,23 @@ public sealed class ValueService
     /// Unfiltered: ZRANGE by rank WITHSCORES (sorted by score; cursor <c>i:{rank}</c>). Filtered: ZSCAN MATCH (the UI
     /// sorts the page by score).
     /// </summary>
-    private static async Task<RedisZsetValue> ZsetAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
+    private static async Task<RedisZsetValue> ZsetAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
     {
         var count = Page(q.Count, DefaultPage);
-        var len = Resp.Long(await Exec(d, "zcard", "ZCARD", (RedisKey)key).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "zcard", "ZCARD", rk).ConfigureAwait(false));
         var cursor = string.IsNullOrEmpty(q.Cursor) ? "0" : q.Cursor;
         var members = new List<RedisZsetMember>();
         string next;
         if (Match(q.Field) is null && (cursor == "0" || cursor.StartsWith("i:", StringComparison.Ordinal)))
         {
             var start = cursor == "0" ? 0 : ParseIndex(cursor[2..], 0, "cursor");
-            var items = Resp.Arr(await Exec(d, "zrange", "ZRANGE", (RedisKey)key, start, start + count - 1, "WITHSCORES").ConfigureAwait(false));
+            var items = Resp.Arr(await Exec(d, "zrange", "ZRANGE", rk, start, start + count - 1, "WITHSCORES").ConfigureAwait(false));
             for (var i = 0; i + 1 < items.Length; i += 2) members.Add(new RedisZsetMember(Resp.Text(items[i]), Resp.Double(items[i + 1])));
             next = start + count < len ? $"i:{start + count}" : "0";
         }
         else
         {
-            var args = new List<object> { (RedisKey)key, Cursor(cursor) };
+            var args = new List<object> { rk, Cursor(cursor) };
             if (Match(q.Field) is { } m) { args.Add("MATCH"); args.Add(m); }
             args.Add("COUNT"); args.Add(count);
             var reply = Resp.Arr(await Exec(d, "zscan", "ZSCAN", [.. args]).ConfigureAwait(false));
@@ -182,7 +183,7 @@ public sealed class ValueService
     }
 
     /// <summary>Newest first: XREVRANGE stop start COUNT n. A stop of "(id" is exclusive (works on every version).</summary>
-    private static async Task<RedisStreamValue> StreamAsync(RedisClient c, IDatabase d, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
+    private static async Task<RedisStreamValue> StreamAsync(RedisClient c, IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory, RedisKeyQuery q)
     {
         var count = Page(q.Count, DefaultStreamPage, 1000);
         var stop = string.IsNullOrEmpty(q.Stop) ? "+" : q.Stop;
@@ -191,14 +192,14 @@ public sealed class ValueService
         if (start.StartsWith('(')) start = NextId(start[1..]);
         ValidateId(stop, "stop");
         ValidateId(start, "start");
-        var entries = stop == "-" ? [] : ParseEntries(await Exec(d, "xrevrange", "XREVRANGE", (RedisKey)key, stop, start, "COUNT", count).ConfigureAwait(false));
-        var len = Resp.Long(await Exec(d, "xlen", "XLEN", (RedisKey)key).ConfigureAwait(false));
-        var first = ParseEntries(await Exec(d, "xrange", "XRANGE", (RedisKey)key, "-", "+", "COUNT", 1).ConfigureAwait(false)).FirstOrDefault()?.Id;
-        var last = ParseEntries(await Exec(d, "xrevrange", "XREVRANGE", (RedisKey)key, "+", "-", "COUNT", 1).ConfigureAwait(false)).FirstOrDefault()?.Id;
+        var entries = stop == "-" ? [] : ParseEntries(await Exec(d, "xrevrange", "XREVRANGE", rk, stop, start, "COUNT", count).ConfigureAwait(false));
+        var len = Resp.Long(await Exec(d, "xlen", "XLEN", rk).ConfigureAwait(false));
+        var first = ParseEntries(await Exec(d, "xrange", "XRANGE", rk, "-", "+", "COUNT", 1).ConfigureAwait(false)).FirstOrDefault()?.Id;
+        var last = ParseEntries(await Exec(d, "xrevrange", "XREVRANGE", rk, "+", "-", "COUNT", 1).ConfigureAwait(false)).FirstOrDefault()?.Id;
         var groups = new List<RedisStreamGroup>();
         try
         {
-            foreach (var g in Resp.Arr(await d.ExecuteAsync("XINFO", "GROUPS", (RedisKey)key).ConfigureAwait(false)))
+            foreach (var g in Resp.Arr(await d.ExecuteAsync("XINFO", "GROUPS", rk).ConfigureAwait(false)))
             {
                 var m = Resp.Map(g);
                 long? lag = m.TryGetValue("lag", out var l) && !l.IsNull ? Resp.Long(l) : null;
@@ -260,9 +261,9 @@ public sealed class ValueService
         return seq < ulong.MaxValue ? $"{ms}-{seq + 1}" : $"{ms + 1}-0";
     }
 
-    private static async Task<RedisJsonValue> JsonAsync(IDatabase d, int db, string key, long ttl, string? enc, long? memory)
+    private static async Task<RedisJsonValue> JsonAsync(IDatabase d, RedisKey rk, int db, string key, long ttl, string? enc, long? memory)
     {
-        var text = (string?)await Exec(d, "json.get", "JSON.GET", (RedisKey)key, "$").ConfigureAwait(false) ?? "[]";
+        var text = (string?)await Exec(d, "json.get", "JSON.GET", rk, "$").ConfigureAwait(false) ?? "[]";
         using var doc = JsonDocument.Parse(text);
         // "$" answers an array of matches; the root has exactly one.
         var root = doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0 ? doc.RootElement[0] : doc.RootElement;
@@ -272,8 +273,9 @@ public sealed class ValueService
     public async Task<RedisStreamGroupDetail> StreamGroupAsync(RedisClient c, int db, string key, string group)
     {
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         var consumers = new List<RedisStreamConsumer>();
-        foreach (var e in Resp.Arr(await Exec(d, "xinfo|consumers", "XINFO", "CONSUMERS", (RedisKey)key, group).ConfigureAwait(false)))
+        foreach (var e in Resp.Arr(await Exec(d, "xinfo|consumers", "XINFO", "CONSUMERS", rk, group).ConfigureAwait(false)))
         {
             var m = Resp.Map(e);
             long? inactive = m.TryGetValue("inactive", out var i) && !i.IsNull ? Resp.Long(i) : null;
@@ -281,7 +283,7 @@ public sealed class ValueService
                 m.TryGetValue("idle", out var idle) ? Resp.Long(idle) : 0, inactive));
         }
         var pending = new List<RedisPendingEntry>();
-        foreach (var e in Resp.Arr(await Exec(d, "xpending", "XPENDING", (RedisKey)key, group, "-", "+", 100).ConfigureAwait(false)))
+        foreach (var e in Resp.Arr(await Exec(d, "xpending", "XPENDING", rk, group, "-", "+", 100).ConfigureAwait(false)))
         {
             var parts = Resp.Arr(e);
             if (parts.Length >= 4) pending.Add(new RedisPendingEntry((string?)parts[0] ?? "", Resp.Text(parts[1]), Resp.Long(parts[2]), Resp.Long(parts[3])));
@@ -296,14 +298,15 @@ public sealed class ValueService
         c.EnsureWritable("editing a string value");
         var value = req.Value ?? throw EngineException.Validation("value is required.", new { field = "value" });
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         if (c.Supports(6))
         {
-            await Exec(d, "set", "SET", (RedisKey)key, value, "KEEPTTL").ConfigureAwait(false);
+            await Exec(d, "set", "SET", rk, value, "KEEPTTL").ConfigureAwait(false);
             return;
         }
-        var pttl = Resp.Long(await Exec(d, "pttl", "PTTL", (RedisKey)key).ConfigureAwait(false));
-        if (pttl > 0) await Exec(d, "set", "SET", (RedisKey)key, value, "PX", pttl).ConfigureAwait(false);
-        else await Exec(d, "set", "SET", (RedisKey)key, value).ConfigureAwait(false);
+        var pttl = Resp.Long(await Exec(d, "pttl", "PTTL", rk).ConfigureAwait(false));
+        if (pttl > 0) await Exec(d, "set", "SET", rk, value, "PX", pttl).ConfigureAwait(false);
+        else await Exec(d, "set", "SET", rk, value).ConfigureAwait(false);
     }
 
     public async Task EditHashAsync(RedisClient c, int db, string key, RedisHashEditRequest req)
@@ -312,16 +315,18 @@ public sealed class ValueService
         if ((req.Set is null || req.Set.Count == 0) && (req.Del is null || req.Del.Count == 0))
             throw EngineException.Validation("set or del is required.", new { field = "set" });
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         if (req.Del is { Count: > 0 } del)
-            await Exec(d, "hdel", "HDEL", [(RedisKey)key, .. del.Select(f => (object)f)]).ConfigureAwait(false);
+            await Exec(d, "hdel", "HDEL", [rk, .. del.Select(f => (object)f)]).ConfigureAwait(false);
         if (req.Set is { Count: > 0 } set)
-            await Exec(d, "hset", "HSET", [(RedisKey)key, .. set.SelectMany(kv => new object[] { kv.Key, kv.Value })]).ConfigureAwait(false);
+            await Exec(d, "hset", "HSET", [rk, .. set.SelectMany(kv => new object[] { kv.Key, kv.Value })]).ConfigureAwait(false);
     }
 
     public async Task EditListAsync(RedisClient c, int db, string key, RedisListEditRequest req)
     {
         c.EnsureWritable("editing list items");
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         var ops = (req.Push is null ? 0 : 1) + (req.SetIndex is null ? 0 : 1) + (req.Remove is null ? 0 : 1);
         if (ops != 1) throw EngineException.Validation("Exactly one of push, setIndex or remove is required.", new { field = "push" });
         if (req.Push is { } push)
@@ -333,18 +338,36 @@ public sealed class ValueService
                 "right" or null => "RPUSH",
                 _ => throw EngineException.Validation("push.side must be left or right.", new { field = "push.side" }),
             };
-            await Exec(d, cmd.ToLowerInvariant(), cmd, [(RedisKey)key, .. values.Select(x => (object)x)]).ConfigureAwait(false);
+            await Exec(d, cmd.ToLowerInvariant(), cmd, [rk, .. values.Select(x => (object)x)]).ConfigureAwait(false);
         }
         else if (req.SetIndex is { } si)
         {
             var index = si.Index ?? throw EngineException.Validation("setIndex.index is required.", new { field = "setIndex.index" });
-            await Exec(d, "lset", "LSET", (RedisKey)key, index, si.Value ?? "").ConfigureAwait(false);
+            await Exec(d, "lset", "LSET", rk, index, si.Value ?? "").ConfigureAwait(false);
         }
         else if (req.Remove is { } rm)
         {
             var value = rm.Value ?? throw EngineException.Validation("remove.value is required.", new { field = "remove.value" });
-            await Exec(d, "lrem", "LREM", (RedisKey)key, rm.Count ?? 1, value).ConfigureAwait(false);
+            if (rm.Index is { } index) await RemoveAtAsync(d, rk, key, index, value).ConfigureAwait(false);
+            else await Exec(d, "lrem", "LREM", rk, rm.Count ?? 1, value).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Removes the element at <paramref name="index"/> (LREM only removes by value, so a duplicate earlier in the list
+    /// would go instead): LSET a unique tombstone, then LREM it, in one MULTI/EXEC guarded by the element the caller saw.
+    /// </summary>
+    private static async Task RemoveAtAsync(IDatabase d, RedisKey rk, string key, long index, string expected)
+    {
+        var tombstone = $"\u001frowlit-removed-{Guid.NewGuid():N}";
+        var tran = d.CreateTransaction();
+        tran.AddCondition(Condition.ListIndexEqual(rk, index, expected));
+        var set = tran.ExecuteAsync("LSET", rk, index, tombstone);
+        var rem = tran.ExecuteAsync("LREM", rk, 1, tombstone);
+        var committed = await RedisErrors.Guard(() => tran.ExecuteAsync(), "lset").ConfigureAwait(false);
+        if (!committed)
+            throw EngineException.Validation($"Element {index} of '{key}' changed since it was loaded: refresh the list and try again.", new { field = "remove.index" });
+        await RedisErrors.Guard(() => Task.WhenAll(set, rem), "lrem").ConfigureAwait(false);
     }
 
     public async Task EditSetAsync(RedisClient c, int db, string key, RedisSetEditRequest req)
@@ -353,8 +376,9 @@ public sealed class ValueService
         if ((req.Add is null || req.Add.Count == 0) && (req.Remove is null || req.Remove.Count == 0))
             throw EngineException.Validation("add or remove is required.", new { field = "add" });
         var d = c.Db(db);
-        if (req.Remove is { Count: > 0 } rm) await Exec(d, "srem", "SREM", [(RedisKey)key, .. rm.Select(x => (object)x)]).ConfigureAwait(false);
-        if (req.Add is { Count: > 0 } add) await Exec(d, "sadd", "SADD", [(RedisKey)key, .. add.Select(x => (object)x)]).ConfigureAwait(false);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
+        if (req.Remove is { Count: > 0 } rm) await Exec(d, "srem", "SREM", [rk, .. rm.Select(x => (object)x)]).ConfigureAwait(false);
+        if (req.Add is { Count: > 0 } add) await Exec(d, "sadd", "SADD", [rk, .. add.Select(x => (object)x)]).ConfigureAwait(false);
     }
 
     public async Task EditZsetAsync(RedisClient c, int db, string key, RedisZsetEditRequest req)
@@ -363,11 +387,12 @@ public sealed class ValueService
         if ((req.Add is null || req.Add.Count == 0) && (req.Remove is null || req.Remove.Count == 0))
             throw EngineException.Validation("add or remove is required.", new { field = "add" });
         var d = c.Db(db);
-        if (req.Remove is { Count: > 0 } rm) await Exec(d, "zrem", "ZREM", [(RedisKey)key, .. rm.Select(x => (object)x)]).ConfigureAwait(false);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
+        if (req.Remove is { Count: > 0 } rm) await Exec(d, "zrem", "ZREM", [rk, .. rm.Select(x => (object)x)]).ConfigureAwait(false);
         if (req.Add is { Count: > 0 } add)
         {
             if (add.Any(m => m.Member is null)) throw EngineException.Validation("add[].member is required.", new { field = "add" });
-            await Exec(d, "zadd", "ZADD", [(RedisKey)key, .. add.SelectMany(m => new object[] { Resp.Score(m.Score), m.Member })]).ConfigureAwait(false);
+            await Exec(d, "zadd", "ZADD", [rk, .. add.SelectMany(m => new object[] { Resp.Score(m.Score), m.Member })]).ConfigureAwait(false);
         }
     }
 
@@ -376,34 +401,35 @@ public sealed class ValueService
     {
         c.EnsureWritable("editing a stream");
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         var ops = new object?[] { req.Add, req.Delete, req.Ack, req.GroupCreate, req.GroupDestroy }.Count(o => o is not null);
         if (ops != 1) throw EngineException.Validation("Exactly one of add, delete, ack, groupCreate or groupDestroy is required.", new { field = "add" });
         if (req.Add is { } add)
         {
             if (add.Count == 0) throw EngineException.Validation("add needs at least one field.", new { field = "add" });
             var id = string.IsNullOrWhiteSpace(req.Id) ? "*" : req.Id.Trim();
-            var r = await Exec(d, "xadd", "XADD", [(RedisKey)key, id, .. add.SelectMany(kv => new object[] { kv.Key, kv.Value })]).ConfigureAwait(false);
+            var r = await Exec(d, "xadd", "XADD", [rk, id, .. add.SelectMany(kv => new object[] { kv.Key, kv.Value })]).ConfigureAwait(false);
             return (string?)r;
         }
         if (req.Delete is { } ids)
         {
             if (ids.Count == 0) throw EngineException.Validation("delete needs at least one id.", new { field = "delete" });
-            await Exec(d, "xdel", "XDEL", [(RedisKey)key, .. ids.Select(x => (object)x)]).ConfigureAwait(false);
+            await Exec(d, "xdel", "XDEL", [rk, .. ids.Select(x => (object)x)]).ConfigureAwait(false);
         }
         else if (req.Ack is { } ack)
         {
             var group = ack.Group ?? throw EngineException.Validation("ack.group is required.", new { field = "ack.group" });
             if (ack.Ids is not { Count: > 0 } ackIds) throw EngineException.Validation("ack.ids is required.", new { field = "ack.ids" });
-            await Exec(d, "xack", "XACK", [(RedisKey)key, group, .. ackIds.Select(x => (object)x)]).ConfigureAwait(false);
+            await Exec(d, "xack", "XACK", [rk, group, .. ackIds.Select(x => (object)x)]).ConfigureAwait(false);
         }
         else if (req.GroupCreate is { } gc)
         {
             var name = string.IsNullOrWhiteSpace(gc.Name) ? throw EngineException.Validation("groupCreate.name is required.", new { field = "groupCreate.name" }) : gc.Name;
-            await Exec(d, "xgroup|create", "XGROUP", "CREATE", (RedisKey)key, name, string.IsNullOrWhiteSpace(gc.Id) ? "$" : gc.Id).ConfigureAwait(false);
+            await Exec(d, "xgroup|create", "XGROUP", "CREATE", rk, name, string.IsNullOrWhiteSpace(gc.Id) ? "$" : gc.Id).ConfigureAwait(false);
         }
         else if (req.GroupDestroy is { } destroy)
         {
-            await Exec(d, "xgroup|destroy", "XGROUP", "DESTROY", (RedisKey)key, destroy).ConfigureAwait(false);
+            await Exec(d, "xgroup|destroy", "XGROUP", "DESTROY", rk, destroy).ConfigureAwait(false);
         }
         return null;
     }
@@ -414,7 +440,8 @@ public sealed class ValueService
         if (req.Value is not { } value || value.ValueKind == JsonValueKind.Undefined)
             throw EngineException.Validation("value is required.", new { field = "value" });
         var path = string.IsNullOrWhiteSpace(req.Path) ? "$" : req.Path;
-        await Exec(c.Db(db), "json.set", "JSON.SET", (RedisKey)key, path, value.GetRawText()).ConfigureAwait(false);
+        var d = c.Db(db);
+        await Exec(d, "json.set", "JSON.SET", await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false), path, value.GetRawText()).ConfigureAwait(false);
     }
 
     public async Task CreateAsync(RedisClient c, RedisCreateKeyRequest req)
@@ -494,18 +521,19 @@ public sealed class ValueService
         c.EnsureWritable("renaming a key");
         var newKey = req.NewKey is { Length: > 0 } nk ? nk : throw EngineException.Validation("newKey is required.", new { field = "newKey" });
         if (newKey == key) throw EngineException.Validation("The new name is the current name.", new { field = "newKey" });
-        if (c.IsCluster && c.Mux.HashSlot(key) != c.Mux.HashSlot(newKey))
-            throw EngineException.Validation(
-                $"In Redis Cluster both names must hash to the same slot ({c.Mux.HashSlot(key)} vs {c.Mux.HashSlot(newKey)}). Use a hash tag, e.g. {{user:1}}:profile.",
-                new { field = "newKey" });
         var d = c.Db(db);
-        if (Resp.Long(await Exec(d, "exists", "EXISTS", (RedisKey)key).ConfigureAwait(false)) == 0) throw EngineException.NotFound($"Key '{key}'");
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
+        if (c.IsCluster && c.Mux.HashSlot(rk) != c.Mux.HashSlot((RedisKey)newKey))
+            throw EngineException.Validation(
+                $"In Redis Cluster both names must hash to the same slot ({c.Mux.HashSlot(rk)} vs {c.Mux.HashSlot((RedisKey)newKey)}). Use a hash tag, e.g. {{user:1}}:profile.",
+                new { field = "newKey" });
+        if (Resp.Long(await Exec(d, "exists", "EXISTS", rk).ConfigureAwait(false)) == 0) throw EngineException.NotFound($"Key '{key}'");
         if (req.Overwrite == true)
         {
-            await Exec(d, "rename", "RENAME", (RedisKey)key, (RedisKey)newKey).ConfigureAwait(false);
+            await Exec(d, "rename", "RENAME", rk, (RedisKey)newKey).ConfigureAwait(false);
             return;
         }
-        var ok = Resp.Long(await Exec(d, "renamenx", "RENAMENX", (RedisKey)key, (RedisKey)newKey).ConfigureAwait(false));
+        var ok = Resp.Long(await Exec(d, "renamenx", "RENAMENX", rk, (RedisKey)newKey).ConfigureAwait(false));
         if (ok == 0) throw EngineException.Validation($"Key '{newKey}' already exists (tick Overwrite to replace it).", new { field = "newKey" });
     }
 
@@ -513,14 +541,15 @@ public sealed class ValueService
     {
         c.EnsureWritable(req.Seconds is null ? "removing a TTL" : "setting a TTL");
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         if (req.Seconds is null)
         {
-            if (Resp.Long(await Exec(d, "exists", "EXISTS", (RedisKey)key).ConfigureAwait(false)) == 0) throw EngineException.NotFound($"Key '{key}'");
-            await Exec(d, "persist", "PERSIST", (RedisKey)key).ConfigureAwait(false);
+            if (Resp.Long(await Exec(d, "exists", "EXISTS", rk).ConfigureAwait(false)) == 0) throw EngineException.NotFound($"Key '{key}'");
+            await Exec(d, "persist", "PERSIST", rk).ConfigureAwait(false);
             return;
         }
         if (req.Seconds <= 0) throw EngineException.Validation("seconds must be positive (null removes the TTL).", new { field = "seconds" });
-        var set = Resp.Long(await Exec(d, "expire", "EXPIRE", (RedisKey)key, req.Seconds.Value).ConfigureAwait(false));
+        var set = Resp.Long(await Exec(d, "expire", "EXPIRE", rk, req.Seconds.Value).ConfigureAwait(false));
         if (set == 0) throw EngineException.NotFound($"Key '{key}'");
     }
 
@@ -528,9 +557,10 @@ public sealed class ValueService
     {
         c.EnsureWritable("deleting a key");
         var d = c.Db(db);
+        var rk = await Resp.ResolveKeyAsync(d, key).ConfigureAwait(false);
         var n = c.Supports(4)
-            ? Resp.Long(await Exec(d, "unlink", "UNLINK", (RedisKey)key).ConfigureAwait(false))
-            : Resp.Long(await Exec(d, "del", "DEL", (RedisKey)key).ConfigureAwait(false));
+            ? Resp.Long(await Exec(d, "unlink", "UNLINK", rk).ConfigureAwait(false))
+            : Resp.Long(await Exec(d, "del", "DEL", rk).ConfigureAwait(false));
         if (n == 0) throw EngineException.NotFound($"Key '{key}'");
     }
 

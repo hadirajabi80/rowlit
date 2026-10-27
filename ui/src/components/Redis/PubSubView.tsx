@@ -3,7 +3,7 @@
 // server's active channels (PUBSUB CHANNELS / NUMSUB).
 import { displayShortcut } from '../../commands/keys';
 import { Pause, Play, RefreshCw, Send, Square, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { RedisMessageItem, RedisPubSubChannels } from '../../api/types';
 import { formatCount, prettyJson } from '../../redis/format';
@@ -21,13 +21,27 @@ const ROW = 24;
 function MessageList({ items, filter }: { items: RedisMessageItem[]; filter: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
-  const [open, setOpen] = useState<number | null>(null);
+  // The expanded message is tracked by identity, not by row index: new messages arrive at the top and would shift
+  // every index, so the open row would jump to a different message while the user reads it.
+  const [openMsg, setOpenMsg] = useState<RedisMessageItem | null>(null);
   const [follow, setFollow] = useState(true);
   const shown = useMemo(() => {
     const f = filter.toLowerCase();
     const list = f ? items.filter((m) => m.channel.toLowerCase().includes(f) || m.payload.toLowerCase().includes(f)) : items;
     return list.slice().reverse();
   }, [items, filter]);
+  const open = openMsg ? shown.indexOf(openMsg) : -1;
+  const setOpen = (i: number | null) => setOpenMsg(i === null ? null : shown[i] ?? null);
+  // Scrolled away from the newest messages: keep the same messages in view while new ones are added above them.
+  const firstShown = useRef<RedisMessageItem | undefined>(undefined);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const prev = firstShown.current;
+    firstShown.current = shown[0];
+    if (!el || follow || !prev || prev === shown[0]) return;
+    const moved = shown.indexOf(prev);
+    if (moved > 0) el.scrollTop += moved * ROW;
+  }, [shown, follow]);
   useEffect(() => {
     if (follow && ref.current) ref.current.scrollTop = 0;
   }, [shown.length, follow]);
@@ -38,13 +52,13 @@ function MessageList({ items, filter }: { items: RedisMessageItem[]; filter: str
     <div className="redis-msglist" ref={ref} role="log" aria-label="Messages" tabIndex={0}
       onScroll={(e) => { setTop(e.currentTarget.scrollTop); setFollow(e.currentTarget.scrollTop < 4); }}>
       {!shown.length && <div className="redis-empty muted">{items.length ? 'No message matches the filter.' : 'Messages appear here (newest first).'}</div>}
-      <div style={{ position: 'relative', height: shown.length * ROW + (open !== null ? 240 : 0) }}>
+      <div style={{ position: 'relative', height: shown.length * ROW + (open >= 0 ? 240 : 0) }}>
         {shown.slice(first, last).map((m, j) => {
           const i = first + j;
           const isOpen = open === i;
           const pretty = isOpen ? prettyJson(m.payload) : null;
           return (
-            <div key={`${m.ts}-${i}`} className={`redis-msg ${isOpen ? 'open' : ''}`} style={{ top: i * ROW + (open !== null && i > open ? 240 : 0) }}>
+            <div key={`${m.ts}-${shown.length - 1 - i}`} className={`redis-msg ${isOpen ? 'open' : ''}`} style={{ top: i * ROW + (open >= 0 && i > open ? 240 : 0) }}>
               <button className="redis-msg-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : i)}>
                 <span className="muted tabular">{new Date(m.ts).toLocaleTimeString('en-GB', { hour12: false })}</span>
                 <span className="mono redis-msg-channel">{m.channel}</span>

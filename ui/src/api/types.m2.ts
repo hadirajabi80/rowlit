@@ -156,7 +156,8 @@ export interface RedisHashEditRequest { set?: Record<string, string>; del?: stri
 export type RedisListEditRequest =
   | { push: { side: 'left' | 'right'; values: string[] } }
   | { setIndex: { index: number; value: string } }
-  | { remove: { value: string; count: number } };
+  /** With `index` the element at that position goes (guarded by `value`, the element the caller saw); without it LREM removes `count` occurrences of `value`. */
+  | { remove: { value: string; count: number; index?: number } };
 /** `POST /keys/{key}/set` (SADD/SREM). */
 export interface RedisSetEditRequest { add?: string[]; remove?: string[] }
 /** `POST /keys/{key}/zset` (ZADD/ZREM). */

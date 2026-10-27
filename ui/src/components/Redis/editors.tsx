@@ -312,9 +312,11 @@ function usePairs(initial: [string, string][]) {
     ...added.map(([a, b]) => ({ a, b, state: 'added' as const })),
     ...base.map(([a, b]) => ({ a, b: edits.get(a) ?? b, state: deleted.has(a) ? 'deleted' as const : edits.has(a) ? 'edited' as const : 'clean' as const })),
   ];
-  const pending = edits.size + added.length + deleted.size;
+  // an edited row that is then deleted is only a delete: re-applying its edit after the delete would bring the row back
+  const liveEdits = [...edits].filter(([a]) => !deleted.has(a));
+  const pending = liveEdits.length + added.length + deleted.size;
   return {
-    rows, pending, base, setBase, edits, added, deleted, reset,
+    rows, pending, base, setBase, edits: new Map(liveEdits), added, deleted, reset,
     discard: () => { setEdits(new Map()); setAdded([]); setDeleted(new Set()); },
     edit: (a: string, b: string) => {
       if (added.some(([x]) => x === a)) setAdded(added.map(([x, y]) => (x === a ? [x, b] : [x, y])));
@@ -416,10 +418,12 @@ export function ZsetEditor({ cid, db, value, readOnly, reload, registerSave, onE
       onError(errorText(e));
     }
   };
-  const score = (s: string) => (s === '+inf' ? Number.MAX_VALUE : s === '-inf' ? -Number.MAX_VALUE : Number(s));
+  // a blank score is not 0 (Number('') is): it must fail validation instead of silently saving a zero
+  const score = (s: string) => (s === '+inf' ? Number.MAX_VALUE : s === '-inf' ? -Number.MAX_VALUE : s.trim() === '' ? NaN : Number(s));
   const rows = useMemo(() => {
     const r = [...pairs.rows];
-    r.sort((x, y) => (x.state === 'added' ? -1 : y.state === 'added' ? 1 : (score(x.b) - score(y.b)) * (desc ? -1 : 1)));
+    const sortKey = (s: string) => (Number.isFinite(score(s)) ? score(s) : 0);
+    r.sort((x, y) => (x.state === 'added' ? -1 : y.state === 'added' ? 1 : (sortKey(x.b) - sortKey(y.b)) * (desc ? -1 : 1)));
     return r;
   }, [pairs.rows, desc]);
 
@@ -475,7 +479,22 @@ export function ListEditor({ cid, db, value, readOnly, reload, onError }: Editor
     }
   };
   const [view, setView] = useState(value);
-  useEffect(() => setView(value), [value]);
+  const viewStart = useRef(view.start);
+  viewStart.current = view.start;
+  // A reload (after an edit, or Refresh) hands over the first page. Stay on the page the user is looking at: an edit
+  // at index 450 must not throw them back to index 0.
+  useEffect(() => {
+    const at = viewStart.current;
+    if (at === 0 || value.start !== 0) {
+      setView(value);
+      return;
+    }
+    const lastPage = Math.max(0, Math.floor((value.length - 1) / page) * page);
+    const target = Math.min(at, lastPage);
+    if (target === 0) setView(value);
+    else void go(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
   const act = async (fn: () => Promise<void>, ok: string) => {
     try {
       await fn();
@@ -516,7 +535,7 @@ export function ListEditor({ cid, db, value, readOnly, reload, onError }: Editor
                 {!readOnly && (
                   <td className="redis-col-actions">
                     <button className="icon-btn" aria-label={`Remove element ${it.index}`} title="Remove (LREM 1)"
-                      onClick={() => void act(() => api.redis.editList(cid, db, value.key, { remove: { value: it.value, count: 1 } }), 'Element removed')}><Trash2 size={14} /></button>
+                      onClick={() => void act(() => api.redis.editList(cid, db, value.key, { remove: { value: it.value, count: 1, index: it.index } }), 'Element removed')}><Trash2 size={14} /></button>
                   </td>
                 )}
               </tr>

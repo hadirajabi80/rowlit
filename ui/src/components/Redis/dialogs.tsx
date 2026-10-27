@@ -198,7 +198,7 @@ export function TtlDialog({ cid, db, keyName, ttl, onClose, onSaved }: { cid: st
  * Delete keys matching a pattern: counts the matches first (SCAN), asks the user to type that count, then runs the
  * delete-pattern job with progress and Cancel.
  */
-export function DeletePatternDialog({ cid, db, pattern: initial, onClose, onDone }: { cid: string; db: number; pattern: string; onClose: () => void; onDone: (deleted: number) => void }) {
+export function DeletePatternDialog({ cid, db, pattern: initial, onClose, onDone, onCancelled }: { cid: string; db: number; pattern: string; onClose: () => void; onDone: (deleted: number) => void; onCancelled?: () => void }) {
   const [pattern, setPattern] = useState(initial);
   const [count, setCount] = useState<number | null>(null);
   const [counting, setCounting] = useState(false);
@@ -244,7 +244,10 @@ export function DeletePatternDialog({ cid, db, pattern: initial, onClose, onDone
           const deleted = (ev.result as { deleted?: number } | null)?.deleted ?? 0;
           setResult(`Deleted ${formatCount(deleted)} keys.`);
           onDone(deleted);
-        } else if (ev.status === 'cancelled') setResult('Cancelled: keys deleted so far stay deleted.');
+        } else if (ev.status === 'cancelled') {
+          setResult('Cancelled: keys deleted so far stay deleted.');
+          onCancelled?.(); // the keys already deleted must leave the lists
+        }
         else setError(ev.error ?? 'The job failed.');
         setJob(null);
       }

@@ -110,6 +110,22 @@ public sealed class RedisProvider : IDataSourceProvider
                     // CONFIG may be renamed or denied by ACL (managed services): keep 16.
                 }
             }
+            // StackExchange.Redis carries on as the default user when AUTH is rejected and that user needs no password, so
+            // a wrong ACL user or password would "connect" (and Test would say OK). Ask the server who we are.
+            if (settings.User is not null && version >= new Version(6, 0))
+            {
+                string? who = null;
+                try
+                {
+                    who = (string?)await primary.ExecuteAsync("ACL", "WHOAMI").ConfigureAwait(false);
+                }
+                catch (RedisServerException)
+                {
+                    // ACL denied or renamed: nothing to verify against
+                }
+                if (who is not null && !string.Equals(who, settings.User, StringComparison.Ordinal))
+                    throw EngineException.SourceUnavailable($"Authentication failed: WRONGPASS invalid username-password pair or user '{settings.User}' is disabled (the server treats this connection as '{who}').");
+            }
             var db = isCluster ? 0 : settings.Database;
             if (db >= databases)
                 throw EngineException.Validation($"Database {db} does not exist (the server has {databases}).", new { field = "db" });

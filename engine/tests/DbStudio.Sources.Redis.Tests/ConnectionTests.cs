@@ -80,6 +80,17 @@ public sealed class ConnectionTests
     }
 
     [Fact]
+    public async Task Rejected_acl_credentials_fail_the_test_even_when_the_driver_carries_on_as_default()
+    {
+        // StackExchange.Redis ignores a failed AUTH and continues as the default user; that must not read as a success
+        await using var server = new Fake.FakeRedisServer();
+        var r = await new RedisProvider().TestAsync(Profile(server.Port, props: new() { ["user"] = "ghost" }), "nope", CancellationToken.None);
+        Assert.False(r.Ok);
+        Assert.Contains("Authentication failed", r.Error!.Message);
+        Assert.Contains("'ghost'", r.Error.Message);
+    }
+
+    [Fact]
     public async Task Database_index_outside_the_server_range_is_rejected()
     {
         await using var server = new Fake.FakeRedisServer();

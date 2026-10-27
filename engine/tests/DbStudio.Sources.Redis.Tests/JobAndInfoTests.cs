@@ -220,6 +220,26 @@ public sealed class JobAndInfoTests
     }
 
     [Fact]
+    public async Task Pubsub_channels_hide_the_drivers_own_subscription()
+    {
+        await using var h = await RedisHarness.StartAsync();
+        var c = await h.ClientAsync();
+        var sub = c.Mux.GetSubscriber();
+        await sub.SubscribeAsync(StackExchange.Redis.RedisChannel.Literal("__Booksleeve_MasterChanged"), (_, _) => { });
+        await sub.SubscribeAsync(StackExchange.Redis.RedisChannel.Literal("mine"), (_, _) => { });
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        RedisPubSubChannels ch;
+        do
+        {
+            ch = await _info.ChannelsAsync(c, null);
+            if (ch.Channels.Any(x => x.Channel == "mine")) break;
+            await Task.Delay(20);
+        } while (DateTime.UtcNow < deadline);
+        Assert.Contains(ch.Channels, x => x.Channel == "mine");
+        Assert.DoesNotContain(ch.Channels, x => x.Channel.StartsWith("__Booksleeve_", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Publish_requires_channel_and_message()
     {
         await using var h = await RedisHarness.StartAsync();

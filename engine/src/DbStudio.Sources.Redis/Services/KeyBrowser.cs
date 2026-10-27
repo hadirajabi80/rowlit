@@ -68,7 +68,7 @@ public sealed class KeyBrowser
         var unique = found.Distinct(StringComparer.Ordinal).ToList();
         var summaries = await DescribeAsync(database, unique, serverTypeFilter ? type : null).ConfigureAwait(false);
         if (type is not null && !serverTypeFilter) summaries = summaries.Where(s => s.Type == type).ToList();
-        else summaries = summaries.Where(s => s.Type != "none").ToList();
+        else summaries = summaries.Where(s => s.Type != "none" && s.Ttl != -2).ToList(); // -2: expired between SCAN and TTL
         var dbSize = await DbSizeAsync(c, db).ConfigureAwait(false);
         // scanned: keys examined by this request (COUNT per SCAN call, at most the database size); the UI sums pages.
         var next = FormatCursor(c, cursors);
@@ -82,18 +82,34 @@ public sealed class KeyBrowser
         var result = new List<RedisKeySummary>(keys.Count);
         foreach (var chunk in keys.Chunk(500))
         {
-            var batch = db.CreateBatch();
-            var types = knownType is null ? chunk.Select(k => batch.ExecuteAsync("TYPE", (RedisKey)k)).ToArray() : null;
-            var ttls = chunk.Select(k => batch.ExecuteAsync("TTL", (RedisKey)k)).ToArray();
-            batch.Execute();
-            await RedisErrors.Guard(() => Task.WhenAll(types is null ? ttls : [.. types, .. ttls]), "type").ConfigureAwait(false);
-            for (var i = 0; i < chunk.Length; i++)
+            var (types, ttls) = await DescribeChunkAsync(db, chunk.Select(k => Resp.HasEscapes(k) ? (RedisKey)Resp.KeyBytes(k) : (RedisKey)k).ToArray(), knownType is null).ConfigureAwait(false);
+            // A key listed as `a\xffb` is a binary key (invalid UTF-8 shown with escapes); a key whose name literally
+            // contains such text is told apart by trying the literal name when the binary one does not exist.
+            var literal = Enumerable.Range(0, chunk.Length).Where(i => ttls[i] == -2 && Resp.HasEscapes(chunk[i])).ToArray();
+            if (literal.Length > 0)
             {
-                var t = knownType ?? Resp.WireType((string?)types![i].Result);
-                result.Add(new RedisKeySummary(chunk[i], t, Resp.Long(ttls[i].Result)));
+                var (lt, ll) = await DescribeChunkAsync(db, literal.Select(i => (RedisKey)chunk[i]).ToArray(), knownType is null).ConfigureAwait(false);
+                for (var j = 0; j < literal.Length; j++)
+                {
+                    if (ll[j] == -2) continue;
+                    ttls[literal[j]] = ll[j];
+                    if (types is not null) types[literal[j]] = lt![j];
+                }
             }
+            for (var i = 0; i < chunk.Length; i++)
+                result.Add(new RedisKeySummary(chunk[i], knownType ?? Resp.WireType(types![i]), ttls[i]));
         }
         return result;
+    }
+
+    private static async Task<(string?[]? Types, long[] Ttls)> DescribeChunkAsync(IDatabase db, RedisKey[] keys, bool withType)
+    {
+        var batch = db.CreateBatch();
+        var types = withType ? keys.Select(k => batch.ExecuteAsync("TYPE", k)).ToArray() : null;
+        var ttls = keys.Select(k => batch.ExecuteAsync("TTL", k)).ToArray();
+        batch.Execute();
+        await RedisErrors.Guard(() => Task.WhenAll(types is null ? ttls : [.. types, .. ttls]), "type").ConfigureAwait(false);
+        return (types?.Select(t => (string?)t.Result).ToArray(), ttls.Select(t => Resp.Long(t.Result)).ToArray());
     }
 
     /// <summary>DBSIZE (cluster: summed over the primaries).</summary>
@@ -123,7 +139,7 @@ public sealed class KeyBrowser
             return sizes;
         }
         var batch = db.CreateBatch();
-        var tasks = keys.Distinct(StringComparer.Ordinal).Select(k => (k, batch.ExecuteAsync("MEMORY", "USAGE", (RedisKey)k, "SAMPLES", "0"))).ToList();
+        var tasks = keys.Distinct(StringComparer.Ordinal).Select(k => (k, batch.ExecuteAsync("MEMORY", "USAGE", Resp.HasEscapes(k) ? (RedisKey)Resp.KeyBytes(k) : (RedisKey)k, "SAMPLES", "0"))).ToList();
         batch.Execute();
         foreach (var (k, t) in tasks)
         {

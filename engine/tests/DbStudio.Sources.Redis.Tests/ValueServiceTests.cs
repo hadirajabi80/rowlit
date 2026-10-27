@@ -131,6 +131,48 @@ public sealed class ValueServiceTests
     }
 
     [Fact]
+    public async Task List_remove_by_index_removes_that_position_not_the_first_equal_value()
+    {
+        var (h, c) = await StartAsync();
+        await using var _ = h;
+        await c.Db(0).ExecuteAsync("RPUSH", "dups", "x", "y", "x", "z", "x");
+        // the element at index 2 (not the first "x" at index 0) goes
+        await _values.EditListAsync(c, 0, "dups", new RedisListEditRequest(null, null, new RedisListRemove("x", 1, 2)));
+        var v = Assert.IsType<RedisListValue>(await _values.GetAsync(c, 0, "dups", new RedisKeyQuery()));
+        Assert.Equal(["x", "y", "z", "x"], v.Items.Select(i => i.Value));
+        // no tombstone is left behind
+        Assert.Equal(4, v.Length);
+    }
+
+    [Fact]
+    public async Task List_remove_by_index_refuses_a_stale_view()
+    {
+        var (h, c) = await StartAsync();
+        await using var _ = h;
+        await c.Db(0).ExecuteAsync("RPUSH", "stale", "a", "b", "c");
+        // the caller saw "b" at index 1, but the element there is "a" now
+        var ex = await Assert.ThrowsAsync<EngineException>(() =>
+            _values.EditListAsync(c, 0, "stale", new RedisListEditRequest(null, null, new RedisListRemove("b", 1, 0))));
+        Assert.Contains("changed", ex.Message);
+        var v = Assert.IsType<RedisListValue>(await _values.GetAsync(c, 0, "stale", new RedisKeyQuery()));
+        Assert.Equal(["a", "b", "c"], v.Items.Select(i => i.Value));
+    }
+
+    [Fact]
+    public void Keys_with_escapes_resolve_to_their_binary_name()
+    {
+        Assert.False(Resp.HasEscapes("user:1"));
+        Assert.False(Resp.HasEscapes("path\\xyz"));
+        Assert.True(Resp.HasEscapes("a\\xffb"));
+        Assert.Equal([0x61, 0xff, 0x62], Resp.KeyBytes("a\\xffb"));
+        Assert.Equal([0x61, 0xff, 0xc3, 0xa9], Resp.KeyBytes("a\\xffé"));
+        Assert.Equal("user:1"u8.ToArray(), Resp.KeyBytes("user:1"));
+        // what RedisArgs.ToDisplay shows for a binary key parses back to the same bytes
+        byte[] raw = [0x6b, 0x3a, 0xff, 0x00, 0x7f, 0x80];
+        Assert.Equal(raw, Resp.KeyBytes(RedisArgs.ToDisplay(raw)));
+    }
+
+    [Fact]
     public async Task List_edit_requires_exactly_one_operation()
     {
         var (h, c) = await StartAsync();

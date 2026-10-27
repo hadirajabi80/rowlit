@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using StackExchange.Redis;
 
 namespace DbStudio.Sources.Redis.Services;
@@ -14,6 +16,37 @@ internal static class Resp
     public static string Text(RedisResult r) => r.IsNull ? "" : r.Resp2Type == ResultType.Integer ? ((long)r).ToString(CultureInfo.InvariantCulture) : RedisArgs.ToDisplay((byte[]?)r ?? []);
 
     public static string? TextOrNull(RedisResult r) => r.IsNull ? null : Text(r);
+
+    private static readonly Regex HexEscape = new(@"\\x[0-9a-fA-F]{2}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>True when a displayed key contains a <c>\xHH</c> escape (<see cref="Text"/> writes invalid UTF-8 bytes that way).</summary>
+    public static bool HasEscapes(string key) => key.Contains("\\x", StringComparison.Ordinal) && HexEscape.IsMatch(key);
+
+    /// <summary>The raw bytes of a key shown by <see cref="Text"/>: <c>\xHH</c> escapes become bytes, everything else UTF-8.</summary>
+    public static byte[] KeyBytes(string key)
+    {
+        var bytes = new List<byte>(key.Length);
+        var last = 0;
+        foreach (Match m in HexEscape.Matches(key))
+        {
+            bytes.AddRange(Encoding.UTF8.GetBytes(key[last..m.Index]));
+            bytes.Add(byte.Parse(m.Value.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture));
+            last = m.Index + m.Length;
+        }
+        bytes.AddRange(Encoding.UTF8.GetBytes(key[last..]));
+        return [.. bytes];
+    }
+
+    /// <summary>
+    /// The key a route / dialog name stands for. A name without <c>\xHH</c> escapes is the key itself. With escapes it is
+    /// the binary key they spell, unless a key with that exact (literal) text exists.
+    /// </summary>
+    public static async Task<RedisKey> ResolveKeyAsync(IDatabase d, string key)
+    {
+        if (!HasEscapes(key)) return key;
+        var literal = await RedisErrors.Guard(() => d.ExecuteAsync("EXISTS", (RedisKey)key), "exists").ConfigureAwait(false);
+        return Long(literal) > 0 ? (RedisKey)key : (RedisKey)KeyBytes(key);
+    }
 
     public static long Long(RedisResult r)
     {

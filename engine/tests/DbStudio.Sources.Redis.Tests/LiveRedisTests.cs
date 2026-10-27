@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DbStudio.Core.Models;
 using DbStudio.Sources.Redis.Services;
+using StackExchange.Redis;
 
 namespace DbStudio.Sources.Redis.Tests;
 
@@ -26,6 +27,37 @@ public sealed class LiveRedisTests
             },
         };
         return await RedisProvider.ConnectAsync(profile, Environment.GetEnvironmentVariable("DBSTUDIO_REDIS_PASSWORD"), CancellationToken.None);
+    }
+
+    [SkippableFact]
+    public async Task Binary_key_names_are_listed_and_addressable()
+    {
+        await using var c = await ConnectAsync();
+        var d = c.Db(15);
+        await d.ExecuteAsync("FLUSHDB");
+        byte[] binary = [0x6b, 0x3a, 0xff, 0xfe];
+        await d.ExecuteAsync("SET", (RedisKey)binary, "v", "EX", 500);
+        await d.ExecuteAsync("SET", (RedisKey)"lit\\xffx", "w"); // a key whose name literally contains the escape text
+        var values = new ValueService();
+
+        var scan = await new KeyBrowser().ScanAsync(c, new RedisScanRequest(15, "*", null, "0", 100), CancellationToken.None);
+        var shown = scan.Keys.ToDictionary(k => k.Key);
+        Assert.Equal(2, shown.Count);
+        Assert.InRange(shown["k:\\xff\\xfe"].Ttl, 1, 500);
+        Assert.Equal("string", shown["k:\\xff\\xfe"].Type);
+
+        var got = Assert.IsType<RedisStringValue>(await values.GetAsync(c, 15, "k:\\xff\\xfe", new RedisKeyQuery()));
+        Assert.Equal("v", got.Value);
+        var lit = Assert.IsType<RedisStringValue>(await values.GetAsync(c, 15, "lit\\xffx", new RedisKeyQuery()));
+        Assert.Equal("w", lit.Value);
+
+        await values.SetTtlAsync(c, 15, "k:\\xff\\xfe", new RedisTtlRequest(null));
+        Assert.Equal(-1, Resp.Long(await d.ExecuteAsync("TTL", (RedisKey)binary)));
+        await values.DeleteAsync(c, 15, "k:\\xff\\xfe");
+        Assert.Equal(0, Resp.Long(await d.ExecuteAsync("EXISTS", (RedisKey)binary)));
+        await values.DeleteAsync(c, 15, "lit\\xffx");
+        Assert.Equal(0, Resp.Long(await d.ExecuteAsync("DBSIZE")));
+        await d.ExecuteAsync("FLUSHDB");
     }
 
     [SkippableFact]

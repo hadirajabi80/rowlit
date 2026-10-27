@@ -3,6 +3,7 @@
 // stay in sync without rescanning.
 import { createElement } from 'react';
 import { api } from '../../api/client';
+import type { RedisKeyValue } from '../../api/types';
 import { copyText } from '../../app/actions';
 import { getConnection } from '../../store/connections';
 import { toast, useUi } from '../../store/ui';
@@ -102,6 +103,7 @@ export function deletePattern(cid: string, db: number, pattern: string): void {
       toast('success', `Deleted ${formatCount(deleted)} keys`, pattern);
       announce({ kind: 'pattern', cid, db, pattern });
     },
+    onCancelled: () => announce({ kind: 'pattern', cid, db, pattern }),
   }));
 }
 
@@ -120,10 +122,25 @@ export function copyKeyName(key: string): Promise<void> {
   return copyText(key, 'Key name copied');
 }
 
+/** How much of a big value one request carries (null when it is all there). A copy must not claim more than it holds. */
+export function partialOf(v: RedisKeyValue): { loaded: number; total: number } | null {
+  const pair = (loaded: number, total: number) => (loaded < total ? { loaded, total } : null);
+  switch (v.type) {
+    case 'hash': return pair(v.fields.length, v.length);
+    case 'list': return pair(v.items.length, v.length);
+    case 'set': return pair(v.members.length, v.length);
+    case 'zset': return pair(v.members.length, v.length);
+    case 'stream': return pair(v.entries.length, v.length);
+    case 'string': return typeof v.value === 'string' ? null : { loaded: v.value.$trunc.length, total: v.value.len };
+    default: return null;
+  }
+}
+
 export async function copyValueJson(cid: string, db: number, key: string): Promise<void> {
   try {
     const v = await api.redis.getKey(cid, key, { db, count: 1000 });
-    await copyText(valueAsJson(v), 'Value copied as JSON');
+    const part = partialOf(v);
+    await copyText(valueAsJson(v), part ? `Copied the first ${formatCount(part.loaded)} of ${formatCount(part.total)} entries as JSON` : 'Value copied as JSON');
   } catch (e) {
     toast('error', 'Could not copy the value', errorText(e));
   }
