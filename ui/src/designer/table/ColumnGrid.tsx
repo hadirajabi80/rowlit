@@ -8,6 +8,7 @@
 import { Check, ChevronDown, KeyRound, Plus } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { DesignerFeatures, DesignerType, Dialect, TableColumnModel, TableModel } from '../../api/types';
+import { mysqlAutoIncrement, mysqlAutoIncrementToggle } from './model';
 
 export type ColumnKey = 'name' | 'type' | 'nullable' | 'pk' | 'identity' | 'default' | 'comment';
 
@@ -116,7 +117,7 @@ export function ColumnGrid(p: ColumnGridProps) {
     if (!c) return false;
     if (key === 'nullable') return c.nullable;
     if (key === 'pk') return pk.includes(c.name);
-    if (key === 'identity') return dialect === 'sqlite' ? c.autoincrement : !!c.identity;
+    if (key === 'identity') return dialect === 'sqlite' ? c.autoincrement : dialect === 'mysql' ? mysqlAutoIncrement(c) : !!c.identity;
     return false;
   };
 
@@ -128,6 +129,7 @@ export function ColumnGrid(p: ColumnGridProps) {
     else if (key === 'pk') p.onTogglePk(row);
     else if (key === 'identity') {
       if (dialect === 'sqlite') p.onChange(row, { autoincrement: !c.autoincrement, ...(c.autoincrement ? {} : { type: 'INTEGER' }) });
+      else if (dialect === 'mysql') p.onChange(row, mysqlAutoIncrementToggle(c));
       else if (dialect === 'pgsql') {
         // GENERATED ALWAYS AS IDENTITY on smallint/integer/bigint; another type becomes bigint.
         const intType = /^(smallint|integer|int|bigint|int2|int4|int8)$/i.test(c.type.trim());

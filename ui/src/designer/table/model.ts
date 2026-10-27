@@ -154,6 +154,17 @@ export function duplicateColumn(t: TableModel, index: number, dialect: Dialect):
   return { ...t, columns };
 }
 
+/**
+ * MySQL / MariaDB AUTO_INCREMENT: the engine reads an existing column as `autoincrement`, a column added in the designer
+ * starts with an `identity` (which the engine scripts as AUTO_INCREMENT too): either one counts.
+ */
+export const mysqlAutoIncrement = (c: Pick<TableColumnModel, 'autoincrement' | 'identity'>): boolean => c.autoincrement || !!c.identity;
+
+/** The patch of the Identity checkbox on a MySQL column: both flavours are cleared, or AUTO_INCREMENT is set. */
+export function mysqlAutoIncrementToggle(c: Pick<TableColumnModel, 'autoincrement' | 'identity'>): Partial<TableColumnModel> {
+  return mysqlAutoIncrement(c) ? { autoincrement: false, identity: null } : { autoincrement: true, identity: null, nullable: false };
+}
+
 /** Patch a column; a rename is propagated to keys, indexes, uniques and foreign keys. */
 export function updateColumn(t: TableModel, index: number, patch: Partial<TableColumnModel>, dialect: Dialect): TableModel {
   const old = t.columns[index];

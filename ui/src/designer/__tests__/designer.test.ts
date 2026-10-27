@@ -6,8 +6,22 @@ import { kindsFor, routineSnippet, snippetToText, type WizardSpec } from '../pro
 import { rewriteForEdit, supportsCreateOrAlter } from '../rewrite';
 import {
   addColumn, addForeignKey, addIndex, duplicateColumn, moveColumn, newTableModel, removeColumn, sameModel, togglePrimaryKey,
-  updateColumn, validateTable, withIds,
+  mysqlAutoIncrement, mysqlAutoIncrementToggle, updateColumn, validateTable, withIds,
 } from '../table/model';
+
+describe('MySQL AUTO_INCREMENT checkbox', () => {
+  it('reads both the server flavour (autoincrement) and the designer default (identity)', () => {
+    expect(mysqlAutoIncrement({ autoincrement: true, identity: null })).toBe(true);
+    expect(mysqlAutoIncrement({ autoincrement: false, identity: { seed: 1, increment: 1 } })).toBe(true);
+    expect(mysqlAutoIncrement({ autoincrement: false, identity: null })).toBe(false);
+  });
+
+  it('toggling clears both flavours, or sets AUTO_INCREMENT and NOT NULL', () => {
+    expect(mysqlAutoIncrementToggle({ autoincrement: true, identity: null })).toEqual({ autoincrement: false, identity: null });
+    expect(mysqlAutoIncrementToggle({ autoincrement: false, identity: { seed: 1, increment: 1 } })).toEqual({ autoincrement: false, identity: null });
+    expect(mysqlAutoIncrementToggle({ autoincrement: false, identity: null })).toEqual({ autoincrement: true, identity: null, nullable: false });
+  });
+});
 
 describe('rewriteForEdit (F4)', () => {
   it('T-SQL: CREATE → CREATE OR ALTER, keeping comments and body', () => {

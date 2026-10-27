@@ -242,6 +242,17 @@ public sealed class MySqlProviderUnitTests
         Assert.Equal("SQLSTATE 42S02", e.Detail);
     }
 
+    [Fact]
+    public void Errors_ConnectFailureNamesTheSocketCause()
+    {
+        var ctor = typeof(MySqlException).GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
+            .First(c => c.GetParameters().Select(p => p.ParameterType).SequenceEqual([typeof(string), typeof(Exception)]));
+        var ex = (MySqlException)ctor.Invoke(["Unable to connect to any of the specified MySQL hosts.", new System.Net.Sockets.SocketException(10061)]);
+        var message = MySqlErrors.ToProviderError(ex).Message;
+        Assert.StartsWith("Unable to connect to any of the specified MySQL hosts: ", message, StringComparison.Ordinal);
+        Assert.Equal("Access denied", MySqlErrors.WithCause(MakeException(1045, "28000", "Access denied")));
+    }
+
     private static MySqlException MakeException(int number, string state, string message)
     {
         var ctor = typeof(MySqlException).GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
