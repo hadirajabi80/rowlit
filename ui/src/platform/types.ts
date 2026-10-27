@@ -1,6 +1,6 @@
-import type { AppMemoryInfo, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus } from './bridge';
+import type { AppMemoryInfo, DiscardRequest, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UnsavedWorkReport, UpdateStatus } from './bridge';
 
-export type { AppMemoryInfo, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus };
+export type { AppMemoryInfo, DiscardRequest, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UnsavedWorkReport, UpdateStatus };
 
 /** What the app needs from its host. Electron delegates to window.dbstudio; the browser uses fallbacks. */
 export interface Platform {
@@ -57,4 +57,9 @@ export interface Platform {
   // ---- resources
   /** Desktop only: memory of the Electron processes (app.getAppMetrics), reported to the engine's memory limit. */
   getAppMemory?(): Promise<AppMemoryInfo>;
+  // ---- quit guard
+  /** Desktop only: main asks what this window would lose before a quit or a window close (app/quitGuard.ts). */
+  onUnsavedWorkQuery?(cb: () => UnsavedWorkReport | null | Promise<UnsavedWorkReport | null>): () => void;
+  /** Desktop only: main asks this window to confirm discarding the work of every window affected. */
+  onConfirmDiscard?(cb: (req: DiscardRequest) => boolean | Promise<boolean>): () => void;
 }

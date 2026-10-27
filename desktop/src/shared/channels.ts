@@ -56,6 +56,13 @@ export const IPC = {
   // ---- keyboard shortcuts
   /** renderer -> main (send): the menu accelerators after the user's keymap */
   setMenuShortcuts: 'dbstudio:set-menu-shortcuts',
+  // ---- quit guard (src/main/quit.ts)
+  /** main -> renderer { id }: what would this window lose? (answered on rendererReply) */
+  unsavedWorkQuery: 'dbstudio:unsaved-work-query',
+  /** main -> renderer { id, payload: DiscardRequest }: ask the user (answered on rendererReply with true / false) */
+  confirmDiscard: 'dbstudio:confirm-discard',
+  /** renderer -> main (send) { id, value }: the answer to a main -> renderer request */
+  rendererReply: 'dbstudio:renderer-reply',
 } as const;
 
 /** Passed to the renderer through webPreferences.additionalArguments, read by the preload. */

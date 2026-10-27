@@ -17,6 +17,7 @@ import { electronProfileDir, engineLogFile, iconPath, initDataDir, repoRoot, uiD
 import { desktopOs, quitWhenAllWindowsClosed } from './platform';
 import { registerSchemePrivileges, registerUiProtocol } from './protocol';
 import { runSmoke } from './smoke';
+import { createQuitGuard } from './quit';
 import { createUpdater } from './updater';
 import type { UpdateController } from './updater-core';
 import { applyTitleBarTheme, createMainWindow, installCsp, uiEntryUrl } from './window';
@@ -140,7 +141,7 @@ function main(): void {
     if (smokeTest) {
       const errorPage = await mainWindow.webContents.executeJavaScript('document.querySelector("h1").textContent + " | " + document.body.innerText.length');
       process.stdout.write(`DBSTUDIO_SMOKE_RESULT ${JSON.stringify({ error: err.message, startFailed: true, errorPage })}\n`);
-      app.quit();
+      quitGuard.flow.quitNow();
       return;
     }
     for (;;) {
@@ -159,7 +160,7 @@ function main(): void {
         // On failure the supervisor calls showStartFailure again.
         supervisor.start().then(loadUi, () => undefined);
       } else {
-        app.quit();
+        quitGuard.flow.quitNow(); // the user chose Quit: nothing more to ask
       }
       return;
     }
@@ -172,9 +173,26 @@ function main(): void {
       sendToAll(IPC.engineRestarted, info);
     },
     onStartFailed: (err) => { void showStartFailure(err); },
-    onGaveUp: () => app.quit(),
+    onGaveUp: () => quitGuard.flow.quitNow(),
     onOutput: (stream, line) => log.write(stream === 'stderr' ? 'engine:err' : 'engine', line),
     onExit: (exit) => log.write('main', `engine exited (code=${exit.code} signal=${exit.signal} expected=${exit.expected})`),
+  });
+
+  // ---- quit guard: closing a window or quitting asks first; the engine stops only after the windows have closed.
+  const quitGuard = createQuitGuard({
+    devUrl,
+    primary: () => mainWindow,
+    mainWindowQuits: quitWhenAllWindowsClosed(os),
+    show: !smokeTest,
+    log: (m) => log.write('main', m),
+    stopEngine: () => {
+      if (os === 'win32' || supervisor.isExternal || supervisor.pid === undefined) {
+        supervisor.shutdown();
+        return undefined;
+      }
+      log.write('main', 'stopping engine (SIGTERM)');
+      return supervisor.shutdownGracefully(5_000);
+    },
   });
 
   const restartEngine = () => {
@@ -208,6 +226,8 @@ function main(): void {
       updates: () => updates!,
       onTitleBarTheme: applyTitleBarTheme,
       onMenuShortcuts: setMenuShortcuts,
+      // The renderer already asked before Restart to update: the quit it starts does not ask again.
+      onQuitForUpdate: (started) => { if (started) quitGuard.flow.confirmQuit(); else quitGuard.flow.cancelConfirmedQuit(); },
     });
     // ---- windows: tabs opened in windows of their own
     detachedWindows = registerWindowIpc({
@@ -216,7 +236,9 @@ function main(): void {
       devUrl,
       primary: () => mainWindow,
       show: !smokeTest,
+      allowClose: (win) => quitGuard.flow.allowClose(win),
       onCreated: (win) => {
+        quitGuard.watch(win, 'detached');
         win.on('page-title-updated', (e) => { if (titleLocked) e.preventDefault(); });
         win.webContents.on('render-process-gone', (_e, details) => log.write('main', `detached window renderer gone: ${details.reason} (${details.exitCode})`));
       },
@@ -243,27 +265,25 @@ function main(): void {
   });
 
   const cleanup = () => {
-    quitting = true;
     detachedWindows?.closeAll();
     void updates?.then((u) => u.dispose());
     supervisor.shutdown(); // synchronous tree kill: taskkill /T /F, or SIGKILL to the process group
   };
+  // Quit sequence (quit-core.ts): before-quit and every window's close ask the renderers first (unsaved grid edits,
+  // open transactions) and go on only once the user agreed; the windows then close, and only after that (will-quit)
+  // the engine stops. A cancelled quit therefore leaves every window with a live engine.
   // POSIX: give the engine a chance to roll back open transactions (SIGTERM to its process group, bounded wait,
-  // then SIGKILL) before quitting. Windows keeps the immediate taskkill.
-  let engineStopped = os === 'win32' || supervisor.isExternal;
+  // then SIGKILL). Windows keeps the immediate taskkill.
   app.on('before-quit', (e) => {
-    if (!engineStopped && supervisor.pid !== undefined) {
-      e.preventDefault();
-      quitting = true;
-      log.write('main', 'stopping engine (SIGTERM)');
-      void supervisor.shutdownGracefully(5_000).finally(() => { engineStopped = true; app.quit(); });
-      return;
-    }
-    engineStopped = true;
-    cleanup();
-    log.write('main', 'quitting');
+    quitGuard.flow.onBeforeQuit(e);
+    if (quitGuard.flow.quitting) { quitting = true; log.write('main', 'quitting'); }
   });
-  app.on('will-quit', () => { cleanup(); log.close(); });
+  app.on('will-quit', (e) => {
+    quitting = true;
+    if (!quitGuard.flow.onWillQuit(e)) return;
+    cleanup();
+    log.close();
+  });
   process.on('exit', cleanup);
   app.on('window-all-closed', () => { if (quitWhenAllWindowsClosed(os) || quitting) app.quit(); });
 
@@ -275,6 +295,7 @@ function main(): void {
       show: !smokeTest,
     });
     win.on('page-title-updated', (e) => { if (titleLocked) e.preventDefault(); });
+    quitGuard.watch(win, 'main');
     win.on('closed', () => {
       if (mainWindow === win) mainWindow = null;
       // Detached windows close with the main window; their tabs are in its workspace and come back next time.

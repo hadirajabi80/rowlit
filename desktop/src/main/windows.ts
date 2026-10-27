@@ -16,6 +16,8 @@ export interface WindowIpcDeps {
   onCreated?(win: BrowserWindow): void;
   /** false keeps detached windows hidden (smoke test). */
   show?: boolean;
+  /** The registry closes a window itself (emptied, or with the main window): its close does not ask. */
+  allowClose?(win: BrowserWindow): void;
 }
 
 function assertTrusted(e: IpcMainInvokeEvent | IpcMainEvent, devUrl?: string): void {
@@ -32,6 +34,7 @@ export function detachedWindowUrl(devUrl?: string): string {
 export function registerWindowIpc(deps: WindowIpcDeps): DetachedWindows<BrowserWindow> {
   const windows = new DetachedWindows<BrowserWindow>({
     primary: deps.primary,
+    allowClose: deps.allowClose,
     create: ({ position }) => {
       const win = createMainWindow({
         preloadPath: deps.preloadPath,

@@ -33,6 +33,8 @@ await Promise.all([
       'src/main/memory.ts',
       // ---- windows
       'src/main/windows-core.ts',
+      // ---- quit guard
+      'src/main/quit-core.ts',
     ],
     outdir: 'out/lib',
     sourcemap: false,

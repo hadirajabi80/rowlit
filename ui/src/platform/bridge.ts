@@ -115,6 +115,40 @@ export interface DbStudioBridge {
    * app.getAppMetrics, plus the machine's RAM. The engine is a separate process and reports its own.
    */
   getAppMemory?(): Promise<AppMemoryInfo>;
+
+  // ---- quit guard (desktop/src/main/quit-core.ts)
+  /**
+   * Additive (optional, older preloads lack it): before the app quits or a window closes, the main process asks every
+   * window it affects what would be lost. `cb` answers at once (or with a promise); main goes ahead without a window
+   * that does not answer within about 3 s. Until a handler is registered the preload answers "nothing". Returns an
+   * unsubscribe function.
+   */
+  onUnsavedWorkQuery?(cb: () => UnsavedWorkReport | null | Promise<UnsavedWorkReport | null>): () => void;
+  /**
+   * Additive: when something would be lost, main asks one window to show the confirmation for all of it; `cb` resolves
+   * true to discard it and go on (quit / close), false to cancel. Returns an unsubscribe function.
+   */
+  onConfirmDiscard?(cb: (req: DiscardRequest) => boolean | Promise<boolean>): () => void;
+}
+
+// ---- quit guard
+/** What a window would lose if it went away now. */
+export interface UnsavedWorkReport {
+  /** Grids with edits that were not submitted. */
+  grids: number;
+  /** Rows changed, inserted or deleted in those grids. */
+  edits: number;
+  /** Sessions with an open transaction (rolled back when the engine session ends) and their connection's name. */
+  transactions: { sessionId: string; connection: string }[];
+}
+
+/** The confirmation main asks for: the work of every window affected, merged. */
+export interface DiscardRequest {
+  /** 'quit': Rowlit quits; 'close-window': this window closes (the app keeps running). */
+  reason: 'quit' | 'close-window';
+  work: UnsavedWorkReport;
+  /** Windows the work is spread over (more than 1: some of it is in other windows). */
+  windows: number;
 }
 
 // ---- resources

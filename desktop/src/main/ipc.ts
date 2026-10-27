@@ -41,6 +41,8 @@ export interface IpcDeps {
   onTitleBarTheme?(win: BrowserWindow, theme: TitleBarThemeArgs): void;
   /** The renderer's keymap for the menu items it rebound ({ commandId: shortcut | null }); the menu is rebuilt with it. */
   onMenuShortcuts?(shortcuts: Record<string, string | null>): void;
+  /** Restart to update: called with true before the restart starts (the renderer already asked), false if it did not. */
+  onQuitForUpdate?(started: boolean): void;
 }
 
 function assertTrustedSender(e: IpcMainInvokeEvent | IpcMainEvent, devUrl?: string): void {
@@ -142,7 +144,18 @@ export function registerIpc(deps: IpcDeps): void {
     const o = validateUpdateConfig(opts);
     (await updates()).configure(o);
   });
-  handle(IPC.updatesQuitAndInstall, async () => (await updates()).quitAndInstall());
+  handle(IPC.updatesQuitAndInstall, async () => {
+    const u = await updates();
+    // The renderer confirmed (ui/src/app/updates.ts restartToUpdate): the quit guard must not ask a second time.
+    deps.onQuitForUpdate?.(true);
+    let ok = false;
+    try {
+      ok = u.quitAndInstall();
+    } finally {
+      if (!ok) deps.onQuitForUpdate?.(false);
+    }
+    return ok;
+  });
   // ---- stop the update download (no arguments to validate)
   handle(IPC.updatesCancelDownload, async () => (await updates()).stopDownload());
   // ---- resources (docs/resources.md): Electron processes' memory for the engine's memory limit (no arguments)

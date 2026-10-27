@@ -110,6 +110,8 @@ export interface DetachedWindowsDeps<W extends WindowLike> {
   create(opts: { position?: { x: number; y: number } }): W;
   /** The main window, if open. */
   primary(): W | null;
+  /** A window about to be closed by the registry itself (emptied, or closing with the main window): no question first. */
+  allowClose?(win: W): void;
 }
 
 interface Entry<W> {
@@ -177,6 +179,7 @@ export class DetachedWindows<W extends WindowLike> {
     if (!e) return;
     e.emptied = true;
     e.tabs = [];
+    this.deps.allowClose?.(e.win);
     if (!e.win.isDestroyed()) e.win.close();
   }
 
@@ -187,7 +190,10 @@ export class DetachedWindows<W extends WindowLike> {
   closeAll(): void {
     if (this.entries.size === 0) return;
     this.shuttingDown = true;
-    for (const e of [...this.entries.values()]) if (!e.win.isDestroyed()) e.win.close();
+    for (const e of [...this.entries.values()]) {
+      this.deps.allowClose?.(e.win);
+      if (!e.win.isDestroyed()) e.win.close();
+    }
   }
 
   /** Every tab of every detached window (for the main window's workspace). */

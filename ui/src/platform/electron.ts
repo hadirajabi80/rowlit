@@ -1,4 +1,4 @@
-import type { DbStudioBridge, NotificationOptions, TitleBarTheme } from './bridge';
+import type { DbStudioBridge, DiscardRequest, NotificationOptions, TitleBarTheme, UnsavedWorkReport } from './bridge';
 import type { Platform } from './types';
 
 function baseName(p: string): string {
@@ -55,5 +55,8 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
     ...(typeof b.cancelUpdateDownload === 'function' ? { cancelUpdateDownload: () => b.cancelUpdateDownload!() } : {}),
     // ---- resources
     ...(typeof b.getAppMemory === 'function' ? { getAppMemory: () => b.getAppMemory!() } : {}),
+    // ---- quit guard
+    ...(typeof b.onUnsavedWorkQuery === 'function' ? { onUnsavedWorkQuery: (cb: () => UnsavedWorkReport | null | Promise<UnsavedWorkReport | null>) => b.onUnsavedWorkQuery!(cb) } : {}),
+    ...(typeof b.onConfirmDiscard === 'function' ? { onConfirmDiscard: (cb: (req: DiscardRequest) => boolean | Promise<boolean>) => b.onConfirmDiscard!(cb) } : {}),
   };
 }

@@ -46,8 +46,12 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
     'appVersion', 'cancelUpdateDownload', 'checkForUpdates', 'closeDetachedWindow', 'configureUpdates',
     'getAppMemory', // ---- resources
     'getDetachedTabs', 'getEngineInfo',
-    'getPathForFile', 'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace', 'onDetachedTabs',
-    'onEngineRestarted', 'onMenuCommand', 'onTabsReattached', 'onUpdateStatus', 'openExternal', 'openPath', 'openTabWindow', 'platform', 'quitAndInstall',
+    'getPathForFile', 'getUpdateStatus', 'listDetachedTabs', 'loadWorkspace',
+    'onConfirmDiscard', // ---- quit guard
+    'onDetachedTabs',
+    'onEngineRestarted', 'onMenuCommand', 'onTabsReattached',
+    'onUnsavedWorkQuery', // ---- quit guard
+    'onUpdateStatus', 'openExternal', 'openPath', 'openTabWindow', 'platform', 'quitAndInstall',
     'readTextFile', 'reattachTabs', 'reportDetachedTabs', 'revealInFolder', 'saveWorkspace', 'setMenuShortcuts', 'setTitle', 'setTitleBarTheme', 'setZoomFactor', 'showAppMenu',
     'showNotification', // ---- notifications
     'showOpenDialog',
@@ -87,6 +91,17 @@ it('electron app: bridge, engine handshake, CSP, restart, clean quit', { timeout
   assert.equal(r.missingAsset, 404);
   assert.equal(r.traversal, 404);
   assert.ok(existsSync(join(dataDir, 'workspace.json')));
+
+  // ---- quit guard: the first quit asked (the page reported unsaved work) and was cancelled: windows and engine stay.
+  assert.equal(r.quitCancel.asked, true, 'the quit asked the page');
+  assert.deepEqual(r.quitCancel.asks, [{
+    reason: 'quit',
+    work: { grids: 1, edits: 2, transactions: [{ sessionId: 's_smoke', connection: 'Smoke DB' }] },
+    windows: 1,
+  }]);
+  assert.equal(r.quitCancel.windows, 2, 'main and detached window still open after the cancelled quit');
+  assert.equal(r.quitCancel.engineAlive, true, 'engine not stopped by the cancelled quit');
+  assert.equal(r.quitCancel.healthAfterCancel.status, 'ok');
 
   assert.equal(r.healthAfterRestart.status, 'ok');
   assert.notEqual(r.healthAfterRestart.pid, r.health.pid, 'a new engine process answered after the restart');

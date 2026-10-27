@@ -83,12 +83,14 @@ class FakeWindow {
 function setup() {
   const main = new FakeWindow();
   const created = [];
+  const allowed = [];
   const reg = new w.DetachedWindows({
     primary: () => main,
+    allowClose: (win) => allowed.push(win),
     create: (opts) => { const win = new FakeWindow(); win.opts = opts; created.push(win); return win; },
   });
   const last = (channel) => main.sent.filter((m) => m[0] === channel).at(-1)?.[1];
-  return { main, created, reg, last };
+  return { main, created, reg, last, allowed };
 }
 
 describe('DetachedWindows', () => {
@@ -109,7 +111,7 @@ describe('DetachedWindows', () => {
   });
 
   it('reattach hands tabs to the main window and focuses it; the emptied window closes without a "closed" report', () => {
-    const { reg, created, main, last } = setup();
+    const { reg, created, main, last, allowed } = setup();
     reg.open({ tabs: [consoleTab('t_1')] });
     const win = created[0];
     assert.equal(reg.reattach(win.webContents.id, [consoleTab('t_1')]), true);
@@ -118,6 +120,7 @@ describe('DetachedWindows', () => {
     assert.deepEqual(last('dbstudio:detached-tabs'), []);
     reg.closeEmpty(win.webContents.id);
     assert.equal(win.destroyed, true);
+    assert.equal(allowed.includes(win), true, 'an emptied window closes without asking');
     assert.equal(reg.size, 0);
     assert.equal(main.sent.filter((m) => m[0] === 'dbstudio:tabs-reattached').length, 1);
   });
@@ -131,12 +134,13 @@ describe('DetachedWindows', () => {
   });
 
   it('closeAll (main window closed, app quitting) closes every window without reporting its tabs as closed', () => {
-    const { reg, created, main } = setup();
+    const { reg, created, main, allowed } = setup();
     reg.open({ tabs: [consoleTab('t_1')] });
     reg.open({ tabs: [consoleTab('t_2')] });
     const before = main.sent.length;
     reg.closeAll();
     assert.ok(created.every((c) => c.destroyed));
+    assert.deepEqual(allowed, created, 'the quit guard lets them close without asking');
     assert.equal(reg.size, 0);
     assert.equal(main.sent.slice(before).filter((m) => m[0] === 'dbstudio:tabs-reattached').length, 0);
     // Afterwards (macOS: a new main window) tabs can be detached again.

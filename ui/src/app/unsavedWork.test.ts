@@ -43,7 +43,7 @@ describe('unsaved work', () => {
       },
     });
     expect(unsavedWork()).toEqual({ pendingGrids: 1, openTransactions: 1 });
-    expect(describeUnsavedWork()).toBe('1 grid with unsaved changes and 1 open transaction');
+    expect(describeUnsavedWork()).toBe('1 unsaved edit in 1 grid and an open transaction');
   });
 
   it('Restart to update asks first when something would be lost, and restarts only after a yes', async () => {

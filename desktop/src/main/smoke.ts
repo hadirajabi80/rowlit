@@ -1,7 +1,7 @@
 // Self-test used by test/smoke.test.mjs (DBSTUDIO_SMOKE=1). Drives the real app end to end:
 // bridge shape, engine handshake + authenticated fetch from the dbstudio:// origin, CSP, IPC
 // validation, workspace round trip, then kills the engine and verifies the restart path.
-import { app, type BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import type { EngineSupervisor } from './engine-process';
 
 const PHASE1 = `(async () => {
@@ -59,6 +59,35 @@ const PHASE2 = `(async () => {
   return { restartedBaseUrl: info.baseUrl, healthAfterRestart: health };
 })()`;
 
+// ---- quit guard: the page reports unsaved work; the first confirmation is cancelled, the second accepted.
+const PHASE3 = `(() => {
+  const b = window.dbstudio;
+  window.__quitAsks = [];
+  b.onUnsavedWorkQuery(() => Promise.resolve({ grids: 1, edits: 2, transactions: [{ sessionId: 's_smoke', connection: 'Smoke DB' }] }));
+  b.onConfirmDiscard((req) => { window.__quitAsks.push(req); return window.__quitAsks.length > 1; });
+  return true;
+})()`;
+
+const PHASE3_CHECK = `(async () => {
+  const info = await window.dbstudio.getEngineInfo();
+  const health = await fetch(info.baseUrl + '/api/v1/health', { headers: { Authorization: 'Bearer ' + info.token } }).then((x) => x.json(), (e) => ({ error: String(e) }));
+  return { asks: window.__quitAsks, healthAfterCancel: health };
+})()`;
+
+function alive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function waitUntil(pred: () => Promise<boolean>, ms: number): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await pred()) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
 function report(result: unknown): void {
   process.stdout.write(`DBSTUDIO_SMOKE_RESULT ${JSON.stringify(result)}\n`);
 }
@@ -71,7 +100,19 @@ export function runSmoke(win: BrowserWindow, supervisor: EngineSupervisor): void
       const phase1 = await win.webContents.executeJavaScript(PHASE1, true);
       supervisor.simulateCrash();
       const phase2 = await win.webContents.executeJavaScript(PHASE2, true);
-      report({ ...phase1, ...phase2, enginePids: [firstPid, supervisor.pid] });
+      // A quit with unsaved work asks; cancelling it keeps the windows and the engine.
+      await win.webContents.executeJavaScript(PHASE3, true);
+      app.quit();
+      const asked = await waitUntil(async () => (await win.webContents.executeJavaScript('window.__quitAsks.length', true)) >= 1, 10_000);
+      await new Promise((r) => setTimeout(r, 300));
+      const phase3 = await win.webContents.executeJavaScript(PHASE3_CHECK, true);
+      const quitCancel = {
+        asked,
+        windows: BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+        engineAlive: alive(supervisor.pid),
+        ...phase3,
+      };
+      report({ ...phase1, ...phase2, quitCancel, enginePids: [firstPid, supervisor.pid] });
     } catch (e) {
       const msg = String((e as Error)?.stack ?? e);
       // A failed engine start is reported (after the error page renders) by main.ts's start-failure path.
@@ -80,6 +121,6 @@ export function runSmoke(win: BrowserWindow, supervisor: EngineSupervisor): void
     } finally {
       clearTimeout(timeout);
     }
-    app.quit(); // exercises the real before-quit cleanup
+    app.quit(); // exercises the real quit sequence: asks (accepted this time), closes the windows, then stops the engine
   });
 }

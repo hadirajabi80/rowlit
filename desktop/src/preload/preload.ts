@@ -1,7 +1,9 @@
 // Sandboxed preload: exposes window.dbstudio (the DbStudioBridge contract from ui/src/platform/bridge.ts).
 // Only `electron` may be required at runtime; esbuild inlines ../shared/channels.
 import { contextBridge, ipcRenderer, webFrame, webUtils, type IpcRendererEvent } from 'electron';
-import type { AppMemoryInfo, DbStudioBridge, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UpdateStatus } from '../../../ui/src/platform/bridge';
+import type {
+  AppMemoryInfo, DbStudioBridge, DiscardRequest, EngineInfo, FileFilter, MenuCommand, NotificationOptions, TitleBarTheme, UnsavedWorkReport, UpdateStatus,
+} from '../../../ui/src/platform/bridge';
 import { desktopOs, htmlPlatformClasses, htmlPlatformVars, parseChromeArg, type DesktopPlatformInfo } from '../main/platform';
 import { APP_VERSION_ARG, IPC, WINDOW_ROLE_ARG } from '../shared/channels';
 
@@ -77,7 +79,41 @@ const bridge: DbStudioBridge = {
   cancelUpdateDownload: () => ipcRenderer.invoke(IPC.updatesCancelDownload) as Promise<boolean>,
   // ---- resources (docs/resources.md)
   getAppMemory: () => ipcRenderer.invoke(IPC.getAppMemory) as Promise<AppMemoryInfo>,
+  // ---- quit guard (desktop/src/main/quit.ts): main asks, the page answers; main validates every answer
+  onUnsavedWorkQuery: (cb: () => UnsavedWorkReport | null | Promise<UnsavedWorkReport | null>) => answer(IPC.unsavedWorkQuery, cb),
+  onConfirmDiscard: (cb: (req: DiscardRequest) => boolean | Promise<boolean>) => answer(IPC.confirmDiscard, cb),
 };
+
+// ---- quit guard
+/** Requests from main ({ id, payload }) answered on IPC.rendererReply ({ id, value }); the latest handler answers. */
+const answerers = new Map<string, (payload: unknown) => unknown>();
+
+function answer<Q, A>(channel: string, cb: (payload: Q) => A | Promise<A>): () => void {
+  if (typeof cb !== 'function') throw new TypeError('callback must be a function');
+  const fn = cb as (payload: unknown) => unknown;
+  answerers.set(channel, fn);
+  return () => { if (answerers.get(channel) === fn) answerers.delete(channel); };
+}
+
+/**
+ * `fallback` is the answer without a handler, or when the handler fails: "nothing to lose" for the query, "go on"
+ * for the confirmation (a broken page never keeps the app from quitting).
+ */
+function listen(channel: string, fallback: unknown): void {
+  ipcRenderer.on(channel, (_e: IpcRendererEvent, msg: { id?: unknown; payload?: unknown }) => {
+    const id = msg?.id;
+    if (typeof id !== 'number') return;
+    const reply = (value: unknown) => ipcRenderer.send(IPC.rendererReply, { id, value });
+    const fn = answerers.get(channel);
+    // No handler yet (the page is still booting, or it is not the Rowlit UI): nothing can be lost there.
+    if (!fn) { reply(fallback); return; }
+    Promise.resolve()
+      .then(() => fn(msg.payload))
+      .then(reply, () => reply(fallback));
+  });
+}
+listen(IPC.unsavedWorkQuery, null);
+listen(IPC.confirmDiscard, true);
 
 contextBridge.exposeInMainWorld('dbstudio', bridge);
 

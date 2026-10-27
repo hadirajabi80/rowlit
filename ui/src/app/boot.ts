@@ -19,6 +19,7 @@ import { followSessionDatabase, preloadCatalog } from './actions';
 import { bootDetachedTabs, liveDetachedTabs, wireMainWindowTabs } from './detach';
 import { MULTIRUN_VIEW, targetTabId, type MultiRunState } from './multiRun';
 import { restoreZoom } from './zoom';
+import { wireQuitGuard } from './quitGuard';
 import { wireResources } from './resources';
 
 let wired = false;
@@ -222,6 +223,8 @@ function preloadTabCatalogs(): void {
 
 export async function boot(): Promise<void> {
   const platform = getPlatform();
+  // Quitting / closing the window asks first when grid edits or open transactions would be lost (desktop).
+  wireQuitGuard();
   if (!(await connectEngine())) return;
   const connErr = await loadBasics();
 
@@ -273,6 +276,7 @@ export async function boot(): Promise<void> {
 export async function bootDetached(): Promise<void> {
   // Not persisted: the main window's layout stays as it is.
   useUi.setState({ explorerVisible: false, historyVisible: false });
+  wireQuitGuard();
   if (!(await connectEngine())) return;
   await loadBasics();
   await bootDetachedTabs();
