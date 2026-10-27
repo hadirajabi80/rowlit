@@ -85,6 +85,24 @@ describe('add to link', () => {
     expect(r.definition.members[0].tables.map((t) => t.name)).toEqual(['orders', 'customers']);
   });
 
+  it('a member saved without a database and a table the explorer places in the default database are one scope', () => {
+    // the member says "the connection's default"; the explorer reports that default by name
+    const explorer = src({ database: 'shop', name: 'customers' });
+    const without = addTableToDefinition(def(), explorer, 'Shop');
+    expect(without.newMember).toBe(true); // unknown default: they cannot be told apart
+    const withDefault = addTableToDefinition(def(), explorer, 'Shop', 'shop');
+    expect(withDefault).toMatchObject({ alias: 'shop', newMember: false, already: false });
+    expect(withDefault.definition.members).toHaveLength(1);
+    expect(withDefault.definition.members[0].tables.map((t) => t.name)).toEqual(['orders', 'customers']);
+    expect(addTableToDefinition(def(), src({ database: 'SHOP', name: 'orders' }), 'Shop', 'shop')).toMatchObject({ already: true });
+    // another database of the same connection is a different scope
+    expect(addTableToDefinition(def(), src({ database: 'archive' }), 'Shop', 'shop').newMember).toBe(true);
+    // and the reverse: a member naming the default database, an explorer table without a database
+    const named = def();
+    named.members[0].database = 'shop';
+    expect(addTableToDefinition(named, src({ database: null }), 'Shop', 'shop').newMember).toBe(false);
+  });
+
   it('does nothing when the table is mounted (explicitly or through allTables)', () => {
     expect(addTableToDefinition(def(), src({ name: 'orders' }), 'Shop')).toMatchObject({ already: true, alias: 'shop' });
     const all = def();

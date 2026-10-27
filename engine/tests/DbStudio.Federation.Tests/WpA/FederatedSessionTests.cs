@@ -193,6 +193,55 @@ public sealed class FederatedSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Explain_is_analysed_as_the_inner_query_and_reads_a_sample_only()
+    {
+        // QA round O-1: EXPLAIN printed DuckDB's "Only SELECT statements can be serialized to json!" and read the whole tables.
+        var s = await _h.OpenAsync(_link);
+        var sink = await FederationHarness.RunAsync(s, "EXPLAIN SELECT n FROM shop.big WHERE n > 10");
+        Assert.NotEmpty(sink.Single());
+        Assert.DoesNotContain(sink.Messages, m => m.Text.Contains("serialized", StringComparison.OrdinalIgnoreCase) || m.Text.Contains("not analysed", StringComparison.Ordinal));
+        var plan = ((Provider.FederatedSession)s).Context.LastPlan!;
+        var src = plan.Sources.Single();
+        Assert.True(plan.Parsed);
+        Assert.Equal(["n"], src.Columns);                      // projection pushed, not the whole table
+        Assert.EndsWith("WHERE \"n\" > 10 LIMIT 1001", src.SourceQuery); // predicate pushed, the source reads the sample only
+        Assert.Equal(1000, src.MaxRows);                        // a sample, not the 5,000 rows
+        Assert.DoesNotContain(plan.Warnings, w => w.Code == PlanWarningCodes.RowCap);
+        Assert.Contains(sink.Messages, m => m.Text.StartsWith("EXPLAIN read only the first 1,000 rows", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Explain_analyze_runs_the_query_over_the_real_rows()
+    {
+        var s = await _h.OpenAsync(_link);
+        var sink = await FederationHarness.RunAsync(s, "EXPLAIN ANALYZE SELECT count(*) FROM shop.big WHERE n > 10");
+        Assert.NotEmpty(sink.Single());
+        var src = ((Provider.FederatedSession)s).Context.LastPlan!.Sources.Single();
+        Assert.False(src.Truncated);
+        Assert.Equal(4990, src.Rows);
+        Assert.DoesNotContain(sink.Messages, m => m.Text.StartsWith("EXPLAIN read only", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("EXPLAIN select 1", "select 1", false)]
+    [InlineData("  explain analyze select 1", "select 1", true)]
+    [InlineData("EXPLAIN (ANALYZE) select 1", "select 1", true)]
+    [InlineData("EXPLAIN (FORMAT JSON) select 1", "select 1", false)]
+    public void Explain_prefix_is_split_off(string sql, string inner, bool analyze)
+    {
+        Assert.True(Pushdown.ExplainSql.TrySplit(sql, out var got, out var an));
+        Assert.Equal(inner, got.Trim());
+        Assert.Equal(analyze, an);
+    }
+
+    [Fact]
+    public void Non_explain_statements_are_left_alone()
+    {
+        Assert.False(Pushdown.ExplainSql.TrySplit("select * from explain_log", out _, out _));
+        Assert.False(Pushdown.ExplainSql.TrySplit("EXPLAINED select 1", out _, out _));
+    }
+
+    [Fact]
     public async Task Sources_are_cached_per_session_until_refreshed()
     {
         var s = await _h.OpenAsync(_link);

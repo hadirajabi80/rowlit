@@ -132,7 +132,10 @@ export function SearchPanel({ runId, state, update, visible, variant, onOpenResu
   const requestKey = 'error' in request ? null : JSON.stringify(request);
   const stale = requestKey !== (run.request ? JSON.stringify(run.request) : null);
 
+  // Dialog: Enter while the search is still running and nothing has arrived yet opens the first match once it does.
+  const pendingOpen = useRef<{ keepOpen: boolean } | null>(null);
   const start = () => {
+    pendingOpen.current = null;
     setPickerOpen(false);
     const req = buildRequest(state.scope, state, [...connected]);
     if ('error' in req) {
@@ -177,6 +180,7 @@ export function SearchPanel({ runId, state, update, visible, variant, onOpenResu
     return n;
   });
 
+  const openRowRef = useRef<(r: ResultRow, keepOpen?: boolean) => void>(() => undefined);
   const openRow = (r: ResultRow, keepOpen = false) => {
     if (r.kind === 'conn' || r.kind === 'schema') {
       toggleRow(r.key);
@@ -187,6 +191,19 @@ export function SearchPanel({ runId, state, update, visible, variant, onOpenResu
     if (r.kind === 'hit') openHit(r.hit, { matchCase: run.request?.matchCase ?? state.matchCase });
     else openObjectOf(r.group);
   };
+
+  openRowRef.current = openRow;
+  const firstOpenable = dialog && !stale && activeRow && isNavigableRow(activeRow) ? activeRow : null;
+  useEffect(() => {
+    const p = pendingOpen.current;
+    if (!p) return;
+    if (firstOpenable) {
+      pendingOpen.current = null;
+      openRowRef.current(firstOpenable, p.keepOpen);
+    } else if (!running || stale) {
+      pendingOpen.current = null; // finished with nothing to open, or the options changed
+    }
+  });
 
   const scrollToIndex = (i: number) => {
     const el = listRef.current;
@@ -328,6 +345,7 @@ export function SearchPanel({ runId, state, update, visible, variant, onOpenResu
       e.preventDefault();
       // Dialog: Enter opens the selected match of up-to-date results; anything else (re)searches.
       if (dialog && !stale && activeRow && isNavigableRow(activeRow)) openRow(activeRow, e.ctrlKey || e.metaKey);
+      else if (dialog && !stale && running) pendingOpen.current = { keepOpen: e.ctrlKey || e.metaKey };
       else start();
     } else if (e.key === 'Escape') {
       escape(e);

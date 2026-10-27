@@ -44,6 +44,7 @@ export const CONTRAST_MATRIX: Pair[] = [
   ...['--cell-edited', '--cell-inserted', '--cell-deleted'].flatMap((cell) => ['--bg-panel', '--bg-grid-alt'].map((base) => pair('--fg', cell, TEXT, 'changed-cell text', base))),
   pair('--fg', '--mark-bg', TEXT, 'search/filter highlight', '--bg-panel'),
   pair('--fg', '--mark-bg', TEXT, 'matched text on a selected row (Find in database, palette)', '--bg-selected'),
+  ...['--bg-elevated', '--bg-app', '--bg-input', '--bg-sunken'].map((base) => pair('--fg', '--mark-bg', TEXT, 'search highlight on elevated surfaces (palette, dialogs, Find in database list)', base)),
   pair('--border', '--bg-panel', 1.5, 'decorative separators (5.1)'),
   pair('--border-strong', '--bg-panel', UI, 'control boundaries (5.1)'), pair('--border-strong', '--bg-input', UI, 'input boundaries'),
   ...['--bg-panel', '--bg-app', '--bg-elevated', '--bg-input', '--bg-selected'].map((bg) => pair('--focus-ring', bg, UI, 'focus ring')),

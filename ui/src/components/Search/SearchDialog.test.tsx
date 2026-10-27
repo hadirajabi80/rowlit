@@ -115,6 +115,20 @@ describe('Find in database dialog', () => {
     expect(useSearchDialog.getState().open).toBe(false);
   });
 
+  it('Enter while the results are still streaming in opens the first match once it arrives', async () => {
+    render(<SearchDialogHost />);
+    const { input } = await openDialog({ kind: 'connection', connectionId: 'c_prod' });
+    fireEvent.change(input, { target: { value: 'customer' } });
+    fireEvent.keyDown(input, { key: 'Enter' }); // searches now
+    expect(run()?.status).toBe('running');
+    expect(run().hits.length).toBe(0);
+    fireEvent.keyDown(input, { key: 'Enter' }); // nothing to open yet: remembered
+    await waitFor(() => expect(useSearchDialog.getState().open).toBe(false), SLOW);
+    expect(useTabs.getState().tabs.length).toBe(1); // the first match opened
+    expect(posts()).toBe(1); // the second Enter did not search again
+    expect(useSearchDialog.getState().open).toBe(false);
+  });
+
   it('table data waits for Enter; Esc cancels a running search before it closes the dialog', async () => {
     render(<SearchDialogHost />);
     const { input } = await openDialog({ kind: 'container', connectionId: 'c_shop', database: 'main', schema: 'main' });

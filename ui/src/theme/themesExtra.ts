@@ -472,10 +472,14 @@ const DARCULA_APP: ThemeVars = {
   '--fg-muted': '#b2b5b9',
   '--fg-muted-on-selected': '#c7cacd',
   '--accent-soft-strong': '#35506f',
-  // warm tints behind the grid's changed cells and the search highlight, light enough to keep the text at 4.5:1
+  // warm tints behind the grid's changed cells, light enough to keep the text at 4.5:1
   '--cell-edited': 'rgb(250 204 21 / 14%)',
   '--cell-inserted': 'rgb(98 181 67 / 16%)',
-  '--mark-bg': 'rgb(255 198 109 / 15%)',
+  // The search highlight DARKENS to a brown-amber instead of lightening: the theme's text is only ~5:1 on the
+  // elevated surface (#3c3f41), so any light tint dropped it below 4.5 (a 15 % amber gave 3.7 on palettes / dialogs).
+  // Over panel, elevated, input, sunken and the selected row the text stays at 6.2:1 or more, and the tint is as far
+  // from each surface (CIE dE 16, more than the old one's 13) as before.
+  '--mark-bg': 'rgb(55 35 0 / 60%)',
   '--glass-hover': 'rgb(255 255 255 / 4%)',
   '--glass-active': 'rgb(255 255 255 / 8%)',
   '--brand': '#4a88c7',

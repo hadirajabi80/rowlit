@@ -347,8 +347,20 @@ public sealed class LinkRuntime : ILinkRuntime
         var catalog = await CatalogAsync(context.LinkId, false, ct).ConfigureAwait(false);
         var def = Definition(context.LinkId);
         var limits = maxRowsOverride is null ? context.Limits : context.Limits with { MaxRowsPerSource = Math.Max(1, maxRowsOverride.Value) };
+        // EXPLAIN [ANALYZE] select ...: analysed as the inner query (push-down applies); a plain EXPLAIN reads a sample only.
+        var sampled = false;
+        if (ExplainSql.TrySplit(sql, out var inner, out var analyze))
+        {
+            sql = inner;
+            if (!analyze && maxRowsOverride is null && limits.MaxRowsPerSource > ExplainSql.SampleRows)
+            {
+                limits = limits with { MaxRowsPerSource = ExplainSql.SampleRows };
+                sampled = true;
+            }
+        }
         var ast = await context.Engine.SerializeSqlAsync(sql, ct).ConfigureAwait(false);
-        return BuildFetches(def, catalog, sql, ast, limits, allColumns, context.Id, context.EngineWarning);
+        var planned = BuildFetches(def, catalog, sql, ast, limits, allColumns, context.Id, context.EngineWarning);
+        return sampled ? planned with { Sampled = true } : planned;
     }
 
     internal PlannedFetches BuildFetches(LinkDefinition def, LinkCatalog catalog, string sql, SqlAst ast, FederationLimits limits, bool allColumns,
@@ -376,7 +388,7 @@ public sealed class LinkRuntime : ILinkRuntime
         if (analysis.SyntaxError is not null) return new PlannedFetches(false, [], warnings, analysis.SyntaxError);
         if (!analysis.Parsed && analysis.Tables.Count > 0)
             warnings.Add(new PlanWarning(PlanWarningCodes.Fallback,
-                $"The statement was not analysed ({analysis.FallbackReason}); whole tables are read without filters."));
+                $"The statement was not analysed ({ExplainSql.FriendlyReason(analysis.FallbackReason)}); whole tables are read without filters."));
         if (analysis.LimitWithoutOrder)
             warnings.Add(new PlanWarning(PlanWarningCodes.LimitWithoutOrder, "LIMIT without ORDER BY: which rows come back is arbitrary."));
         foreach (var j in analysis.JoinPairs)
@@ -452,6 +464,7 @@ public sealed class LinkRuntime : ILinkRuntime
         var catalog = await CatalogAsync(linkId, false, ct).ConfigureAwait(false);
         var probe = _factory.Probe();
         var engineName = def.Options.Engine is { Length: > 0 } forced ? forced.ToLowerInvariant() : probe.Engine;
+        if (ExplainSql.TrySplit(sql, out var explained, out _)) sql = explained;
         var ast = engineName == "duckdb" && probe.Engine == "duckdb"
             ? await SerializeSqlAsync(sql, ct).ConfigureAwait(false)
             : new SqlAst(false, false, null, "no parser");

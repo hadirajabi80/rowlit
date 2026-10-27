@@ -9,6 +9,7 @@ import type { ConnectionInput } from '../../../api/types';
 import { useCatalog } from '../../../store/catalog';
 import { useConnections } from '../../../store/connections';
 import { useTabs } from '../../../store/tabs';
+import { useUi } from '../../../store/ui';
 import { chooseOption, selectValue } from '../../../test/select';
 import { installMockEngine } from '../../../test/mockServer';
 import { LinkEditorDialog } from '../editor/LinkEditorDialog';
@@ -250,5 +251,23 @@ describe('unmountTable', () => {
     expect(names).toContain('items');
     expect(names).toContain('customers');
     expect(names).not.toContain('orders');
+  });
+
+  it('asking to remove the last table of a source is a danger confirmation; declining keeps the source', async () => {
+    const saved = await useConnections.getState().save({
+      name: 'L2', providerId: 'linked', color: null, folder: null, readOnly: true, savePassword: false, password: null,
+      props: linkProps({
+        version: 1, relations: [], options: {},
+        members: [
+          { alias: 'crm', connectionId: 'c_pg', database: 'shop', schema: 'public', allTables: false, tables: [{ name: 'customers' }] },
+          { alias: 'shop', connectionId: 'c_shop', schema: 'main', allTables: false, tables: [{ name: 'products' }] },
+        ],
+      }),
+    });
+    const done = unmountTable(saved.id, 'crm', 'customers');
+    await waitFor(() => expect(useUi.getState().confirm).toMatchObject({ confirmLabel: 'Remove source', danger: true }));
+    act(() => useUi.getState().resolveConfirm(false));
+    await done;
+    expect((mock.ctx.engine.conn(saved.id)!.props.members as LinkDefinition['members']).map((m) => m.alias)).toEqual(['crm', 'shop']);
   });
 });

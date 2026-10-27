@@ -2,6 +2,7 @@
 // server filter, editing, copy/export, record view). Grid commands act on the grid named by `args.gridKey` (menus and
 // toolbars pass it) or else on the grid that last had focus (Grid/controller.ts), and are scoped to
 // `data-command-scope="grid"`, so their keys only apply while a grid has focus.
+import { pendingGrids } from '../../app/pendingGrids';
 import { objectTargetOf } from '../../commands/core';
 import { aliasCommand, isEnabled, registerCommands, runCommand, type Command } from '../../commands/registry';
 import type { ObjectTarget } from '../../commands/types';
@@ -11,7 +12,7 @@ import { dialectOf } from '../../store/connections';
 import { useEdits } from '../../store/edits';
 import { useSessions } from '../../store/sessions';
 import { useTabs, type ViewTab } from '../../store/tabs';
-import { useUi } from '../../store/ui';
+import { toast, useUi } from '../../store/ui';
 import type { FileFormat } from '../Grid/clientExport';
 import { activeGridController, gridController, type GridController } from '../Grid/controller';
 import { hasOpenEditor } from '../Grid/overlayEditor';
@@ -211,12 +212,27 @@ async function beforeClose(tab: ViewTab): Promise<boolean> {
   const b = useEdits.getState().get(dataGridKey(tab.id));
   const n = Object.keys(b.pending.updates).length + b.pending.inserts.length + Object.keys(b.pending.deletes).length;
   if (n === 0) return true;
-  return useUi.getState().askConfirm({
-    title: 'Discard pending changes?',
-    message: `“${tab.title}” has ${n} change${n === 1 ? '' : 's'} that ${n === 1 ? 'is' : 'are'} not submitted.`,
-    confirmLabel: 'Close and discard',
-    danger: true,
+  const message = `“${tab.title}” has ${n} change${n === 1 ? '' : 's'} that ${n === 1 ? 'is' : 'are'} not submitted.`;
+  const save = pendingGrids().find((g) => g.tabId === tab.id)?.save;
+  if (!save) {
+    // The tab is not mounted (so nothing can save its edits): discard or cancel.
+    return useUi.getState().askConfirm({ title: 'Discard pending changes?', message, confirmLabel: 'Close and discard', danger: true });
+  }
+  const choice = await useUi.getState().askConfirmChoice({
+    title: 'Unsaved changes',
+    message: `${message} Save them before closing, or discard them.`,
+    confirmLabel: 'Save and close', altLabel: 'Discard', cancelLabel: 'Cancel',
   });
+  if (choice === 'cancel') return false;
+  if (choice === 'alt') return true;
+  let saved = false;
+  try {
+    saved = await save();
+  } catch (e) {
+    console.warn('[close] saving pending edits failed', e);
+  }
+  if (!saved) toast('error', `Not closed: “${tab.title}” could not be saved`, 'Fix the changes and save again, or discard them.');
+  return saved;
 }
 
 function onClosed(tab: ViewTab): void {
