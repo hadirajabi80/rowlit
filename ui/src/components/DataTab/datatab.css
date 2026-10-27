@@ -62,3 +62,10 @@
     display: none;
   }
 }
+
+/* "Still loading…" (a load running for SLOW_LOAD_MS): a notice, not an error */
+.rs-error.dt-slow {
+  align-items: center;
+  color: var(--text);
+  background: var(--bg-hover);
+}

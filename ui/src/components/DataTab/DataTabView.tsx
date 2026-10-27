@@ -23,7 +23,7 @@ import type { ExecParam } from '../../filter/wire';
 import { ChunkedList } from '../../lib/chunked';
 import { formatCount, formatDuration } from '../../lib/format';
 import type { CellLocator } from '../../lib/serialize';
-import { dbKey, isCatalogClosed, useCatalog, useSnapshot } from '../../store/catalog';
+import { dbKey, isCatalogClosed, SLOW_LOAD_MS, useCatalog, useSnapshot } from '../../store/catalog';
 import { useConnection, useDialect } from '../../store/connections';
 import { hasPending, pendingCount, useEditBuffer, useEdits } from '../../store/edits';
 import { useSessions } from '../../store/sessions';
@@ -170,6 +170,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     chain.current = next.catch(() => undefined);
     return next;
   }, []);
+  /** Resolves the running load's wait when the user cancels it. */
+  const cancelWaiter = useRef<(() => void) | null>(null);
+  const [slow, setSlow] = useState(false);
   const lastNonce = useRef(state.nonce);
   const lastRetry = useRef(state.retry);
   /** A page was read at least once: later failures (a bad filter, a lost connection) are not "could not open". */
@@ -373,9 +376,44 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     }
     return exclusive(async () => {
       if (req === 'next') moreQueued.current = false;
-      await loadNowRef.current(req);
+      // Cancel ("Still loading…") ends the wait even when the server never answers, so the queue behind it is free.
+      const cancelled = new Promise<void>((resolve) => { cancelWaiter.current = resolve; });
+      try {
+        await Promise.race([loadNowRef.current(req), cancelled]);
+      } finally {
+        cancelWaiter.current = null;
+      }
     });
   }, [exclusive, tab.id]);
+
+  // A load that takes SLOW_LOAD_MS (a server that does not answer) shows "Still loading…" with Cancel / Retry.
+  useEffect(() => {
+    if (!data.loading) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), SLOW_LOAD_MS);
+    return () => clearTimeout(t);
+  }, [data.loading]);
+
+  /**
+   * Stops waiting for the running load: the session still being opened is aborted, the running statement cancelled, the
+   * result (if one ever comes) dropped, and the queue behind the load is released.
+   */
+  const cancelLoading = useCallback(() => {
+    loadSeq.current++;
+    moreQueued.current = false;
+    useSessions.getState().cancelPending(tab.id);
+    const s = useSessions.getState().forTab(tab.id);
+    if (s) void api.cancel(s.sessionId).catch(() => undefined);
+    cancelWaiter.current?.();
+    setCount((c) => ({ ...c, loading: false }));
+    setData((d) => ({ ...d, loading: false, error: 'Loading was cancelled.', errorCode: null }));
+  }, [tab.id]);
+  const retryLoading = useCallback(() => {
+    cancelLoading();
+    void load(0);
+  }, [cancelLoading, load]);
 
   /** Columns of a unique index or constraint of a table without a primary key (looked up once, from the engine). */
   const uniqueKeyFor = async (cols: ColumnInfo[]): Promise<string[] | null> => {
@@ -862,6 +900,14 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
           <button className="btn btn-xs" onClick={() => void load(0)}>Retry</button>
         </div>
       )}
+      {data.loading && slow && (
+        <div className="rs-error dt-slow" role="status">
+          <LoaderCircle size={14} className="spin" />
+          <div className="flex-1">Still loading… the server is slow to answer or not reachable.</div>
+          <button className="btn btn-xs" onClick={cancelLoading}>Cancel</button>
+          <button className="btn btn-xs" onClick={retryLoading}>Retry</button>
+        </div>
+      )}
       <div className="resultset-body">
         <div className="resultset-grid">
           {data.columns ? (
@@ -935,7 +981,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
             </>
           ) : (
             <div className="results-empty">
-              {data.loading ? <><LoaderCircle size={18} className="spin" /> Loading {title}…</> : 'No data'}
+              {data.loading ? <><LoaderCircle size={18} className="spin" /> {slow ? 'Still loading' : 'Loading'} {title}…</> : 'No data'}
             </div>
           )}
         </div>

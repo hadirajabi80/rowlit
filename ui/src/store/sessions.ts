@@ -23,6 +23,8 @@ interface SessionsState {
   /** Ensure the tab has a session on this connection/database; replaces a session on another connection. */
   ensure(tabId: string, connectionId: string, database: string | null, txMode: TxMode, schema?: string | null): Promise<SessionInfo>;
   forTab(tabId: string): SessionInfo | undefined;
+  /** Aborts the session this tab is still opening (the server does not answer): `ensure` rejects with ABORTED and a new one may start. */
+  cancelPending(tabId: string): void;
   setTxMode(tabId: string, mode: TxMode): Promise<SessionInfo | undefined>;
   /** Reopens the connection of a tab whose session was released by Close connection / Close database. */
   reconnect(tabId: string): Promise<SessionInfo | undefined>;
@@ -73,6 +75,7 @@ function txEnd(sessionId: string, kind: TxEnd['kind']): { lastTxEnd: TxEnd } {
 }
 
 const creating = new Map<string, Promise<SessionInfo>>();
+const creatingAbort = new Map<string, AbortController>();
 
 // ---------- ownership (logic-r1-03) ----------
 // The engine marks a session `orphan` when the window that owns it has no live WebSocket. A page reload keeps this
@@ -149,6 +152,12 @@ export const useSessions = create<SessionsState>((set, get) => ({
     return sid ? get().sessions[sid] : undefined;
   },
 
+  cancelPending(tabId) {
+    creatingAbort.get(tabId)?.abort();
+    creatingAbort.delete(tabId);
+    creating.delete(tabId); // the next ensure starts a new session instead of waiting for the aborted one
+  },
+
   async ensure(tabId, connectionId, database, txMode, schema) {
     // Every caller is a user action that needs the connection (a run, a page load, a save): a connection or database
     // the user closed (Close connection / Close database) opens again, and its catalog may load.
@@ -168,9 +177,11 @@ export const useSessions = create<SessionsState>((set, get) => ({
     }
     const pending = creating.get(tabId);
     if (pending) return pending;
-    const p = (async () => {
+    const abort = new AbortController();
+    creatingAbort.set(tabId, abort);
+    const p: Promise<SessionInfo> = (async () => {
       if (existing) await get().close(tabId, true);
-      let info = await api.createSession({ connectionId, database, txMode, captureServerOutput: true });
+      let info = await api.createSession({ connectionId, database, txMode, captureServerOutput: true }, abort.signal);
       get().upsert(info, tabId);
       // A reopened session (restored workspace, switched connection) starts in the server's default schema: put it back
       // in the one the tab remembers. Only a new session is touched; a live one already follows the editor's own SET.
@@ -183,7 +194,13 @@ export const useSessions = create<SessionsState>((set, get) => ({
         }
       }
       return info;
-    })().finally(() => creating.delete(tabId));
+    })().finally(() => {
+      // a newer attempt (after cancelPending) owns the entries now
+      if (creating.get(tabId) === p) {
+        creating.delete(tabId);
+        creatingAbort.delete(tabId);
+      }
+    });
     creating.set(tabId, p);
     return p;
   },
