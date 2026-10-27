@@ -264,12 +264,19 @@ function canSplitTsql(cur: TsqlState, t: Token, prev: Token, next: Token | undef
 
 // ---------------------------------------------------------------- Oracle
 
-type OraMode = 'sql' | 'block' | 'sqlplus' | 'exec';
+type OraMode = 'sql' | 'block' | 'sqlplus' | 'exec' | 'withfn';
 
 function oracleMode(toks: Token[], sig: number[], k: number): { mode: OraMode; pkg: boolean; typeSpec: boolean } {
   const t = toks[sig[k]];
   const u = t.upper;
   if (u === 'DECLARE' || u === 'BEGIN') return { mode: 'block', pkg: false, typeSpec: false };
+  // <<label>> BEGIN ... END; (a labelled anonymous block)
+  if (t.kind === 'op' && t.text === '<<') return { mode: 'block', pkg: false, typeSpec: false };
+  // 12c inline PL/SQL: WITH FUNCTION f ... IS BEGIN ... END; SELECT ... (the function bodies hold `;`)
+  if (u === 'WITH') {
+    const nx = sig[k + 1] !== undefined ? toks[sig[k + 1]].upper : '';
+    if (nx === 'FUNCTION' || nx === 'PROCEDURE') return { mode: 'withfn', pkg: false, typeSpec: false };
+  }
   if (u === 'EXEC' || u === 'EXECUTE') return { mode: 'exec', pkg: false, typeSpec: false };
   if (t.kind === 'op' && t.text === '@') return { mode: 'sqlplus', pkg: false, typeSpec: false };
   if ((t.kind === 'ident' || t.kind === 'keyword') && SQLPLUS.has(u)) return { mode: 'sqlplus', pkg: false, typeSpec: false };
@@ -346,6 +353,7 @@ function splitOracle(b: Builder, sig: number[], opts: SplitOptions): void {
       continue;
     }
     // PL/SQL block
+    const withFn = mode === 'withfn';
     let depth = 0;
     let pkgOpened = !pkg;
     let last = k;
@@ -353,6 +361,19 @@ function splitOracle(b: Builder, sig: number[], opts: SplitOptions): void {
     let closedByEnd = false;
     let missingSlash = false;
     let terminated = false;
+    // Local subprograms (DECLARE PROCEDURE p IS ... BEGIN ... END;) close with an END; at depth 0 that is NOT the end of
+    // the block: `bodiesPending` counts subprogram headers whose BEGIN has not been seen, `mainBegin` is set by the
+    // block's own BEGIN. The unit's own header (CREATE PROCEDURE/FUNCTION name) is not a local subprogram.
+    let headerOpen = false;
+    let bodiesPending = 0;
+    let mainBegin = false;
+    let unitHeaderSkipped = true;
+    if (toks[ti].upper === 'CREATE' && !pkg) {
+      let m = k + 1;
+      while (m < sig.length && ORA_CREATE_MODIFIERS.has(toks[sig[m]].upper)) m++;
+      const o = m < sig.length ? toks[sig[m]].upper : '';
+      unitHeaderSkipped = !(o === 'PROCEDURE' || o === 'FUNCTION');
+    }
     for (; j < sig.length; j++) {
       const x = toks[sig[j]];
       if (x.kind === 'batchSep') { terminated = true; break; }
@@ -360,16 +381,37 @@ function splitOracle(b: Builder, sig: number[], opts: SplitOptions): void {
       if (isWordTok(x)) {
         const u = x.upper;
         if (!pkgOpened && (u === 'AS' || u === 'IS') && depth === 0) { depth++; pkgOpened = true; }
-        else if (u === 'BEGIN' || u === 'CASE') depth++;
+        else if (u === 'BEGIN') {
+          if (bodiesPending > 0) bodiesPending--;
+          else if (depth === 0) mainBegin = true;
+          headerOpen = false;
+          depth++;
+        }
+        else if (u === 'CASE' && prevU !== 'END') depth++; // `END CASE;` closes the CASE statement, it does not open one
         else if ((u === 'IF' || u === 'LOOP') && prevU !== 'END') depth++;
         else if (u === 'COMPOUND' && j + 1 < sig.length && toks[sig[j + 1]].upper === 'TRIGGER') depth++;
         else if (u === 'END') {
           depth = Math.max(0, depth - 1);
           if (depth === 0) closedByEnd = true;
         }
+        else if (u === 'PROCEDURE' || u === 'FUNCTION') {
+          if (!unitHeaderSkipped) unitHeaderSkipped = true;
+          else headerOpen = true;
+        }
+        else if ((u === 'IS' || u === 'AS') && headerOpen) { headerOpen = false; bodiesPending++; }
       }
       last = j;
-      if (x.kind === 'punct' && x.text === ';' && depth === 0 && closedByEnd) {
+      if (x.kind === 'punct' && x.text === ';') {
+        if (withFn && depth === 0 && bodiesPending === 0 && !closedByEnd && j > k) {
+          // WITH FUNCTION ... SELECT ...;  the statement ends at the first `;` after the last function body
+          last = j - 1;
+          terminated = false;
+          j++;
+          break;
+        }
+        headerOpen = false;
+      }
+      if (!withFn && x.kind === 'punct' && x.text === ';' && depth === 0 && closedByEnd && bodiesPending === 0 && (mainBegin || pkg)) {
         const nextTok = toks[sig[j] + 1];
         const nextSigTok = j + 1 < sig.length ? toks[sig[j + 1]] : undefined;
         if (nextSigTok && nextSigTok.kind === 'batchSep') continue;
@@ -380,6 +422,13 @@ function splitOracle(b: Builder, sig: number[], opts: SplitOptions): void {
         }
       }
       if (x.kind === 'punct' && x.text === ';' && depth === 0) closedByEnd = false;
+    }
+    if (withFn) {
+      // the statement is plain SQL once the functions are declared: no `/` is expected, the `;` ended it
+      const st = b.add(first, sig[last]);
+      if (st) st.kind = 'select';
+      k = j;
+      continue;
     }
     const st = b.add(first, sig[last], { isPlsqlBlock: true });
     if (st) {

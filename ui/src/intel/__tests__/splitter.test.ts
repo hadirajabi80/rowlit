@@ -158,6 +158,40 @@ describe('splitter: Oracle', () => {
   it('@script is a SQL*Plus command', () => expect(split('plsql', '@setup.sql\nSELECT 1 FROM dual;').sts[0].skipOnRun).toBe(true));
   it('blank line splits SQL statements (SQL Developer style)', () => expect(t('SELECT 1\nFROM dual\n\nSELECT 2 FROM dual')).toEqual(['SELECT 1\nFROM dual', 'SELECT 2 FROM dual']));
   it('blank lines inside a block do not split', () => expect(t('BEGIN\n NULL;\n\n NULL;\nEND;\n/')).toHaveLength(1));
+  // Oracle QA round: END CASE; must not leave the block open (it swallowed every following statement).
+  it('END CASE; closes the CASE statement and does not open a new one', () => {
+    const r = split('plsql', 'BEGIN\n CASE x WHEN 1 THEN NULL; END CASE;\nEND;\n\nSELECT 1 FROM dual;\nSELECT 2 FROM dual;');
+    expect(r.texts).toEqual(['BEGIN\n CASE x WHEN 1 THEN NULL; END CASE;\nEND;', 'SELECT 1 FROM dual', 'SELECT 2 FROM dual']);
+  });
+  it('a local subprogram END; followed by a blank line does not end the DECLARE block', () => {
+    const src = 'DECLARE\n PROCEDURE p IS\n BEGIN\n  NULL;\n END;\n\nBEGIN\n p;\nEND;';
+    const r = split('plsql', src + '\n/\nSELECT 1 FROM dual;');
+    expect(r.texts).toEqual([src, 'SELECT 1 FROM dual']);
+    expect(r.sts[0].missingSlash).toBeFalsy();
+    // without the `/` the block still ends at the final END; + blank line
+    expect(split('plsql', src + '\n\nSELECT 1 FROM dual;').texts).toEqual([src, 'SELECT 1 FROM dual']);
+  });
+  it('nested local subprograms and an inner block do not end the block early', () => {
+    const src = 'DECLARE\n FUNCTION f RETURN NUMBER IS\n  PROCEDURE q IS BEGIN NULL; END;\n\n BEGIN\n  BEGIN NULL; END;\n  RETURN 1;\n END;\n\nBEGIN\n NULL;\nEND;';
+    expect(split('plsql', src + '\n\nSELECT 1 FROM dual;').texts).toEqual([src, 'SELECT 1 FROM dual']);
+  });
+  it('CREATE PROCEDURE with a local subprogram', () => {
+    const src = 'CREATE OR REPLACE PROCEDURE p IS\n PROCEDURE q IS BEGIN NULL; END;\n\nBEGIN\n q;\nEND p;';
+    expect(split('plsql', src + '\n\nSELECT 1 FROM dual;').texts).toEqual([src, 'SELECT 1 FROM dual']);
+  });
+  it('a labelled block <<lbl>> BEGIN is a PL/SQL block', () => {
+    const r = split('plsql', '<<outer>>\nBEGIN NULL; END;\n/\nSELECT 1 FROM dual;');
+    expect(r.texts).toEqual(['<<outer>>\nBEGIN NULL; END;', 'SELECT 1 FROM dual']);
+    expect(r.sts[0].isPlsqlBlock).toBe(true);
+  });
+  it('WITH FUNCTION ... SELECT is one statement (function bodies hold `;`)', () => {
+    const fn = 'WITH FUNCTION f(x NUMBER) RETURN NUMBER IS\n v NUMBER;\nBEGIN\n v := x * 2;\n RETURN v;\nEND;\nSELECT f(21) FROM dual';
+    expect(t(fn + ';\nSELECT 2 FROM dual;')).toEqual([fn, 'SELECT 2 FROM dual']);
+    expect(t(fn + '\n/\nSELECT 2 FROM dual;')).toEqual([fn, 'SELECT 2 FROM dual']);
+    expect(t('WITH FUNCTION a RETURN NUMBER IS BEGIN RETURN 1; END; FUNCTION b RETURN NUMBER IS BEGIN RETURN a + 1; END; SELECT b FROM dual;')).toHaveLength(1);
+    expect(split('plsql', fn).sts[0].kind).toBe('select');
+  });
+  it('a plain WITH (CTE) statement is still ordinary SQL', () => expect(t('WITH c AS (SELECT 1 x FROM dual) SELECT * FROM c; SELECT 2 FROM dual;')).toEqual(['WITH c AS (SELECT 1 x FROM dual) SELECT * FROM c', 'SELECT 2 FROM dual']));
   it('each statement is its own batch', () => {
     const r = split('plsql', 'SELECT 1 FROM dual;\nSELECT 2 FROM dual;');
     expect(r.i.batchesFor(r.uri)).toEqual([{ sql: 'SELECT 1 FROM dual', line: 1, col: 1 }, { sql: 'SELECT 2 FROM dual', line: 2, col: 1 }]);
