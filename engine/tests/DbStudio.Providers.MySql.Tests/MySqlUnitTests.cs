@@ -242,6 +242,17 @@ public sealed class MySqlProviderUnitTests
         Assert.Equal("SQLSTATE 42S02", e.Detail);
     }
 
+    [Fact]
+    public void Errors_ConnectFailureNamesTheSocketCause()
+    {
+        var ctor = typeof(MySqlException).GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
+            .First(c => c.GetParameters().Select(p => p.ParameterType).SequenceEqual([typeof(string), typeof(Exception)]));
+        var ex = (MySqlException)ctor.Invoke(["Unable to connect to any of the specified MySQL hosts.", new System.Net.Sockets.SocketException(10061)]);
+        var message = MySqlErrors.ToProviderError(ex).Message;
+        Assert.StartsWith("Unable to connect to any of the specified MySQL hosts: ", message, StringComparison.Ordinal);
+        Assert.Equal("Access denied", MySqlErrors.WithCause(MakeException(1045, "28000", "Access denied")));
+    }
+
     private static MySqlException MakeException(int number, string state, string message)
     {
         var ctor = typeof(MySqlException).GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
@@ -260,6 +271,15 @@ public sealed class MySqlProviderUnitTests
         Assert.Equal(ColumnKinds.Date, MySqlTypes.KindFor("DATE", typeof(DateTime)));
         Assert.Equal(ColumnKinds.Decimal, MySqlTypes.KindFor("DECIMAL", typeof(decimal)));
         Assert.Equal(ColumnKinds.String, MySqlTypes.KindFor("ENUM", typeof(string)));
+        Assert.Equal("838:59:59", MySqlTypes.FormatTime(new TimeSpan(838, 59, 59)));
+        Assert.Equal("-838:59:59", MySqlTypes.FormatTime(-new TimeSpan(838, 59, 59)));
+        Assert.Equal("-01:02:03.5", MySqlTypes.FormatTime(-(new TimeSpan(1, 2, 3) + TimeSpan.FromMilliseconds(500))));
+        Assert.Equal("12:34:56.789", MySqlTypes.FormatTime(new TimeSpan(0, 12, 34, 56, 789)));
+        Assert.Equal("00:00:00", MySqlTypes.FormatTime(TimeSpan.Zero));
+        Assert.Equal("00:00:00.000001", MySqlTypes.FormatTime(TimeSpan.FromTicks(10)));
+        Assert.True(MySqlSession.ReadsDiagnostics(null, "SHOW WARNINGS"));
+        Assert.True(MySqlSession.ReadsDiagnostics(null, "  get diagnostics @n = NUMBER"));
+        Assert.False(MySqlSession.ReadsDiagnostics(null, "SELECT 1"));
         Assert.Equal("1010", MySqlTypes.BitString(10, 4));
         Assert.Equal("00000001", MySqlTypes.BitString(1, 8));
         Assert.Equal("18446744073709551615", MySqlTypes.Convert(ulong.MaxValue, new ColumnInfo("u", 0, "BIGINT UNSIGNED", ColumnKinds.Int, true)));

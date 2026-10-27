@@ -530,7 +530,8 @@ function ColumnProps({ col, dialect, features, readOnly, onChange }: { col: Tabl
   return (
     <div className="dz-props" aria-label={`Properties of ${col.name || 'column'}`}>
       <span className="dz-props-title">{col.name || 'Column'}</span>
-      {col.identity && (
+      {/* AUTO_INCREMENT has no per-column seed or increment (MySQL / MariaDB): the checkbox is all there is. */}
+      {col.identity && dialect !== 'mysql' && (
         <>
           <label className="dz-field">
             Seed

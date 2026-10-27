@@ -9,6 +9,7 @@ import { connectAndOpen } from '../../app/actions';
 import { isMac } from '../../commands/keys';
 import { runCommand } from '../../commands/registry';
 import { CONNECTION_PALETTE, connColorCss } from '../../theme/connColors';
+import { fileFilterExtensions } from '../../lib/fileFilter';
 import { Dialog } from '../common/Dialog';
 import { Select } from '../common/Select';
 import { PROVIDER_LABEL } from '../common/icons';
@@ -551,10 +552,10 @@ function FieldRow({ field: f, value, error, password, hasStoredPassword, onChang
 
 function FileInput({ id, aria, className, field, value, onChange }: { id: string; aria: Record<string, unknown>; className: string; field: FormField; value: string; onChange: (v: string) => void }) {
   const platform = getPlatform();
-  const exts = (field.fileFilter ?? '').split(';').map((s) => s.trim().replace(/^\*\./, '')).filter(Boolean);
+  const exts = fileFilterExtensions(field.fileFilter);
   return (
     <div className="file-input">
-      <input id={id} {...aria} className={className} value={value} placeholder={field.placeholder ?? 'C:\\data\\database.db'} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
+      <input id={id} {...aria} className={className} value={value} placeholder={field.placeholder ?? (exts[0] ? `C:\\path\\to\\file.${exts[0]}` : 'C:\\path\\to\\file')} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
       {platform.hasFileSystem && (
         <button
           className="btn"

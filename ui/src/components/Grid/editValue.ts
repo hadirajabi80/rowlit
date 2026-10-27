@@ -2,6 +2,7 @@
 import type { CellValue, ColumnInfo, Dialect } from '../../api/types';
 import { rawText } from '../../lib/format';
 import { normalizeDecimal, parseDateOperand, parseTimeOperand } from '../../filter/values';
+import { isMysqlBit } from '../../data/sqlgen';
 
 export type ParsedEdit = { ok: true; value: CellValue } | { ok: false; error: string };
 
@@ -11,6 +12,13 @@ export function parseEdit(text: string, col: ColumnInfo, dialect: Dialect): Pars
   const t = text;
   const trimmed = t.trim();
   const kind = col.kind;
+  if (kind === 'string' && isMysqlBit(col, dialect)) {
+    // BIT(n) is edited as its bits ("1010"); empty = NULL.
+    if (trimmed === '') return col.nullable ? { ok: true, value: null } : { ok: false, error: `${col.name} cannot be NULL` };
+    if (!/^[01]+$/.test(trimmed)) return { ok: false, error: 'Enter bits (0 and 1), e.g. 1010' };
+    if (col.size && col.size > 0 && trimmed.length > col.size) return { ok: false, error: `At most ${col.size} bits` };
+    return { ok: true, value: trimmed };
+  }
   if (kind === 'string' || kind === 'json' || kind === 'xml' || kind === 'other') return { ok: true, value: t };
   if (trimmed === '') return col.nullable ? { ok: true, value: null } : { ok: false, error: `${col.name} cannot be NULL` };
   switch (kind) {
@@ -45,6 +53,11 @@ export function parseEdit(text: string, col: ColumnInfo, dialect: Dialect): Pars
       return { ok: true, value: kind === 'date' && d.length > 10 && d.endsWith('T00:00:00') ? d.slice(0, 10) : d };
     }
     case 'time': {
+      // MySQL / MariaDB TIME is a duration: -838:59:59 to 838:59:59 (the server checks the range).
+      if (dialect === 'mysql') {
+        const m = /^(-)?(\d{1,3}):([0-5]\d)(?::([0-5]\d)(\.\d{1,6})?)?$/.exec(trimmed);
+        return m ? { ok: true, value: `${m[1] ?? ''}${m[2].padStart(2, '0')}:${m[3]}:${m[4] ?? '00'}${m[5] ?? ''}` } : { ok: false, error: 'Use [-]HH:MM[:SS[.ffffff]]' };
+      }
       const v = parseTimeOperand(trimmed);
       return v ? { ok: true, value: v } : { ok: false, error: 'Use HH:MM[:SS]' };
     }

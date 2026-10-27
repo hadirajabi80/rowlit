@@ -38,6 +38,35 @@ describe('mysql inserts', () => {
   });
 });
 
+describe('mysql BIT and TIME columns', () => {
+  const bits = col('flags', 'string', 'BIT');
+  const tm = col('tm', 'time', 'TIME');
+
+  it('writes and compares BIT(n) through CONV, not as a byte string', () => {
+    const s = generateChange(
+      { kind: 'update', ref: '1', key: [{ column: id, value: 1 }], set: [{ column: bits, value: '1010', old: '0001' }] },
+      T, 'mysql', { verifyUnchanged: true },
+    );
+    expect(s.sql).toBe('UPDATE orders SET flags = CAST(CONV(@p1, 2, 10) AS UNSIGNED) WHERE id = @p2 AND flags = CAST(CONV(@p3, 2, 10) AS UNSIGNED)');
+    expect(s.params.map((p) => [p.kind, p.value])).toEqual([['string', '1010'], ['int', 1], ['string', '0001']]);
+  });
+
+  it('a NULL BIT value stays a plain NULL bind', () => {
+    const s = generateChange({ kind: 'insert', ref: '1', values: [{ column: bits, value: null }, { column: name, value: 'x' }] }, T, 'mysql');
+    expect(s.sql).toBe('INSERT INTO orders (flags, name) VALUES (@p1, @p2)');
+  });
+
+  it('only MySQL BIT columns are converted', () => {
+    const s = generateChange({ kind: 'update', ref: '1', key: [{ column: id, value: 1 }], set: [{ column: col('b', 'string', 'bit'), value: '1', old: '0' }] }, T, 'sqlite');
+    expect(s.sql).not.toContain('CONV');
+  });
+
+  it('binds TIME as text: a duration can exceed 24 hours', () => {
+    const s = generateChange({ kind: 'update', ref: '1', key: [{ column: id, value: 1 }], set: [{ column: tm, value: '838:59:59', old: '-12:00:00' }] }, T, 'mysql');
+    expect(s.params.map((p) => [p.kind, p.value])).toEqual([['string', '838:59:59'], ['int', 1]]);
+  });
+});
+
 describe('mysql savepoints', () => {
   it('has SAVEPOINT / ROLLBACK TO / RELEASE', () => {
     expect(savepointSql('mysql')).toBe('SAVEPOINT dbs_edit');

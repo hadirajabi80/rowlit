@@ -141,6 +141,26 @@ describe('typed cell editing', () => {
   });
 });
 
+describe('typed cell editing on MySQL', () => {
+  it('edits BIT(n) as bits', () => {
+    const bit = col('flags', 'string', { dbType: 'BIT', size: 4 });
+    expect(parseEdit('1010', bit, 'mysql')).toEqual({ ok: true, value: '1010' });
+    expect(parseEdit('10102', bit, 'mysql').ok).toBe(false);
+    expect(parseEdit('10101', bit, 'mysql').ok).toBe(false);
+    expect(parseEdit('', bit, 'mysql')).toEqual({ ok: true, value: null });
+    expect(parseEdit('abc', col('s', 'string', { dbType: 'varchar' }), 'mysql')).toEqual({ ok: true, value: 'abc' });
+  });
+
+  it('accepts TIME durations beyond 24 hours and negative ones', () => {
+    const t = col('tm', 'time', { dbType: 'TIME' });
+    expect(parseEdit('838:59:59', t, 'mysql')).toEqual({ ok: true, value: '838:59:59' });
+    expect(parseEdit('-1:02', t, 'mysql')).toEqual({ ok: true, value: '-01:02:00' });
+    expect(parseEdit('12:34:56.789', t, 'mysql')).toEqual({ ok: true, value: '12:34:56.789' });
+    expect(parseEdit('12:61', t, 'mysql').ok).toBe(false);
+    expect(parseEdit('25:00', t, 'tsql').ok).toBe(false);
+  });
+});
+
 describe('quick filter from a cell', () => {
   it('offers =, ≠, >, < for numbers and contains for text', () => {
     expect(quickFilterOptions(col('total', 'decimal'), 2, '12.5').map((o) => o.label)).toEqual(['total = 12.5', 'total ≠ 12.5', 'total > 12.5', 'total < 12.5', 'total is not NULL']);
