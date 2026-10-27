@@ -18,6 +18,8 @@ const CREATE_MODIFIERS = wordSet(`
   EDITIONING FORCE NOFORCE VIRTUAL PUBLIC PRIVATE SHARDED DUPLICATED IMMUTABLE BLOCKCHAIN COLUMNSTORE FULLTEXT SPATIAL XML
   PRIMARY SECURE`);
 const TSQL_BLOCK_BEGIN_NOT = wordSet('TRAN TRANSACTION DISTRIBUTED DIALOG CONVERSATION');
+const SF_NAMED_END = wordSet('IF FOR WHILE LOOP REPEAT CASE');
+const SF_TX_BEGIN = wordSet('TRANSACTION WORK NAME');
 const TABLE_CONSTRAINT_STARTS = wordSet('CONSTRAINT PRIMARY FOREIGN UNIQUE CHECK INDEX KEY PERIOD');
 
 function isWord(t: Token | undefined): boolean {
@@ -59,6 +61,7 @@ class Parser {
   readonly lite: boolean;
   readonly pg: boolean;
   readonly cql: boolean;
+  readonly sf: boolean;
 
   constructor(tokens: Token[], spec: DialectSpec, start: number, end: number) {
     this.t = tokens;
@@ -69,6 +72,7 @@ class Parser {
     this.lite = spec.id === 'sqlite';
     this.pg = spec.id === 'pgsql';
     this.cql = spec.id === 'cql';
+    this.sf = spec.id === 'snowflake';
     const root = this.mkScope('other', null, null, start);
     this.m = { root, scopes: [root], tokens, chains: [], created: [], declared: [], start, end };
   }
@@ -316,7 +320,7 @@ class Parser {
     while (!this.eof()) {
       const t = this.t[this.i];
       if (t.kind === 'punct' && t.text === ';') { this.i++; continue; }
-      if (isWord(t) && terminators.has(t.upper)) return;
+      if (isWord(t) && terminators.has(t.upper) && !(this.sf && t.upper === 'END' && SF_NAMED_END.has(this.u(1)))) return;
       if (t.kind === 'punct' && t.text === ')') return;
       const before = this.i;
       this.parseStatement(c);
@@ -332,6 +336,7 @@ class Parser {
       this.parseQuery(c, 'select', null);
       return;
     }
+    if (this.sf && this.parseSfControl(c, u)) return;
     switch (u) {
       case 'WITH': case 'SELECT': case 'VALUES': {
         if (u === 'VALUES' && !this.lite && !this.pg) break;
@@ -356,8 +361,23 @@ class Parser {
       case 'DECLARE':
         if (this.ora) { this.parseBlock(c); return; }
         if (this.tsql) { this.parseTsqlDeclare(c); return; }
+        if (this.sf) {
+          // Snowflake Scripting DECLARE section: declarations up to BEGIN
+          this.i++;
+          while (!this.eof() && !this.at('BEGIN')) this.i++;
+          return;
+        }
         break;
       case 'BEGIN':
+        if (this.sf && !this.atP(';', 1) && !SF_TX_BEGIN.has(this.u(1))) {
+          // Snowflake Scripting block: BEGIN stmt; … [EXCEPTION WHEN … THEN stmt;] END
+          this.i++;
+          this.mark(c, 'unknown', this.prevEnd(), { statementStart: true });
+          this.parseStatementList(c, wordSet('END'));
+          if (this.at('END')) this.i++;
+          return;
+        }
+        if (this.sf) break;
         if (this.ora) { this.parseBlock(c); return; }
         if (this.cql && (this.at('BATCH', 1) || ((this.at('UNLOGGED', 1) || this.at('COUNTER', 1)) && this.at('BATCH', 2)))) {
           // BEGIN [UNLOGGED | COUNTER] BATCH [USING TIMESTAMP n] stmt; … APPLY BATCH
@@ -415,10 +435,57 @@ class Parser {
           this.parseName();
           return;
         }
+        if (this.spec.id === 'snowflake') {
+          // USE [DATABASE | SCHEMA | WAREHOUSE | ROLE | SECONDARY ROLES] <name>
+          this.i++;
+          const kw = this.peek();
+          const word = kw && isWord(kw) ? kw.upper : '';
+          const kinds: Record<string, 'database' | 'schema' | 'other'> = { DATABASE: 'database', SCHEMA: 'schema', WAREHOUSE: 'other', ROLE: 'other', SECONDARY: 'other' };
+          const kind = kinds[word];
+          if (kind && !this.atP('.', 1)) this.i++;
+          this.mark(c, 'use', this.prevEnd(), { use: kind ?? 'object' });
+          this.parseName();
+          return;
+        }
         break;
     }
     if (this.pg && this.parsePgStatement(c, u)) return;
     this.parseExprStatement(c);
+  }
+
+  /**
+   * Snowflake Scripting control words, so the statements inside a `$$` body or a `BEGIN … END` block parse on their own:
+   * `IF (c) THEN`, `ELSEIF`, `ELSE`, `WHILE (c) DO`, `FOR r IN cur DO`, `LOOP`, `REPEAT`, `UNTIL c`, `END IF` / `END LOOP` …,
+   * `EXCEPTION WHEN x THEN`, and `LET v [type] := | DEFAULT | CURSOR FOR` (what follows is an expression or a query).
+   */
+  parseSfControl(c: Scope, u: string): boolean {
+    const skipTo = (stops: string[]) => {
+      while (!this.eof() && !this.atP(';') && !stops.includes(this.u())) {
+        if (this.atP('(')) this.skipParens(); else this.i++;
+      }
+      if (!this.eof() && stops.includes(this.u())) this.i++;
+    };
+    const open = () => this.mark(c, 'unknown', this.prevEnd(), { statementStart: true });
+    switch (u) {
+      case 'IF': case 'ELSEIF':
+        if (u === 'IF' && (this.at('EXISTS', 1) || this.at('NOT', 1))) return false;
+        this.i++; skipTo(['THEN']); open(); return true;
+      case 'WHEN': this.i++; skipTo(['THEN']); open(); return true;
+      case 'WHILE': case 'FOR': this.i++; skipTo(['DO', 'LOOP']); open(); return true;
+      case 'ELSE': case 'LOOP': case 'REPEAT': this.i++; open(); return true;
+      case 'EXCEPTION': this.i++; open(); return true;
+      case 'UNTIL': this.i++; skipTo([';']); return true;
+      case 'END':
+        if (!SF_NAMED_END.has(this.u(1))) return false;
+        this.i += 2; return true;
+      case 'LET': {
+        this.i++;
+        while (!this.eof() && !this.atP(';') && !this.at('DEFAULT') && !this.at('FOR') && !this.atOp(':=') && !this.atOp('=')) this.i++;
+        if (!this.eof() && !this.atP(';')) { this.i++; open(); }
+        return true;
+      }
+      default: return false;
+    }
   }
 
   /** Generic statement: an expression context up to the end (`;` / statement start). */

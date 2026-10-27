@@ -390,6 +390,52 @@ class IntelImpl implements Intel {
     return false;
   }
 
+  /**
+   * Snowflake: the `$$ … $$` body of a SQL-language procedure / function or an `EXECUTE IMMEDIATE` around `offset`
+   * (JavaScript, Python, Java and Scala bodies are not SQL and stay opaque strings).
+   */
+  private scriptingBodyAt(d: Doc, offset: number): { start: number; end: number } | null {
+    if (this.dialect !== 'snowflake') return null;
+    const toks = d.tokens;
+    const k = toks.findIndex((t) => t.kind === 'string' && t.text.startsWith('$$') && t.start + 2 <= offset && offset <= (t.unterminated || t.text.length < 4 || !t.text.endsWith('$$') ? t.end : t.end - 2));
+    if (k < 0) return null;
+    const t = toks[k];
+    let language = '';
+    let routine = false;
+    for (let i = k - 1; i >= 0; i--) {
+      const p = toks[i];
+      if (p.kind === 'punct' && p.text === ';') break;
+      if (p.kind !== 'ident' && p.kind !== 'keyword') continue;
+      if (p.upper === 'LANGUAGE' && !language) language = toks[i + 1] && (toks[i + 1].kind === 'ident' || toks[i + 1].kind === 'keyword') ? toks[i + 1].upper : '';
+      if (p.upper === 'PROCEDURE' || p.upper === 'FUNCTION' || p.upper === 'IMMEDIATE') routine = true;
+    }
+    if (!routine || (language && language !== 'SQL')) return null;
+    const closed = !t.unterminated && t.text.length >= 4 && t.text.endsWith('$$');
+    return { start: t.start + 2, end: closed ? t.end - 2 : t.end };
+  }
+
+  /** Completes against the body text as a document of its own, then maps the offsets back. */
+  private completeInBody(uri: string, body: { start: number; end: number }, offset: number): CompletionResult {
+    const d = this.doc(uri);
+    const bodyUri = `${uri}\u0000body`;
+    this.setDocument(bodyUri, d.text.slice(body.start, body.end));
+    try {
+      const r = this.complete(bodyUri, offset - body.start);
+      const shift = (range: [number, number]): [number, number] => [range[0] + body.start, range[1] + body.start];
+      return {
+        ...r,
+        replaceRange: shift(r.replaceRange),
+        items: r.items.map((it) => ({
+          ...it,
+          ...(it.range ? { range: shift(it.range) } : {}),
+          ...(it.additionalTextEdits ? { additionalTextEdits: it.additionalTextEdits.map((e) => ({ ...e, range: shift(e.range) })) } : {}),
+        })),
+      };
+    } finally {
+      this.closeDocument(bodyUri);
+    }
+  }
+
   modelAt(uri: string, offset: number): StatementModel | null {
     const d = this.doc(uri);
     const st = this.featureStatement(d, offset);
@@ -400,6 +446,8 @@ class IntelImpl implements Intel {
     void trigger;
     const d = this.doc(uri);
     const empty: CompletionResult = { items: [], isIncomplete: false, replaceRange: [offset, offset] };
+    const body = this.scriptingBodyAt(d, offset);
+    if (body) return this.completeInBody(uri, body, offset);
     if (this.inCommentOrString(d, offset, true)) return empty;
     const st = this.featureStatement(d, offset);
     const model = st ? this.model(d, st) : buildModel([], this.spec, offset, offset);

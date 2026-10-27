@@ -117,7 +117,7 @@ public sealed class MySqlDdlScripter(string providerId = "mysql") : IDdlScripter
     /// </summary>
     internal static TableModel Normalize(TableModel t) => t with
     {
-        Options = t.Options with { WithoutRowid = false, Strict = false, Tablespace = null },
+        Options = t.Options with { WithoutRowid = false, Strict = false, Tablespace = null, Extra = t.Options.Extra?.Where(kv => MySqlTableOptions.Keys.Contains(kv.Key, StringComparer.OrdinalIgnoreCase)).ToDictionary(kv => kv.Key, kv => kv.Value) },
         PrimaryKey = t.PrimaryKey is null ? null : t.PrimaryKey with { Clustered = false, Name = null },
         Indexes = t.Indexes.Select(i => i with { Clustered = false, Include = [], Filter = null }).ToList(),
         ForeignKeys = t.ForeignKeys.Select(f => f with { OnDelete = Action(f.OnDelete), OnUpdate = Action(f.OnUpdate) }).ToList(),
@@ -145,6 +145,7 @@ public sealed class MySqlDdlScripter(string providerId = "mysql") : IDdlScripter
         foreach (var ck in t.Checks) parts.Add(CheckSql(ck));
         foreach (var fk in t.ForeignKeys) parts.Add(ForeignKeySql(t, fk));
         var sb = new StringBuilder($"CREATE TABLE {Table(t.Schema, t.Name)} (\n{string.Join(",\n", parts.Select(p => "    " + p))}\n)");
+        foreach (var option in MySqlTableOptions.CreateClauses(t)) sb.Append(' ').Append(option);
         if (!string.IsNullOrWhiteSpace(t.Comment)) sb.Append(" COMMENT = ").Append(MySqlSqlText.Literal(t.Comment));
         return sb.ToString();
     }
@@ -206,6 +207,9 @@ public sealed class MySqlDdlScripter(string providerId = "mysql") : IDdlScripter
         foreach (var ix in d.IndexesAdded) sub.Add(("ADD " + IndexSql(ix), null));
         foreach (var ck in d.ChecksAdded) sub.Add(("ADD " + CheckSql(ck), null));
         if (d.CommentChanged) sub.Add(("COMMENT = " + MySqlSqlText.Literal(desired.Comment ?? ""), null));
+        var (optionClauses, optionWarnings) = MySqlTableOptions.AlterClauses(original, desired);
+        foreach (var option in optionClauses) sub.Add((option, null));
+        warnings.AddRange(optionWarnings);
         if (sub.Count > 0)
         {
             var warning = string.Join(" ", sub.Where(s => s.Warning is not null).Select(s => s.Warning).Distinct());

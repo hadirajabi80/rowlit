@@ -2233,6 +2233,7 @@
       ],
       "returns": "table",
       "doc": "Table-valued function that parses JSON into rows of key/value/type, or typed columns via a WITH clause. Requires compatibility level 130 or higher.",
+      "columns": ["key", "value", "type"],
       "since": "2016"
     },
     {
@@ -4293,6 +4294,7 @@
       ],
       "returns": "table",
       "doc": "Splits a string into rows (column value) on a single-character separator. Output order is not guaranteed without enable_ordinal. Needs compatibility level 130.",
+      "columns": ["value", "ordinal"],
       "since": "2016"
     },
     {
@@ -4311,6 +4313,7 @@
       ],
       "returns": "table",
       "doc": "Returns a one-column table (value) of numbers from start to stop, stepping by step (default 1 or -1). Requires compatibility level 160.",
+      "columns": ["value"],
       "since": "2022"
     },
     {
@@ -4330,7 +4333,8 @@
         }
       ],
       "returns": "table",
-      "doc": "Full-text search returning a table of KEY and RANK columns for rows matching a CONTAINS-style condition."
+      "doc": "Full-text search returning a table of KEY and RANK columns for rows matching a CONTAINS-style condition.",
+      "columns": ["KEY", "RANK"]
     },
     {
       "name": "FREETEXTTABLE",
@@ -4349,7 +4353,8 @@
         }
       ],
       "returns": "table",
-      "doc": "Full-text search returning a table of KEY and RANK columns for rows whose meaning matches the free-text string."
+      "doc": "Full-text search returning a table of KEY and RANK columns for rows whose meaning matches the free-text string.",
+      "columns": ["KEY", "RANK"]
     },
     {
       "name": "SEMANTICKEYPHRASETABLE",

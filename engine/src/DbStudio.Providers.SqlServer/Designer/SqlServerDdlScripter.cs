@@ -124,15 +124,20 @@ public sealed class SqlServerDdlScripter : IDdlScripter
         }
         table = Table(schema, desired.Name);
 
+        // 0b. objects that are unchanged themselves but use a column whose type / collation / nullability changes: the
+        // server refuses a bare ALTER COLUMN on them, so they are dropped first and recreated afterwards
+        var blocked = FindBlockedDependents(d);
+        if (blocked.Any) warnings.Add(blocked.Describe());
+
         // 1–2. drop constraints and indexes that changed or went away
-        foreach (var fk in d.ForeignKeysDropped) statements.Add(DropConstraint(table, fk.Name, "foreign key", warnings));
-        foreach (var ck in d.ChecksDropped) statements.Add(DropConstraint(table, ck.Name, "check constraint", warnings));
-        foreach (var u in d.UniquesDropped) statements.Add(DropConstraint(table, u.Name, "unique constraint", warnings));
-        foreach (var ix in d.IndexesDropped) statements.Add(new DdlStatement($"DROP INDEX {Q(ix.Name)} ON {table}", DdlKinds.Drop));
-        if (d.PrimaryKeyDropped is { } oldPk) statements.Add(DropConstraint(table, oldPk.Name, "primary key", warnings));
+        foreach (var fk in d.ForeignKeysDropped.Concat(blocked.ForeignKeys.Select(p => p.Old))) statements.Add(DropConstraint(table, fk.Name, "foreign key", warnings));
+        foreach (var ck in d.ChecksDropped.Concat(blocked.Checks.Select(p => p.Old))) statements.Add(DropConstraint(table, ck.Name, "check constraint", warnings));
+        foreach (var u in d.UniquesDropped.Concat(blocked.Uniques.Select(p => p.Old))) statements.Add(DropConstraint(table, u.Name, "unique constraint", warnings));
+        foreach (var ix in d.IndexesDropped.Concat(blocked.Indexes.Select(p => p.Old))) statements.Add(new DdlStatement($"DROP INDEX {Q(ix.Name)} ON {table}", DdlKinds.Drop));
+        if ((d.PrimaryKeyDropped ?? blocked.PrimaryKey?.Old) is { } oldPk) statements.Add(DropConstraint(table, oldPk.Name, "primary key", warnings));
 
         // 3. default constraints that block ALTER/DROP COLUMN or change
-        var recomputed = d.Matched.Where(m => m.ComputedChanged || (m.Old.Computed is null) != (m.New.Computed is null)).ToList();
+        var recomputed = d.Matched.Where(m => m.ComputedChanged || (m.Old.Computed is null) != (m.New.Computed is null)).Concat(blocked.Computed).Distinct().ToList();
         foreach (var c in d.Dropped.Where(c => c.Default is not null))
             statements.Add(DropDefault(table, schema, desired.Name, c));
         foreach (var m in d.Matched.Where(m => m.Old.Default is not null && (m.DefaultChanged || m.TypeChanged || recomputed.Contains(m))))
@@ -170,12 +175,12 @@ public sealed class SqlServerDdlScripter : IDdlScripter
             statements.Add(new DdlStatement($"ALTER TABLE {table} ADD CONSTRAINT {Q(DefaultName(desired, m.New))} DEFAULT ({TableDiff.StripOuterParens(m.New.Default!)}) FOR {Q(m.New.Name)}", DdlKinds.Alter));
 
         // 9. new constraints and indexes
-        if (d.PrimaryKeyAdded is { } pk) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {PrimaryKeySql(desired, pk)}", DdlKinds.Alter));
-        foreach (var u in d.UniquesAdded) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {UniqueSql(desired, u)}", DdlKinds.Alter));
+        if ((d.PrimaryKeyAdded ?? blocked.PrimaryKey?.New) is { } pk) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {PrimaryKeySql(desired, pk)}", DdlKinds.Alter));
+        foreach (var u in d.UniquesAdded.Concat(blocked.Uniques.Select(p => p.New))) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {UniqueSql(desired, u)}", DdlKinds.Alter));
         var checkNo = original.Checks.Count;
-        foreach (var ck in d.ChecksAdded) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {CheckSql(desired, ck, ++checkNo)}", DdlKinds.Alter));
-        foreach (var fk in d.ForeignKeysAdded) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {ForeignKeySql(desired, fk)}", DdlKinds.Alter));
-        foreach (var ix in d.IndexesAdded) statements.Add(new DdlStatement(CreateIndexSql(table, ix), DdlKinds.Index));
+        foreach (var ck in d.ChecksAdded.Concat(blocked.Checks.Select(p => p.New))) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {CheckSql(desired, ck, ++checkNo)}", DdlKinds.Alter));
+        foreach (var fk in d.ForeignKeysAdded.Concat(blocked.ForeignKeys.Select(p => p.New))) statements.Add(new DdlStatement($"ALTER TABLE {table} ADD {ForeignKeySql(desired, fk)}", DdlKinds.Alter));
+        foreach (var ix in d.IndexesAdded.Concat(blocked.Indexes.Select(p => p.New))) statements.Add(new DdlStatement(CreateIndexSql(table, ix), DdlKinds.Index));
 
         // 10. comments
         if (d.CommentChanged) statements.Add(CommentSql(schema, desired.Name, null, original.Comment, desired.Comment));
@@ -184,6 +189,148 @@ public sealed class SqlServerDdlScripter : IDdlScripter
         foreach (var c in d.Added.Where(c => !string.IsNullOrWhiteSpace(c.Comment)))
             statements.Add(CommentSql(schema, desired.Name, c.Name, null, c.Comment));
     }
+
+    /// <summary>An unchanged object that must be dropped (Old) and recreated (New) around an ALTER COLUMN.</summary>
+    private sealed record Pair<T>(T Old, T New);
+
+    private sealed class BlockedDependents
+    {
+        public Pair<PrimaryKeyModel>? PrimaryKey { get; set; }
+        public List<Pair<UniqueModel>> Uniques { get; } = [];
+        public List<Pair<IndexModel>> Indexes { get; } = [];
+        public List<Pair<ForeignKeyModel>> ForeignKeys { get; } = [];
+        public List<Pair<CheckModel>> Checks { get; } = [];
+        public List<ColumnDelta> Computed { get; } = [];
+        public List<string> Columns { get; } = [];
+
+        public bool Any => PrimaryKey is not null || Uniques.Count + Indexes.Count + ForeignKeys.Count + Checks.Count + Computed.Count > 0;
+
+        public string Describe()
+        {
+            var parts = new List<string>();
+            if (PrimaryKey is { } pk) parts.Add($"primary key {pk.Old.Name}");
+            parts.AddRange(Uniques.Select(p => $"unique constraint {p.Old.Name}"));
+            parts.AddRange(Indexes.Select(p => $"index {p.Old.Name}"));
+            parts.AddRange(ForeignKeys.Select(p => $"foreign key {p.Old.Name}"));
+            parts.AddRange(Checks.Select(p => $"check constraint {p.Old.Name}"));
+            parts.AddRange(Computed.Select(m => $"computed column {m.Old.Name}"));
+            var text = $"ALTER COLUMN {string.Join(", ", Columns)} is refused while it is used by {string.Join(", ", parts)}: they are dropped before the change and recreated after it.";
+            if (PrimaryKey is not null || Uniques.Count > 0)
+                text += " Foreign keys of other tables that reference the key must be dropped first (they are not scripted here).";
+            return text;
+        }
+    }
+
+    /// <summary>
+    /// SQL Server refuses ALTER COLUMN on a column used by an index, a PRIMARY KEY / UNIQUE / FOREIGN KEY / CHECK
+    /// constraint or a computed column (error 5074 / 4922). The model holds all of them, so the unchanged ones that touch
+    /// a column whose type or collation changes (or whose nullability changes, for keys and indexes) are collected here
+    /// to be dropped before and recreated after the ALTER. Widening a varchar / nvarchar / varbinary is allowed under an
+    /// index, unique or check, so only keys, foreign keys and computed columns are redone for it.
+    /// </summary>
+    private static BlockedDependents FindBlockedDependents(TableDiffResult d)
+    {
+        var result = new BlockedDependents();
+        var original = d.Original!;
+        var desired = d.Desired;
+        // old column name -> blocks everything (true) or only keys / indexes (false: nullability alone) or only keys, FKs and computed columns (length widening)
+        var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase);      // PK, unique, index, check, FK, computed
+        var strictOnly = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // PK, unique, index (nullability)
+        var keysOnly = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // PK, FK, computed (widening)
+        foreach (var m in d.Matched)
+        {
+            if (m.Old.Computed is not null || m.New.Computed is not null) continue;
+            if (m.TypeChanged || m.CollationChanged)
+            {
+                if (!m.CollationChanged && !m.NullabilityChanged && IsWidening(m.Old.Type, m.New.Type)) keysOnly.Add(m.Old.Name);
+                else all.Add(m.Old.Name);
+            }
+            else if (m.NullabilityChanged) strictOnly.Add(m.Old.Name);
+        }
+        if (all.Count + strictOnly.Count + keysOnly.Count == 0) return result;
+        foreach (var n in all.Concat(strictOnly).Concat(keysOnly)) result.Columns.Add(n);
+
+        // computed columns that read an affected column are dropped and added again (and then count as affected)
+        var computedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (var m in d.Matched)
+            {
+                if (m.Old.Computed is null || m.New.Computed is null || m.ComputedChanged || computedNames.Contains(m.Old.Name)) continue;
+                var touched = all.Concat(strictOnly).Concat(keysOnly).Concat(computedNames).Any(c => Mentions(m.Old.Computed.Expression, c));
+                if (!touched) continue;
+                computedNames.Add(m.Old.Name);
+                result.Computed.Add(m);
+                all.Add(m.Old.Name);
+                grew = true;
+            }
+        }
+
+        bool Uses(IEnumerable<string> columns, bool strict, bool keys) =>
+            columns.Any(c => all.Contains(c) || (strict && strictOnly.Contains(c)) || (keys && keysOnly.Contains(c)));
+        // widened columns do not block indexes / uniques / checks: `all` and `strictOnly` only for them
+        bool UsesIndexLike(IEnumerable<string> columns) => columns.Any(c => all.Contains(c) || strictOnly.Contains(c));
+        bool UsesKeyLike(IEnumerable<string> columns) => Uses(columns, true, true);
+
+        if (original.PrimaryKey is { Columns.Count: > 0 } opk && desired.PrimaryKey is { Columns.Count: > 0 } dpk && d.PrimaryKeyDropped is null && d.PrimaryKeyAdded is null && UsesKeyLike(opk.Columns))
+            result.PrimaryKey = new(opk, string.IsNullOrWhiteSpace(dpk.Name) ? dpk with { Name = opk.Name } : dpk);
+
+        var unpaired = desired.Uniques.Where(x => !d.UniquesAdded.Contains(x)).ToList();
+        foreach (var o in original.Uniques.Where(x => !d.UniquesDropped.Contains(x)))
+        {
+            var n = PairWith(unpaired, o.Name, x => x.Name);
+            if (n is not null && UsesIndexLike(o.Columns)) result.Uniques.Add(new(o, string.IsNullOrWhiteSpace(n.Name) ? n with { Name = o.Name } : n));
+        }
+        var unpairedIx = desired.Indexes.Where(x => !d.IndexesAdded.Contains(x)).ToList();
+        foreach (var o in original.Indexes.Where(x => !d.IndexesDropped.Contains(x)))
+        {
+            var n = PairWith(unpairedIx, o.Name, x => x.Name);
+            if (n is not null && (UsesIndexLike(o.Columns.Select(c => c.Name)) || UsesIndexLike(o.Include) || (o.Filter is not null && all.Concat(strictOnly).Any(c => Mentions(o.Filter, c)))))
+                result.Indexes.Add(new(o, n));
+        }
+        var unpairedFk = desired.ForeignKeys.Where(x => !d.ForeignKeysAdded.Contains(x)).ToList();
+        foreach (var o in original.ForeignKeys.Where(x => !d.ForeignKeysDropped.Contains(x)))
+        {
+            var n = PairWith(unpairedFk, o.Name, x => x.Name);
+            // a nullability change alone does not touch a foreign key
+            if (n is not null && o.Columns.Any(c => all.Contains(c) || keysOnly.Contains(c)))
+                result.ForeignKeys.Add(new(o, string.IsNullOrWhiteSpace(n.Name) ? n with { Name = o.Name } : n));
+        }
+        var unpairedCk = desired.Checks.Where(x => !d.ChecksAdded.Contains(x)).ToList();
+        foreach (var o in original.Checks.Where(x => !d.ChecksDropped.Contains(x)))
+        {
+            var n = PairWith(unpairedCk, o.Name, x => x.Name);
+            if (n is not null && all.Any(c => Mentions(o.Expression, c)))
+                result.Checks.Add(new(o, string.IsNullOrWhiteSpace(n.Name) ? n with { Name = o.Name } : n));
+        }
+        return result;
+    }
+
+    private static T? PairWith<T>(List<T> candidates, string? name, Func<T, string?> nameOf) where T : class
+    {
+        var hit = candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(nameOf(c)) && !string.IsNullOrWhiteSpace(name) && nameOf(c)!.Equals(name, StringComparison.OrdinalIgnoreCase))
+                  ?? candidates.FirstOrDefault(c => string.IsNullOrWhiteSpace(nameOf(c)) || string.IsNullOrWhiteSpace(name));
+        if (hit is not null) candidates.Remove(hit);
+        return hit;
+    }
+
+    /// <summary>varchar / nvarchar / varbinary to the same type with a larger (non-max) length.</summary>
+    private static bool IsWidening(string oldType, string newType)
+    {
+        var (ob, oa) = DdlText.ParseType(oldType);
+        var (nb, na) = DdlText.ParseType(newType);
+        if (!ob.Equals(nb, StringComparison.OrdinalIgnoreCase) || !(nb.Equals("varchar", StringComparison.OrdinalIgnoreCase) || nb.Equals("nvarchar", StringComparison.OrdinalIgnoreCase) || nb.Equals("varbinary", StringComparison.OrdinalIgnoreCase))) return false;
+        if (oa.Count != 1 || na.Count != 1) return false;
+        var o = DdlText.ArgInt(oa, 0);
+        var n = DdlText.ArgInt(na, 0);
+        return o is not null && n is not null && n >= o;
+    }
+
+    /// <summary>Whether the SQL text names the column as a whole word (outside nothing in particular: a false hit only recreates more).</summary>
+    private static bool Mentions(string sql, string column) =>
+        System.Text.RegularExpressions.Regex.IsMatch(sql, @"(?<![\w$#@])\[?" + System.Text.RegularExpressions.Regex.Escape(column) + @"\]?(?![\w$#])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Identity rebuild, like SSMS: new table, copy with IDENTITY_INSERT, drop the foreign keys of other tables that

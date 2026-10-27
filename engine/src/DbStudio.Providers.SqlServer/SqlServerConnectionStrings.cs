@@ -9,6 +9,7 @@ public static class SqlServerConnectionStrings
 {
     public const string ApplicationName = "Rowlit";
     public const int DefaultConnectTimeout = 15;
+    public const int RetryIntervalSeconds = 1;
 
     public static ConnectionFormSpec FormSpec { get; } = new(
     [
@@ -39,6 +40,10 @@ public static class SqlServerConnectionStrings
             MultipleActiveResultSets = false,
             Pooling = pooling,
             ConnectTimeout = Math.Max(0, profile.GetInt("connectTimeout", DefaultConnectTimeout)),
+            // The driver retries a failed first connect once (transient errors include "Cannot open database" for a mistyped
+            // name) after ConnectRetryInterval, default 10 s: sessions and catalog connections reported the error after 11 s.
+            // One second keeps the retry (a database that is just waking up) without making a typo wait.
+            ConnectRetryInterval = RetryIntervalSeconds,
             TrustServerCertificate = profile.GetBool("trustServerCertificate", true),
             Encrypt = ParseEncrypt(profile.GetString("encrypt")),
         };

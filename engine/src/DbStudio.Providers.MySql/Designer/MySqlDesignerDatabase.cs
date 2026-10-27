@@ -145,6 +145,7 @@ public sealed partial class MySqlDesignerDatabase(string providerId = "mysql") :
             Schema = schema,
             Name = table,
             Comment = info.Value.Comment,
+            Options = new TableOptions { Extra = MySqlTableOptions.Read(info.Value.Engine, tableCollation, info.Value.RowFormat, info.Value.AutoIncrement) },
             Columns = columns,
             PrimaryKey = pkCols.Count > 0 ? new PrimaryKeyModel { Name = "PRIMARY", Columns = pkCols, Clustered = false } : null,
             Uniques = uniques,

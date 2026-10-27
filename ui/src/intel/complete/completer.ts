@@ -179,12 +179,40 @@ function containerItems(items: Items, c: CursorContext, env: CompleteEnv, group:
 /** T-SQL `USE |`: the databases (the name only: no dot, no retrigger); the current one last. */
 function databaseNameItems(items: Items, c: CursorContext, env: CompleteEnv): void {
   const { index } = env;
-  if (env.spec.id !== 'tsql') return;
+  if (env.spec.id !== 'tsql' && env.spec.id !== 'snowflake') return;
   const fe = fenv(c, env);
   const cur = index.database ? index.keyOfCatalog(index.database) : null;
   for (const d of index.databases) {
     const isCur = cur !== null && index.keyOfCatalog(d) === cur;
     items.add({ label: d, kind: 'database', group: 9, relevance: isCur ? 0 : 10, insertText: formatIdent(d, fe), detail: isCur ? 'current database' : 'database' });
+  }
+}
+
+/**
+ * Snowflake `USE |` (databases and the object kinds), `USE DATABASE |` (databases), `USE SCHEMA |` (the schemas of the
+ * current database, and `db.` for another one); warehouse and role names come from the account, not the catalog.
+ */
+function snowflakeUseItems(items: Items, c: CursorContext, env: CompleteEnv): void {
+  const { index, opts } = env;
+  const kind = c.marker?.data?.use ?? 'object';
+  const prev = c.prevToken?.upper;
+  const atName = kind === 'object' ? prev === 'USE' : prev === kind.toUpperCase();
+  if (!atName || kind === 'other') return;
+  const fe = fenv(c, env);
+  if (kind === 'object') {
+    for (const k of ['DATABASE', 'SCHEMA', 'WAREHOUSE', 'ROLE', 'SECONDARY ROLES']) items.add({ label: kwCase(k, opts), kind: 'keyword', group: 8, relevance: 5 });
+  }
+  if (kind === 'database' || kind === 'object') databaseNameItems(items, c, env);
+  if (kind === 'schema') {
+    const cur = index.database ? index.keyOfCatalog(index.database) : null;
+    for (const sc of index.schemas.values()) {
+      items.add({ label: sc.name, kind: 'schema', group: 9, relevance: index.isDefaultSchema(sc.name) ? 20 : 10, insertText: formatIdent(sc.name, fe), detail: schemaDetail(env, sc.name) });
+    }
+    for (const name of index.unloadedSchemaNames()) items.add({ label: name, kind: 'schema', group: 9, relevance: 10, insertText: formatIdent(name, fe), detail: schemaDetail(env, name) });
+    for (const d of index.databases) {
+      const isCur = cur !== null && index.keyOfCatalog(d) === cur;
+      items.add({ label: d, kind: 'database', group: 9, relevance: isCur ? 5 : 0, insertText: formatIdent(d, fe) + '.', command: 'retrigger', detail: isCur ? 'current database' : 'database' });
+    }
   }
 }
 
@@ -550,6 +578,7 @@ function clauseItems(items: Items, c: CursorContext, env: CompleteEnv): boolean 
     case 'execArgs': execArgItems(items, c, env); break;
     case 'use': {
       // `USE |` → databases; `USE Shop |` → (a new statement on the next line)
+      if (spec.id === 'snowflake') { snowflakeUseItems(items, c, env); break; }
       if (c.prevToken?.upper === 'USE') databaseNameItems(items, c, env);
       else offerStarts();
       break;
@@ -1296,9 +1325,10 @@ function qualifierItems(items: Items, c: CursorContext, env: CompleteEnv): boole
     case 'database': {
       // `Db.` → that database's schemas (the console's own, or another database of the server once its list has loaded)
       const ix = t.db.index;
+      const dot = c.clause === 'use' ? '' : '.'; // `USE SCHEMA Db.|` names the schema itself
       if (ix) {
-        for (const sc of ix.schemas.values()) items.add({ label: sc.name, kind: 'schema', group: 9, insertText: formatIdent(sc.name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
-        for (const name of ix.unloadedSchemaNames()) items.add({ label: name, kind: 'schema', group: 9, insertText: formatIdent(name, fe, false) + '.', command: 'retrigger', detail: 'schema' });
+        for (const sc of ix.schemas.values()) items.add({ label: sc.name, kind: 'schema', group: 9, insertText: formatIdent(sc.name, fe, false) + dot, ...(dot ? { command: 'retrigger' as const } : {}), detail: 'schema' });
+        for (const name of ix.unloadedSchemaNames()) items.add({ label: name, kind: 'schema', group: 9, insertText: formatIdent(name, fe, false) + dot, ...(dot ? { command: 'retrigger' as const } : {}), detail: 'schema' });
       } else if (t.db.status === 'loading') loadingItem(items, c, t.db.name);
       return true;
     }
