@@ -60,6 +60,24 @@ Shortcuts are written for Windows; on macOS read Ctrl as ⌘.
 | 26 | *Copy script* / *Open in console* | The script is copied, or a console titled "Native link: crm" opens on the target connection with the text; nothing is executed. Real secrets never appear (only the placeholders). | — |
 | 27 | A pair the engine cannot script | The engine's message is shown in the script area; *Open in console* is disabled. | — |
 
+## E. Live run over the docker servers (QA round)
+
+Link `QA All` with every table of SQL Server (`ms`, dbo), PostgreSQL (`pg`), MySQL (`my`), Oracle (`ora`, SHOP), ClickHouse (`ch`)
+and MongoDB (`mg`, db shop). Engine on a throw-away `DBSTUDIO_DATA_DIR`. Shop data: 5 customers, 6 orders, order 1 total 120.50.
+
+| # | Run | Expected |
+|---|---|---|
+| 28 | `select o.id, o.total from pg.orders o where o.id = 1` | One row, total **120.50** (the scale of the source column is kept: not 120.5); the message says `pg.orders: 1 rows from PostgreSQL`, i.e. the predicate was pushed down. |
+| 29 | `select c.Name, count(distinct o.id), sum(l.qty*p.price) from ms.Customers c join pg.orders o on o.customer_id=c.Id join pg.order_lines l on l.order_id=o.id join my.products p on p.id=l.product_id group by c.Name order by 1` | Alice 2 / 138.80, Bob 1 / 199.00, Chie 1 / 55.15, Dora 1 / 199.00 (SQL Server × PostgreSQL × MySQL). |
+| 30 | `select * from ms.Orders o join ora.ORDERS a on a.ID=o.Id join ch.orders c on c.id=o.Id` | 6 rows, same totals on all three servers. |
+| 31 | `select count(*) from mg.orders` and `select count(*) from mg.sessions` (empty collection) | 2000, then 0 (an empty collection still has `_id`). |
+| 32 | `select count(*) from ch.orders_since` (a parametrised view) | "ch.orders_since has no columns the link can read …" (not "table does not exist"). |
+| 33 | Link option `maxRowsPerSource` = 3, `select count(*) from mg.orders` | 3 and the warning "only the first 3 rows were read"; Refresh sources and raise the cap to get the real count. |
+| 34 | Run `select count(*) from mg.orders a, mg.orders b, mg.orders c, mg.orders d`, Cancel after 2 s | Cancelled within a few hundred ms, the session is usable again, nothing else was changed. |
+| 35 | Query builder: pg.orders + ms.Customers (auto-joined), Name + total, filter *matches regex* `^A` on Name, Run | `regexp_matches(Customers.Name, $fp1, 'i')` in the SQL panel, only Alice's orders; Edit SQL (Advanced) → Back to builder keeps the regex condition. |
+| 36 | Materialize the join of step 29 to PostgreSQL / SQL Server / MySQL / MariaDB / Oracle / ClickHouse as `qa_mat_x`: Create, Create again (refused), Append (type the name in lower case also on Oracle), Replace | Six rows each time; decimals keep their scale (numeric(38,2), not (38,10)); the table is dropped afterwards. |
+| 37 | Native link, target PostgreSQL, member `ms` (SQL Server, tables `Customers`, `Orders`) | `LIMIT TO ("Customers", "Orders")` and examples `ms."Customers"` (quoted: PostgreSQL folds unquoted names); password only as `<password>`. |
+
 ## Pass criteria
 
 - Steps 3–5: completion works with no network (the link catalog is loaded once; `crm.` is instant).

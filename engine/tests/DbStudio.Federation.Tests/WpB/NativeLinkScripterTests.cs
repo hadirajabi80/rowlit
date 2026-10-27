@@ -108,6 +108,30 @@ public sealed class NativeLinkScripterTests
     }
 
     [Fact]
+    public void Fdw_quotes_mixed_case_remote_tables_but_not_oracle_ones()
+    {
+        // QA round: IMPORT FOREIGN SCHEMA keeps SQL Server's "Customers"; PostgreSQL folds an unquoted Customers to lower case.
+        var mixed = new[] { new MountedTable { Name = "Customers" }, new MountedTable { Name = "order_lines" } };
+        var ms = Profile("sqlserver", new() { ["server"] = "srv", ["auth"] = "sql", ["user"] = "sa", ["database"] = "shop" });
+        var r = NativeLinkScripter.Script(Dialect.PgSql, "postgresql", new NativeLinkSource("ms", "sqlserver", ms, "shop", "dbo", false, mixed, null), null, null);
+        Assert.Contains("LIMIT TO (\"Customers\", order_lines)", r.Script, StringComparison.Ordinal);
+        Assert.Contains("SELECT * FROM ms.\"Customers\" LIMIT 100;", r.Script, StringComparison.Ordinal);
+        Assert.Contains("SELECT * FROM ms.order_lines LIMIT 100;", r.Script, StringComparison.Ordinal);
+        // oracle_fdw lower-cases the names it imports
+        var ora = NativeLinkScripter.Script(Dialect.PgSql, "postgresql", Source("oracle") with { Alias = "ora", Mounted = [new MountedTable { Name = "CUSTOMERS" }] }, null, null);
+        Assert.Contains("SELECT * FROM ora.CUSTOMERS LIMIT 100;", ora.Script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Impossible_pair_message_names_the_providers()
+    {
+        var profile = Profile("mongodb", new() { ["uri"] = "mongodb://h" });
+        var e = Assert.Throws<EngineException>(() => NativeLinkScripter.Script(Dialect.TSql, "sqlserver",
+            new NativeLinkSource("mg", "mongodb", profile, null, null, true, [], null), null, null));
+        Assert.Equal("A sqlserver server cannot link to a mongodb member natively.", e.Message);
+    }
+
+    [Fact]
     public void All_tables_member_imports_the_whole_schema()
     {
         var r = NativeLinkScripter.Script(Dialect.PgSql, "postgresql", Source("postgresql") with { AllTables = true }, null, null);

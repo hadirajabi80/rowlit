@@ -110,7 +110,10 @@ public sealed class MaterializeService(
         var d = target.Dialect;
         var create = request.Mode != MaterializeModes.Append;
         var table = create ? d.Fold(target.Table) : target.Table;
-        var (exists, existing) = await TableAsync(request.TargetConnectionId, d, target.Database, target.Schema, table, ct).ConfigureAwait(false);
+        bool exists;
+        List<TargetCol> existing;
+        if (create) (exists, existing) = await TableAsync(request.TargetConnectionId, d, target.Database, target.Schema, table, ct).ConfigureAwait(false);
+        else (exists, existing, table) = await AppendTargetAsync(request.TargetConnectionId, d, target.Database, target.Schema, table, ct).ConfigureAwait(false);
         var warnings = new List<string>();
         string? ddl = null;
         IReadOnlyList<ColumnInfo> columns;
@@ -187,8 +190,11 @@ public sealed class MaterializeService(
         var warnings = query.Plan.Warnings.ToList();
         var create = request.Mode != MaterializeModes.Append;
         var finalName = create ? d.Fold(target.Table) : target.Table;
+        bool exists;
+        List<TargetCol> existing;
+        if (create) (exists, existing) = await TableAsync(request.TargetConnectionId, d, target.Database, target.Schema, finalName, ct).ConfigureAwait(false);
+        else (exists, existing, finalName) = await AppendTargetAsync(request.TargetConnectionId, d, target.Database, target.Schema, finalName, ct).ConfigureAwait(false);
         var finalTable = d.Qualify(target.Database, target.Schema, finalName);
-        var (exists, existing) = await TableAsync(request.TargetConnectionId, d, target.Database, target.Schema, finalName, ct).ConfigureAwait(false);
         Mapped mapped;
         string writeName;
         if (create)
@@ -321,6 +327,23 @@ public sealed class MaterializeService(
     };
 
     // ------------------------------------------------------------------ columns
+
+    /// <summary>
+    /// The table append writes to: the name as typed, else its folded form (Oracle creates QA_MAT_X for qa_mat_x, PostgreSQL
+    /// qa_mat_x for QA_MAT_X, so "append" to the name the user typed for "create" must find the table that create made).
+    /// </summary>
+    private async Task<(bool Exists, List<TargetCol> Columns, string Name)> AppendTargetAsync(string connectionId, ImportDialect d, string? database, string? schema, string table, CancellationToken ct)
+    {
+        var (exists, columns) = await TableAsync(connectionId, d, database, schema, table, ct).ConfigureAwait(false);
+        if (exists) return (true, columns, table);
+        var folded = d.Fold(table);
+        if (!string.Equals(folded, table, StringComparison.Ordinal))
+        {
+            (exists, columns) = await TableAsync(connectionId, d, database, schema, folded, ct).ConfigureAwait(false);
+            if (exists) return (true, columns, folded);
+        }
+        return (false, [], table);
+    }
 
     private async Task<(bool Exists, List<TargetCol> Columns)> TableAsync(string connectionId, ImportDialect d, string? database, string? schema, string table, CancellationToken ct)
     {

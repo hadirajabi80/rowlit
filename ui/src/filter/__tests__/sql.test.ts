@@ -107,6 +107,18 @@ describe('server predicate per dialect', () => {
     expect(splitForServer(orRegex, COLS).server).toBeNull();
   });
 
+  it('DuckDB (the link query builder has no grid to finish the job) runs a regex itself, also inside OR', () => {
+    const r = one('duckdb', 'Name', 'regex', ['^A.*']);
+    expect(r.where).toBe("regexp_matches(q.Name, $fp1, 'i')");
+    expect(r.params).toEqual([{ name: 'fp1', kind: 'string', value: '^A.*' }]);
+    expect(r.clientOnly).toBeNull();
+    expect(one('duckdb', 'Name', 'regex', ['^A'], true).where).toBe('regexp_matches(q.Name, $fp1)');
+    const orRegex = newGroup('or', [newCondition('Id', 'gt', [1]), newCondition('Name', 'regex', ['^A'])]);
+    const r2 = buildPredicate(orRegex, COLS, 'duckdb', { alias: 'q' });
+    expect(r2.where).toBe("q.Id > $fp1 OR regexp_matches(q.Name, $fp2, 'i')");
+    expect(r2.clientOnly).toBeNull();
+  });
+
   it('BETWEEN inside AND is not mistaken for a group', () => {
     const tree = newGroup('or', [newCondition('Total', 'between', [1, 2]), newCondition('Id', 'eq', [9])]);
     expect(buildPredicate(tree, COLS, 'tsql', { alias: 'q' }).where).toBe('q.Total BETWEEN @fp1 AND @fp2 OR q.Id = @fp3');

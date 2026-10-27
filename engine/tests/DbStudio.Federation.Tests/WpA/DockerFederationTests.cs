@@ -241,6 +241,24 @@ public sealed class DockerFederationTests
     }
 
     [SkippableFact]
+    public async Task A_clickhouse_parametrised_view_says_why_it_cannot_be_queried()
+    {
+        // QA round: shop.orders_since mounts with no columns; querying it used to end with DuckDB's
+        // "Table with name orders_since does not exist" after the member connections were already opened.
+        Need(Server.ClickHouse);
+        await using var h = new FederationHarness();
+        var ch = h.AddConnection(Server.ClickHouse.Profile(), Server.ClickHouse.Password);
+        var link = h.AddLink("CH", new LinkDefinition { Members = [new LinkMember { Alias = "ch", ConnectionId = ch, Schema = "shop", AllTables = true }] });
+        var s = await h.OpenAsync(link);
+        var sink = await FederationHarness.RunAsync(s, "SELECT count(*) FROM ch.orders_since");
+        var error = Assert.Single(sink.Errors);
+        Assert.Contains("ch.orders_since has no columns", error.Message, StringComparison.Ordinal);
+        // the other tables of the member are not affected
+        var ok = await FederationHarness.RunAsync(s, "SELECT count(*) FROM ch.orders");
+        Assert.Equal(6L, Convert.ToInt64(Assert.Single(ok.Single())[0], CultureInfo.InvariantCulture));
+    }
+
+    [SkippableFact]
     public async Task Large_clickhouse_table_spills_under_a_512_mb_limit()
     {
         Need(Server.ClickHouse);

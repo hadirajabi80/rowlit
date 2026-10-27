@@ -201,7 +201,9 @@ function conditionText(ctx: Ctx, cond: FilterCondition): string | Piece | null {
       }
       return `${pgText} = ''`;
     case 'regex':
-      return null; // client-only (never reached: filtered out before)
+      // The grid applies a regex client-side (never reached for those dialects); the query builder's DuckDB runs it.
+      if (d !== 'duckdb') return null;
+      return atom(`regexp_matches(${c}, ${strParam(String(v[0]))}${cs ? '' : ", 'i'"})`);
     case 'contains': case 'notContains': case 'startsWith': case 'endsWith': {
       const raw = String(v[0]);
       const pre = cond.op === 'contains' || cond.op === 'notContains' || cond.op === 'endsWith';
@@ -321,15 +323,15 @@ interface Split {
 }
 
 /** Separate what SQL can express from what must stay client-side, preserving AND/OR semantics. */
-export function splitForServer(node: FilterNode | null, columns: readonly ColumnInfo[]): Split {
+export function splitForServer(node: FilterNode | null, columns: readonly ColumnInfo[], serverRegex = false): Split {
   if (!node) return { server: null, client: null };
   if (node.kind === 'condition') {
     if (node.enabled === false) return { server: null, client: null };
     const ci = resolveColumn(columns, node.column, node.ordinal);
     if (ci < 0 || conditionProblem(node, columns[ci].kind)) return { server: null, client: null };
-    return OPERATOR_INFO[node.op]?.server ? { server: node, client: null } : { server: null, client: node };
+    return OPERATOR_INFO[node.op]?.server || (serverRegex && node.op === 'regex') ? { server: node, client: null } : { server: null, client: node };
   }
-  const parts = node.items.map((i) => splitForServer(i, columns));
+  const parts = node.items.map((i) => splitForServer(i, columns, serverRegex));
   const servers = parts.map((p) => p.server).filter((x): x is FilterNode => x !== null);
   const clients = parts.map((p) => p.client).filter((x): x is FilterNode => x !== null);
   if (node.logic === 'and' && !node.negate) {
@@ -380,7 +382,7 @@ export function buildPredicate(
 ): PredicateResult {
   const pb = opts.builder ?? new ParamBuilder(dialect, opts.paramPrefix ?? 'fp');
   const ctx: Ctx = { dialect, columns, pb, alias: opts.alias ?? null, columnRef: opts.columnRef, now: opts.now, warnings: [], count: 0 };
-  const { server, client } = splitForServer(filter, columns);
+  const { server, client } = splitForServer(filter, columns, dialect === 'duckdb');
   const parts: Piece[] = [];
   const main = server ? nodeSql(ctx, server, true) : null;
   if (main) parts.push(main);

@@ -124,6 +124,9 @@ public sealed partial class MongoFetcher : ISourceFetcher
                 seen[e.Name] = (s.Types, s.Count + (e.Value.IsBsonNull ? 0 : 1));
             }
         }
+        // An empty collection has no fields to infer, but every document will have an _id: mounting it with that column
+        // keeps `select count(*) from mg.empty` working (0 rows) instead of "table does not exist".
+        if (n == 0) return [new SourceColumn("_id", "objectId", ColumnKinds.String, Nullable: false, IsPk: true)];
         if (seen.ContainsKey("_id")) { order.Remove("_id"); order.Insert(0, "_id"); }
         return order.Select(name =>
         {
