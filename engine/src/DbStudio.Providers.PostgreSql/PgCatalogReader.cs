@@ -361,7 +361,8 @@ public sealed partial class PgCatalogReader : ICatalogReader
     {
         var info = (await PgDb.QueryAsync(conn, PgCatalogQueries.RelationInfo, r => (
             Name: r.GetString(0), Schema: r.GetString(1), Kind: r.GetString(2), Persistence: PgDb.Str(r, 3), Comment: PgDb.Str(r, 4),
-            PartitionKey: PgDb.Str(r, 5), Options: PgDb.Strings(r, 6), Rows: PgDb.Long(r, 7), ViewDef: PgDb.Str(r, 8)), ct, oid).ConfigureAwait(false)).FirstOrDefault();
+            PartitionKey: PgDb.Str(r, 5), Options: PgDb.Strings(r, 6), Rows: PgDb.Long(r, 7), ViewDef: PgDb.Str(r, 8), Populated: PgDb.Bool(r, 9),
+            Bound: PgDb.Str(r, 10)), ct, oid).ConfigureAwait(false)).FirstOrDefault();
         if (info.Name is null) throw EngineException.NotFound($"Relation {oid}");
         var columns = await PgDb.QueryAsync(conn, PgCatalogQueries.RelationColumns, r =>
         {
@@ -397,8 +398,22 @@ public sealed partial class PgCatalogReader : ICatalogReader
             server = ft.Server;
             serverOptions = ft.Options ?? [];
         }
+        var parents = info.Kind is "r" or "p" or "f"
+            ? await PgDb.QueryAsync(conn, PgCatalogQueries.RelationParents, r => PgSqlText.Qualify(r.GetString(0), r.GetString(1)), ct, oid).ConfigureAwait(false)
+            : [];
+        var partitions = info.Kind == "p"
+            ? await PgDb.QueryAsync(conn, PgCatalogQueries.RelationPartitions,
+                r => (Name: PgSqlText.Qualify(r.GetString(0), r.GetString(1)), Bound: PgDb.Str(r, 2) ?? "", Key: PgDb.Str(r, 3)), ct, oid).ConfigureAwait(false)
+            : [];
         return new PgTableDefinition(info.Schema, info.Name, info.Kind, info.Persistence == "u", info.Comment, columns, constraints, indexes,
-            triggers, info.PartitionKey, info.Options, server, serverOptions, info.Rows, info.ViewDef);
+            triggers, info.PartitionKey, info.Options, server, serverOptions, info.Rows, info.ViewDef)
+        {
+            Populated = info.Populated || info.Kind != "m",
+            Parents = info.Bound is null ? parents : [],
+            PartitionOf = info.Bound is not null ? parents.FirstOrDefault() : null,
+            PartitionBound = info.Bound,
+            Partitions = partitions.Select(p => (p.Name, p.Bound, p.Key)).ToList(),
+        };
     }
 
     // ------------------------------------------------------------------ DDL
@@ -496,8 +511,10 @@ public sealed partial class PgCatalogReader : ICatalogReader
 
     private static async Task<DdlResult> TriggerDdlAsync(NpgsqlConnection conn, string schema, string name, CancellationToken ct)
     {
-        var tr = (await PgDb.QueryAsync(conn, PgCatalogQueries.FindTrigger, r => PgDb.Oid(r, 0), ct, schema, name).ConfigureAwait(false)).FirstOrDefault();
+        var found = (await PgDb.QueryAsync(conn, PgCatalogQueries.FindTrigger, r => (Oid: PgDb.Oid(r, 0), Name: r.GetString(4)), ct, schema, name).ConfigureAwait(false)).FirstOrDefault();
+        var tr = found.Oid;
         if (tr == 0) throw EngineException.NotFound($"Trigger {schema}.{name}");
+        name = found.Name; // the real trigger name: the listed one may be "name on table"
         var rows = await PgDb.QueryAsync(conn, PgCatalogQueries.TriggerDefinition, r => (Trigger: r.GetString(0), Function: PgDb.Str(r, 1), Comment: PgDb.Str(r, 2)), ct, tr).ConfigureAwait(false);
         var d = rows[0];
         var sb = new StringBuilder();

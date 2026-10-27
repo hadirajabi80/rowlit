@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Globalization;
-using System.Numerics;
 using System.Text;
 using DbStudio.Core.Models;
 using DbStudio.Core.Services;
@@ -102,19 +101,44 @@ public static class PgTypes
             switch (name)
             {
                 case "date":
-                    return ValueConverter.ToWire(reader.GetFieldValue<DateOnly>(ordinal));
+                {
+                    // Npgsql maps ±infinity to DateOnly.MaxValue / MinValue, which are also real dates: look at the wire value.
+                    var date = reader.GetFieldValue<DateOnly>(ordinal);
+                    return date == DateOnly.MaxValue || date == DateOnly.MinValue ? PgBinaryText.Read(reader, ordinal) : ValueConverter.ToWire(date);
+                }
                 case "time without time zone" or "time":
-                    return ValueConverter.ToWire(reader.GetFieldValue<TimeSpan>(ordinal));
+                {
+                    var time = reader.GetFieldValue<TimeSpan>(ordinal);
+                    // 24:00:00 is a valid PostgreSQL time; TimeSpan would print it as "1.00:00:00".
+                    return time >= TimeSpan.FromDays(1) ? PgBinaryText.Read(reader, ordinal) : ValueConverter.ToWire(time);
+                }
                 case "time with time zone" or "timetz":
                     return reader.GetFieldValue<DateTimeOffset>(ordinal).ToString("HH:mm:ss.FFFFFFFzzz", Inv);
                 case "timestamp with time zone" or "timestamptz":
-                    return ValueConverter.ToWire(reader.GetFieldValue<DateTimeOffset>(ordinal).ToUniversalTime());
+                {
+                    var stamp = reader.GetFieldValue<DateTimeOffset>(ordinal);
+                    return stamp == DateTimeOffset.MaxValue || stamp == DateTimeOffset.MinValue
+                        ? PgBinaryText.Read(reader, ordinal) : ValueConverter.ToWire(stamp.ToUniversalTime());
+                }
                 case "timestamp without time zone" or "timestamp":
-                    return ValueConverter.ToWire(DateTime.SpecifyKind(reader.GetFieldValue<DateTime>(ordinal), DateTimeKind.Unspecified));
+                {
+                    var stamp = reader.GetFieldValue<DateTime>(ordinal);
+                    return stamp == DateTime.MaxValue || stamp == DateTime.MinValue
+                        ? PgBinaryText.Read(reader, ordinal) : ValueConverter.ToWire(DateTime.SpecifyKind(stamp, DateTimeKind.Unspecified));
+                }
+                // Text forms of types Npgsql maps lossily: inet/cidr lose their mask, MAC addresses print without colons,
+                // ranges format their bounds with the current culture, anonymous records arrive as object[].
+                case "inet" or "cidr" or "macaddr" or "macaddr8" or "record" or "int4range" or "int8range" or "numrange" or "tsrange" or "tstzrange"
+                    or "daterange" or "int4multirange" or "int8multirange" or "nummultirange" or "tsmultirange" or "tstzmultirange" or "datemultirange":
+                    return ValueConverter.Text(PgBinaryText.Read(reader, ordinal));
+                case var array when array.EndsWith("[]", StringComparison.Ordinal):
+                    // NULL elements, composites, inet masks...: the wire form is exact; the CLR array is the fallback.
+                    try { return ValueConverter.Text(PgBinaryText.Read(reader, ordinal)); }
+                    catch (NotSupportedException) { break; }
                 case "interval":
                     return IntervalText(reader.GetFieldValue<NpgsqlInterval>(ordinal));
                 case "numeric" or "decimal" or "money":
-                    return ReadNumeric(reader, ordinal, column, warn);
+                    return ReadNumeric(reader, ordinal);
                 case "refcursor":
                     return reader.GetFieldValue<string>(ordinal);
                 case "bit" or "bit varying" or "varbit":
@@ -131,16 +155,24 @@ public static class PgTypes
         {
             try
             {
-                return ValueConverter.Text(reader.GetFieldValue<string>(ordinal));
+                // Composites, arrays with NULLs, dates beyond DateTime...: PostgreSQL's text form from the binary wire value.
+                return ValueConverter.Text(PgBinaryText.Read(reader, ordinal));
             }
-            catch (Exception ex2) when (ex2 is InvalidCastException or NotSupportedException or ArgumentException or InvalidOperationException)
+            catch (Exception ex2) when (ex2 is InvalidCastException or NotSupportedException or ArgumentException or InvalidOperationException or IndexOutOfRangeException or OverflowException)
             {
-                return $"(unsupported type {column.DbType})";
+                try
+                {
+                    return ValueConverter.Text(reader.GetFieldValue<string>(ordinal));
+                }
+                catch (Exception ex3) when (ex3 is InvalidCastException or NotSupportedException or ArgumentException or InvalidOperationException)
+                {
+                    return $"(unsupported type {column.DbType}: cast to text to view, e.g. {PgSqlText.Quote(column.Name)}::text)";
+                }
             }
         }
     }
 
-    private static object? ReadNumeric(NpgsqlDataReader reader, int ordinal, ColumnInfo column, Action<string>? warn)
+    private static object? ReadNumeric(NpgsqlDataReader reader, int ordinal)
     {
         try
         {
@@ -148,17 +180,8 @@ public static class PgTypes
         }
         catch (Exception ex) when (ex is OverflowException or InvalidCastException)
         {
-            // Beyond System.Decimal (28-29 digits, NaN, ±Infinity): exact BigInteger when integral, else double.
-            try
-            {
-                return reader.GetFieldValue<BigInteger>(ordinal).ToString(Inv);
-            }
-            catch (Exception ex2) when (ex2 is OverflowException or InvalidCastException or ArgumentException)
-            {
-                var d = reader.GetDouble(ordinal);
-                warn?.Invoke($"Column {column.Name}: a numeric value exceeds 28 digits and is shown as a double (precision may be lost).");
-                return double.IsFinite(d) ? d.ToString("R", Inv) : ValueConverter.ToWire(d);
-            }
+            // Beyond System.Decimal (28-29 digits, NaN, ±Infinity): the exact text of the binary numeric, nothing is rounded.
+            return PgBinaryText.Read(reader, ordinal);
         }
     }
 

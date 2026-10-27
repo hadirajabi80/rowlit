@@ -330,6 +330,26 @@ public sealed class PgSession : AdoSessionBase
             Transaction = null;
             try { await tx.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException) { }
         }
+
+        // Npgsql reads the type catalog once per connection string: a type or extension created (or changed) in this session
+        // is unknown to it until the types are reloaded, which would show its values as "(unsupported type …)".
+        if (context.Status == BatchStatus.Ok && DefinesTypes(context.Batch.Sql) && _conn.State == ConnectionState.Open)
+        {
+            try { await _conn.ReloadTypesAsync().ConfigureAwait(false); }
+            catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException) { /* aborted transaction: the next batch reloads nothing, values fall back to text */ }
+        }
+    }
+
+    /// <summary>True when a top-level statement of the batch is CREATE / ALTER / DROP of a TYPE, DOMAIN or EXTENSION.</summary>
+    internal static bool DefinesTypes(string sql)
+    {
+        foreach (var st in PgSqlText.Split(sql))
+        {
+            var t = st.Tokens;
+            if (t.Count < 2 || t[0].Kind != SqlTokenKind.Word || t[0].Upper is not ("CREATE" or "ALTER" or "DROP")) continue;
+            if (t.Take(4).Skip(1).Any(x => x.Kind == SqlTokenKind.Word && x.Upper is "TYPE" or "DOMAIN" or "EXTENSION")) return true;
+        }
+        return false;
     }
 
     private async Task RollbackToStatementSavepointAsync()
