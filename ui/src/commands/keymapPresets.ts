@@ -29,8 +29,10 @@ export const KEYMAP_PRESETS: readonly KeymapPreset[] = [
   {
     id: 'jetbrains',
     name: 'JetBrains / DataGrip',
-    description: 'Ctrl+Shift+F10 runs the script, Ctrl+Alt+L formats, Ctrl+Shift+N finds an object, Ctrl+Shift+A finds a command.',
+    description: 'Ctrl+Shift+F10 runs the script, Ctrl+Alt+L formats, Ctrl+B opens a definition, Ctrl+Shift+N finds an object, Ctrl+Shift+A finds a command.',
     overrides: {
+      // Go to declaration, in the editor only: elsewhere Ctrl+B still toggles the side panel.
+      'editor.openDefinitionDdl': ['Mod+B', 'Alt+F12'],
       'run.script': ['Mod+Shift+F10'],
       'run.cancel': ['Mod+F2'],
       'format.document': ['Mod+Alt+L'],

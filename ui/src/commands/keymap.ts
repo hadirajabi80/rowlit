@@ -35,6 +35,7 @@ const TYPING_SCOPES = new Set(['global', 'console', 'editor']);
 /** Commands that also have a Monaco action (editor/keyActions.ts): their keys are bound inside the editor too. */
 export const EDITOR_ACTION_COMMANDS: readonly string[] = [
   'run.statement', 'run.script', 'format.selection', 'snippet.insert', 'explain.estimated', 'explain.actual', 'editor.triggerSuggest',
+  'editor.openDefinitionDdl',
 ];
 
 // ---------------------------------------------------------------------------------------------- canonical form

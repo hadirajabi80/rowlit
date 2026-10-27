@@ -344,6 +344,12 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
         commandId: 'editor.triggerSuggest', fallback: ['MacCtrl+Space', 'Mod+I'],
         action: { id: 'dbstudio.triggerSuggest', label: 'Trigger Suggest', contextMenuGroupId: '1_modification', contextMenuOrder: 1, precondition: '!editorReadonly', run: (x) => { triggerSuggest(x); } },
       },
+      // F12 / Ctrl+click open a table's DATA; this is the explicit way to its DDL (any object). Alt+F12 replaces Monaco's
+      // Peek Definition, which would only preview the object's one-line summary. The JetBrains keymap adds Ctrl+B.
+      {
+        commandId: 'editor.openDefinitionDdl', fallback: ['Alt+F12'],
+        action: { id: 'dbstudio.openDefinitionDdl', label: 'Open definition (DDL)', contextMenuGroupId: 'navigation', contextMenuOrder: 1.6, run: () => { void openDefinitionDdl(binding); } },
+      },
     ];
     const keyedActions = bindCommandActions(ed as unknown as ActionHost<monaco.editor.IActionDescriptor>, monaco as unknown as MonacoKeys, keyed);
     subs.push({ dispose: () => keyedActions.dispose() });
@@ -367,12 +373,6 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       e.preventDefault();
       e.stopPropagation();
       void ed.getAction('editor.action.formatDocument')?.run();
-    }));
-    // F12 / Ctrl+click open a table's DATA; this is the explicit way to its DDL (any object). Alt+F12 replaces Monaco's
-    // Peek Definition, which would only preview the object's one-line summary.
-    subs.push(ed.addAction({
-      id: 'dbstudio.openDefinitionDdl', label: 'Open definition (DDL)', keybindings: [K.Alt | C.F12],
-      contextMenuGroupId: 'navigation', contextMenuOrder: 1.6, run: () => { void openDefinitionDdl(binding); },
     }));
     subs.push(ed.addAction({ id: 'dbstudio.signatureHelp', label: 'Parameter Info', keybindings: [K.CtrlCmd | K.Shift | C.Space], run: (x) => x.trigger('dbstudio', 'editor.action.triggerParameterHints', {}) }));
 

@@ -8,8 +8,8 @@
 // phase), so it never runs twice. Format selection (a Ctrl+K chord) and the tab-focus toggle stay with Monaco
 // (`keyHandler: 'host'`).
 //
-// Commands: format.document, format.selection, snippet.insert, editor.triggerSuggest, snippets.manage,
-// editor.toggleTabFocus.
+// Commands: format.document, format.selection, snippet.insert, editor.triggerSuggest, editor.openDefinitionDdl,
+// snippets.manage, editor.toggleTabFocus.
 // Explain commands live in components/PlanView/commands.ts.
 import { registerCommands, type Command } from '../commands/registry';
 import { FORMAT_ALT_SHORTCUT, isMac } from '../commands/keys';
@@ -103,6 +103,18 @@ export const EDITOR_COMMANDS: Command[] = [
       (h) => (h.triggerSuggest ? (h.focus(), h.triggerSuggest(), true) : false),
       (a, b) => { b.editor.focus(); a.triggerSuggest(b.editor); },
     ),
+  },
+  {
+    // F12 / Ctrl+click open a table's data; this opens the definition (DDL) of whatever is under the cursor. The
+    // editor action (SqlEditor `dbstudio.openDefinitionDdl`) takes the same keys from the keymap; inside the editor the
+    // dispatcher runs this command first (editor scope). JetBrains keymap: Ctrl+B, its "Go to declaration".
+    id: 'editor.openDefinitionDdl', title: 'Open definition (DDL)', category: 'Edit', shortcut: 'Alt+F12', scope: 'editor',
+    icon: 'FileCode', keywords: 'go to declaration definition ddl source create script',
+    when: () => !!activeBinding(),
+    run: () => {
+      const b = activeBinding();
+      if (b) void import('./monaco-setup').then((m) => m.openDefinitionDdl(b));
+    },
   },
   {
     id: 'snippets.manage', title: 'Manage snippets…', category: 'Preferences', icon: 'Braces', keywords: 'snippets templates settings',

@@ -5,7 +5,7 @@ import { initCommands } from '.';
 import { normalizeShortcut, setPlatformForTests } from './keys';
 import { effectiveKeys, sanitizeOverrides } from './keymap';
 import { DEFAULT_PRESET_ID, detectPreset, getPreset, KEYMAP_PRESETS, presetOverrides, validatePreset } from './keymapPresets';
-import { getCommand, hasCommand, listCommands } from './registry';
+import { commandsForKey, getCommand, hasCommand, listCommands, setKeybindingOverrides } from './registry';
 
 beforeAll(() => initCommands(), 60_000);
 afterEach(() => setPlatformForTests(null));
@@ -51,6 +51,22 @@ describe('keymap presets', () => {
     const o = getPreset('jetbrains')!.overrides;
     expect(o['run.script']).toEqual(['Mod+Shift+F10']);
     expect(o['format.document']?.[0]).toBe('Mod+Alt+L');
+  });
+
+  it('JetBrains opens a definition with Ctrl+B in the editor; elsewhere Ctrl+B still toggles the side panel', () => {
+    const o = getPreset('jetbrains')!.overrides;
+    expect(o['editor.openDefinitionDdl']).toEqual(['Mod+B', 'Alt+F12']);
+    expect(getCommand('editor.openDefinitionDdl')?.scope).toBe('editor');
+    setKeybindingOverrides(o);
+    try {
+      expect(commandsForKey('ctrl+b', 'editor').map((c) => c.id)).toEqual(['editor.openDefinitionDdl']);
+      expect(commandsForKey('ctrl+b', 'global').map((c) => c.id)).toEqual(['view.toggleSidebar']);
+      expect(commandsForKey('alt+f12', 'editor').map((c) => c.id)).toEqual(['editor.openDefinitionDdl']);
+    } finally {
+      setKeybindingOverrides({});
+    }
+    // The default keymap keeps Alt+F12 only.
+    expect(commandsForKey('ctrl+b', 'editor')).toEqual([]);
   });
 
   it('VS Code moves the palette to F1 and keeps the keyboard-shortcuts chord', () => {
