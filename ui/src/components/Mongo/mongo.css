@@ -15,7 +15,7 @@
 .mg-subtab.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--provider-mongodb); }
 .mg-subtab:disabled { opacity: 0.45; cursor: default; }
 .mg-subtab:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: -2px; }
-.mg-subtab-count { min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--bg-active); color: var(--fg-muted); font-size: var(--text-xs); display: inline-flex; align-items: center; justify-content: center; }
+.mg-subtab-count { min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--bg-active); color: var(--fg-muted-on-selected); font-size: var(--text-xs); display: inline-flex; align-items: center; justify-content: center; }
 
 .mg-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .mg-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -135,7 +135,7 @@
 .mg-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .mg-stage { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-panel); box-shadow: var(--shadow-1); }
 .mg-stage.disabled { opacity: 0.65; }
-.mg-stage.disabled .mg-stage-n { background: var(--bg-active); color: var(--fg-muted); }
+.mg-stage.disabled .mg-stage-n { background: var(--bg-active); color: var(--fg-muted-on-selected); }
 .mg-stage-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); outline: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .mg-stage.collapsed .mg-stage-head { border-bottom: 0; }
 .mg-stage-head:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
@@ -238,7 +238,7 @@
 .mg-ixkeys { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .mg-ixkey { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; font-family: var(--font-mono); font-size: var(--text-xs); }
 .mg-ixkey span { padding: 0 6px; }
-.mg-ixkey b { padding: 0 6px; background: var(--bg-active); font-weight: var(--weight-regular); color: var(--fg-muted); }
+.mg-ixkey b { padding: 0 6px; background: var(--bg-active); font-weight: var(--weight-regular); color: var(--fg-muted-on-selected); }
 .mg-props { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .mg-ixfields { border: 0; padding: 0; margin: 0 0 var(--space-3); display: flex; flex-direction: column; gap: 6px; }
 .mg-ixfields legend { font-weight: var(--weight-strong); margin-bottom: 4px; }

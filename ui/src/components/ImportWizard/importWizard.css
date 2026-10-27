@@ -360,7 +360,7 @@
   padding: 1px 8px;
   border-radius: 10px;
   background: var(--bg-active);
-  color: var(--text-muted);
+  color: var(--fg-muted-on-selected); /* muted text on --bg-active: --fg-muted is 4.19:1 there in the dark theme */
   font-size: var(--text-xs);
   white-space: nowrap;
 }
@@ -815,7 +815,7 @@
   padding: 0 6px;
   border-radius: 8px;
   background: var(--bg-active);
-  color: var(--text-muted);
+  color: var(--fg-muted-on-selected);
   font-size: var(--text-xs);
 }
 .iw-tag-req {

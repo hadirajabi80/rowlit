@@ -9,12 +9,16 @@
 }
 
 /* ---------- toolbar ---------- */
+/* One row at the usual widths; at a narrow window (900 px with the explorer open) the buttons and the filter box no
+   longer fit side by side, so the right-hand group wraps onto a second row instead of pushing "Details" out of the
+   window (the document scrolled sideways before). */
 .ol-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: var(--toolbar-h);
-  padding: 0 10px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-height: var(--toolbar-h);
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-panel);
   flex-shrink: 0;
@@ -22,8 +26,8 @@
 }
 .ol-sep {
   width: 1px;
-  align-self: stretch;
-  margin: 8px 2px;
+  height: 18px;
+  margin: 0 2px;
   background: var(--border-subtle);
 }
 .ol-execute:not(:disabled) {
@@ -34,6 +38,7 @@
   align-items: center;
   gap: 6px;
   width: min(300px, 34vw);
+  margin-left: auto; /* on the wrapped second row the filter box and layout buttons stay on the right */
   height: var(--input-h-sm);
   padding: 0 4px 0 8px;
   border: 1px solid var(--border-control);
