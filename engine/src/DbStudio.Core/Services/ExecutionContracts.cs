@@ -53,5 +53,7 @@ public static class ErrorCodes
         // M2 (docs/PLAN-M2.md 1.1, 7.5)
         SourceUnavailable = "SOURCE_UNAVAILABLE", StreamLimit = "STREAM_LIMIT", Privilege = "PRIVILEGE", GroupActive = "GROUP_ACTIVE",
         // Resources (docs/resources.md): closing a connection would roll back a transaction or cancel running work.
-        ResourceBusy = "RESOURCE_BUSY";
+        ResourceBusy = "RESOURCE_BUSY",
+        // The database server does not answer (connection broken / timeout): 503, message "Server not reachable: …".
+        Unreachable = "SERVER_UNREACHABLE";
 }

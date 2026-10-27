@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using DbStudio.Core.Models;
 using DbStudio.Core.Providers;
 using DbStudio.Core.Search;
+using DbStudio.Core.Services;
 using DbStudio.Providers.PostgreSql.Diagnostics;
 using Npgsql;
 
@@ -103,19 +104,43 @@ public sealed class PostgreSqlProvider : IDbProvider, IObjectBrowserProvider, ID
         }
     }
 
+    /// <summary>How long the liveness query of a freshly opened catalog connection may take.</summary>
+    public static TimeSpan LivenessTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Opens the catalog reader on a pooled connection and checks that it answers (<c>SELECT 1</c>, bounded by
+    /// <see cref="LivenessTimeout"/>). Npgsql hands out an idle pooled connection without testing it, so after the server
+    /// restarted (Docker) the first real query would block; a pooled connection that fails the check clears the pool and the
+    /// reader opens once more on a new connection.
+    /// </summary>
     public async Task<ICatalogReader> OpenCatalogReaderAsync(ConnectionProfile profile, string? password, CancellationToken ct)
     {
-        var reader = new PgCatalogReader(profile, password);
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            await reader.ConnectionFor(null, ct).ConfigureAwait(false); // fail fast on bad credentials
-            return reader;
+            var reader = new PgCatalogReader(profile, password);
+            try
+            {
+                var conn = await reader.ConnectionFor(null, ct).ConfigureAwait(false); // fail fast on bad credentials
+                await ConnectionGuard.BoundedAsync(t => PgDb.ScalarAsync(conn, "SELECT 1", t), LivenessTimeout, ct, "The server").ConfigureAwait(false);
+                return reader;
+            }
+            catch (Exception ex) when (attempt == 1 && !ct.IsCancellationRequested && ConnectionGuard.IsBrokenConnection(ex, includeBareIo: true))
+            {
+                await DisposeQuietly(reader).ConfigureAwait(false);
+                ClearPooledConnections(profile, password, []);
+            }
+            catch
+            {
+                await DisposeQuietly(reader).ConfigureAwait(false);
+                throw;
+            }
         }
-        catch
-        {
-            await reader.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
+    }
+
+    private static async Task DisposeQuietly(PgCatalogReader reader)
+    {
+        try { await reader.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception) { /* a broken connection: nothing left to give back */ }
     }
 
     /// <summary>version(), server_version, inet_server_addr() (profile host for Unix sockets), current_user, current_database().</summary>

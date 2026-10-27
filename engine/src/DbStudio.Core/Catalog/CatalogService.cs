@@ -21,6 +21,17 @@ public sealed record CatalogSchemas(string? Database, string DefaultSchema, IRea
 public sealed record CatalogSnapshotResult(byte[]? Json, string ETag, bool NotModified, int Version);
 
 /// <summary>
+/// Deadlines of the calls on catalog connections (a server that vanished behind a pooled connection never answers).
+/// <paramref name="Probe"/>: the liveness check made when a catalog reader is opened. <paramref name="Quick"/>: database /
+/// schema lists. <paramref name="Load"/>: schema snapshots, object details, DDL (a huge dictionary may legitimately take minutes).
+/// A call that hits a deadline or fails on a broken connection clears the pooled connections and runs once more on fresh ones.
+/// </summary>
+public sealed record CatalogTimeouts(TimeSpan Probe, TimeSpan Quick, TimeSpan Load)
+{
+    public static CatalogTimeouts Default { get; } = new(TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(5));
+}
+
+/// <summary>
 /// Metadata cache per connection / database / schema (docs/PLAN.md 2.7). Schemas are loaded lazily with one
 /// <see cref="ICatalogReader.LoadSchemaAsync"/> call over a short-lived catalog connection, serialized once to the
 /// compact wire format and ETag'd. DDL executed in sessions invalidates and reloads the affected schemas in the
@@ -36,13 +47,15 @@ public sealed class CatalogService
     private readonly ConcurrentDictionary<string, ConnectionCatalog> _caches = new(StringComparer.Ordinal);
     private readonly string _epoch = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
     private readonly TimeProvider _time;
+    private readonly CatalogTimeouts _limits;
     // Resources: the last version of every forgotten / evicted database cache, so a reload never reuses an ETag.
     private readonly ConcurrentDictionary<string, int> _retiredVersions = new(StringComparer.OrdinalIgnoreCase);
 
     public CatalogService(ProviderRegistry providers, ConnectionStore connections, IEventPublisher events, ILogger<CatalogService>? log = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null, CatalogTimeouts? limits = null)
     {
         _time = time ?? TimeProvider.System;
+        _limits = limits ?? CatalogTimeouts.Default;
         _providers = providers;
         _connections = connections;
         _events = events;
@@ -76,13 +89,85 @@ public sealed class CatalogService
         public DateTimeOffset LastUsed { get; set; }
     }
 
-    /// <summary>Lazily opened catalog reader shared by one operation.</summary>
-    private sealed class ReaderLease(IDbProvider provider, ConnectionProfile profile, string? password, CancellationToken ct) : IAsyncDisposable
+    /// <summary>
+    /// Lazily opened catalog reader shared by one attempt of an operation. Opening it also checks that the (possibly pooled)
+    /// connection answers: a stale one is found within <c>probe</c> instead of blocking the real query.
+    /// </summary>
+    private sealed class ReaderLease(IDbProvider provider, ConnectionProfile profile, string? password, TimeSpan probe, CancellationToken ct) : IAsyncDisposable
     {
         private ICatalogReader? _reader;
-        public async ValueTask<ICatalogReader> GetAsync() =>
-            _reader ??= await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        public ValueTask DisposeAsync() => _reader?.DisposeAsync() ?? ValueTask.CompletedTask;
+        private volatile bool _disposed;
+
+        public async ValueTask<ICatalogReader> GetAsync()
+        {
+            if (_reader is not null) return _reader;
+            var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
+            try
+            {
+                // the attempt was abandoned while this reader was still opening: give the connection back, do not use it
+                if (_disposed) throw new OperationCanceledException(ct);
+                await ConnectionGuard.BoundedAsync(t => reader.GetCurrentDatabaseAsync(t), probe, ct, "The server").ConfigureAwait(false);
+            }
+            catch
+            {
+                await DisposeQuietly(reader).ConfigureAwait(false);
+                throw;
+            }
+            return _reader = reader;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _disposed = true;
+            return _reader is { } r ? DisposeQuietly(r) : ValueTask.CompletedTask;
+        }
+
+        private static async ValueTask DisposeQuietly(ICatalogReader reader)
+        {
+            try { await reader.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception) { /* a broken connection: nothing left to give back */ }
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> on a fresh reader lease with a deadline. When the attempt times out or fails on a broken
+    /// connection (socket / IO error, no answer) the provider's pooled connections are cleared and the whole operation runs
+    /// once more on new ones; a second failure is reported as 503 "Server not reachable: …". The request's cancellation
+    /// token reaches every driver call (a cancelled request ends the attempt at once).
+    /// </summary>
+    private async Task<T> WithReaderAsync<T>(string connectionId, IDbProvider provider, ConnectionProfile profile, string? password,
+        TimeSpan timeout, CancellationToken ct, Func<ReaderLease, CancellationToken, Task<T>> body)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await ConnectionGuard.BoundedAsync(async token =>
+                {
+                    await using var lease = new ReaderLease(provider, profile, password, _limits.Probe, token);
+                    return await body(lease, token).ConfigureAwait(false);
+                }, timeout, ct, "The server").ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ConnectionGuard.IsBrokenConnection(ex, includeBareIo: true))
+            {
+                if (attempt >= 2) throw ConnectionGuard.Unreachable(ex, profile.Name);
+                _log.LogWarning("Catalog call on {ConnectionId} failed on a broken connection ({Message}); clearing the pooled connections and retrying once",
+                    connectionId, ConnectionGuard.RootMessage(ex));
+                ClearPools(connectionId, provider, profile, password);
+            }
+        }
+    }
+
+    private void ClearPools(string connectionId, IDbProvider provider, ConnectionProfile profile, string? password)
+    {
+        try
+        {
+            provider.ClearPooledConnections(profile, password, CachedDatabases(connectionId));
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Clearing the pooled connections of {ConnectionId} failed", connectionId);
+        }
     }
 
     private (IDbProvider Provider, ConnectionProfile Profile, string? Password) Resolve(string connectionId)
@@ -101,7 +186,7 @@ public sealed class CatalogService
 
     private static string RetiredKey(string connectionId, string dbKey) => connectionId + "|" + dbKey;
 
-    private async Task<DbCatalog> DbAsync(ConnectionCatalog cc, Dialect dialect, string? database, ReaderLease lease)
+    private async Task<DbCatalog> DbAsync(ConnectionCatalog cc, Dialect dialect, string? database, ReaderLease lease, CancellationToken ct)
     {
         string? name = null;
         if (DialectInfo.HasDatabases(dialect))
@@ -109,7 +194,7 @@ public sealed class CatalogService
             name = string.IsNullOrWhiteSpace(database) ? null : database;
             if (name is null)
             {
-                cc.CurrentDatabase ??= await (await lease.GetAsync().ConfigureAwait(false)).GetCurrentDatabaseAsync(CancellationToken.None).ConfigureAwait(false);
+                cc.CurrentDatabase ??= await (await lease.GetAsync().ConfigureAwait(false)).GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
                 name = cc.CurrentDatabase;
             }
         }
@@ -139,12 +224,14 @@ public sealed class CatalogService
         await cc.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await using var lease = new ReaderLease(provider, profile, password, ct);
-            var reader = await lease.GetAsync().ConfigureAwait(false);
-            cc.DatabaseList = await reader.ListDatabasesAsync(ct).ConfigureAwait(false);
-            var current = await reader.GetCurrentDatabaseAsync(ct).ConfigureAwait(false);
-            if (DialectInfo.HasDatabases(provider.Dialect)) cc.CurrentDatabase = current;
-            return new CatalogDatabases(cc.DatabaseList, current);
+            return await WithReaderAsync(connectionId, provider, profile, password, _limits.Quick, ct, async (lease, token) =>
+            {
+                var reader = await lease.GetAsync().ConfigureAwait(false);
+                cc.DatabaseList = await reader.ListDatabasesAsync(token).ConfigureAwait(false);
+                var current = await reader.GetCurrentDatabaseAsync(token).ConfigureAwait(false);
+                if (DialectInfo.HasDatabases(provider.Dialect)) cc.CurrentDatabase = current;
+                return new CatalogDatabases(cc.DatabaseList, current);
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -159,16 +246,18 @@ public sealed class CatalogService
         await cc.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await using var lease = new ReaderLease(provider, profile, password, ct);
-            var db = await DbAsync(cc, provider.Dialect, database, lease).ConfigureAwait(false);
-            await EnsureDefaultsAsync(db, cc, lease, ct).ConfigureAwait(false);
-            db.SchemaList = await (await lease.GetAsync().ConfigureAwait(false)).ListSchemasAsync(db.Name, ct).ConfigureAwait(false);
-            var items = db.SchemaList
-                .Select(s => db.Loaded.TryGetValue(s.Name, out var e)
-                    ? new CatalogSchemaItem(s.Name, true, e.ObjectCount, s.SearchPathIndex)
-                    : new CatalogSchemaItem(s.Name, false, s.ObjectCount, s.SearchPathIndex))
-                .ToList();
-            return new CatalogSchemas(db.Name, db.DefaultSchema!, items);
+            return await WithReaderAsync(connectionId, provider, profile, password, _limits.Quick, ct, async (lease, token) =>
+            {
+                var db = await DbAsync(cc, provider.Dialect, database, lease, token).ConfigureAwait(false);
+                await EnsureDefaultsAsync(db, cc, lease, token).ConfigureAwait(false);
+                db.SchemaList = await (await lease.GetAsync().ConfigureAwait(false)).ListSchemasAsync(db.Name, token).ConfigureAwait(false);
+                var items = db.SchemaList
+                    .Select(s => db.Loaded.TryGetValue(s.Name, out var e)
+                        ? new CatalogSchemaItem(s.Name, true, e.ObjectCount, s.SearchPathIndex)
+                        : new CatalogSchemaItem(s.Name, false, s.ObjectCount, s.SearchPathIndex))
+                    .ToList();
+                return new CatalogSchemas(db.Name, db.DefaultSchema!, items);
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -186,34 +275,36 @@ public sealed class CatalogService
         await cc.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await using var lease = new ReaderLease(provider, profile, password, ct);
-            var db = await DbAsync(cc, provider.Dialect, database, lease).ConfigureAwait(false);
-            await EnsureDefaultsAsync(db, cc, lease, ct).ConfigureAwait(false);
-
-            var requested = schemas is { Count: > 0 } ? schemas.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : [db.DefaultSchema!];
-            var entries = new List<SchemaEntry>(requested.Count);
-            foreach (var name in requested)
+            return await WithReaderAsync(connectionId, provider, profile, password, _limits.Load, ct, async (lease, token) =>
             {
-                if (!db.Loaded.TryGetValue(name, out var entry))
+                var db = await DbAsync(cc, provider.Dialect, database, lease, token).ConfigureAwait(false);
+                await EnsureDefaultsAsync(db, cc, lease, token).ConfigureAwait(false);
+
+                var requested = schemas is { Count: > 0 } ? schemas.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : [db.DefaultSchema!];
+                var entries = new List<SchemaEntry>(requested.Count);
+                foreach (var name in requested)
                 {
-                    // Evicted to save memory: the reload may differ from what the client kept, so it gets a new ETag.
-                    if (db.Evicted.Remove(name)) db.Version++;
-                    entry = await LoadSchemaAsync(db, name, db.Version, lease, ct).ConfigureAwait(false);
+                    if (!db.Loaded.TryGetValue(name, out var entry))
+                    {
+                        // Evicted to save memory: the reload may differ from what the client kept, so it gets a new ETag.
+                        if (db.Evicted.Remove(name)) db.Version++;
+                        entry = await LoadSchemaAsync(db, name, db.Version, lease, token).ConfigureAwait(false);
+                    }
+                    entry.LastUsed = _time.GetUtcNow();
+                    entries.Add(entry);
                 }
-                entry.LastUsed = _time.GetUtcNow();
-                entries.Add(entry);
-            }
 
-            var etag = ETag(connectionId, db, entries);
-            if (ifNoneMatch is not null && ETagMatches(ifNoneMatch, etag))
-                return new CatalogSnapshotResult(null, etag, true, db.Version);
+                var etag = ETag(connectionId, db, entries);
+                if (ifNoneMatch is not null && ETagMatches(ifNoneMatch, etag))
+                    return new CatalogSnapshotResult(null, etag, true, db.Version);
 
-            if (provider.Dialect == Dialect.PgSql && db.SchemaList is null)
-                db.SchemaList = await (await lease.GetAsync().ConfigureAwait(false)).ListSchemasAsync(db.Name, ct).ConfigureAwait(false);
-            var searchPath = db.SchemaList?.Where(s => s.SearchPathIndex is not null).OrderBy(s => s.SearchPathIndex).Select(s => s.Name).ToList();
-            var json = CatalogWire.ComposeSnapshot(connectionId, provider.Dialect, db.Name, db.DefaultSchema!, db.Version,
-                cc.DatabaseList ?? [], entries.Select(e => e.Json), searchPath);
-            return new CatalogSnapshotResult(json, etag, false, db.Version);
+                if (provider.Dialect == Dialect.PgSql && db.SchemaList is null)
+                    db.SchemaList = await (await lease.GetAsync().ConfigureAwait(false)).ListSchemasAsync(db.Name, token).ConfigureAwait(false);
+                var searchPath = db.SchemaList?.Where(s => s.SearchPathIndex is not null).OrderBy(s => s.SearchPathIndex).Select(s => s.Name).ToList();
+                var json = CatalogWire.ComposeSnapshot(connectionId, provider.Dialect, db.Name, db.DefaultSchema!, db.Version,
+                    cc.DatabaseList ?? [], entries.Select(e => e.Json), searchPath);
+                return new CatalogSnapshotResult(json, etag, false, db.Version);
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -257,40 +348,28 @@ public sealed class CatalogService
         return false;
     }
 
-    public async Task<ObjectDetails> GetObjectDetailsAsync(string connectionId, ObjectRef obj, CancellationToken ct)
+    /// <summary>One metadata read on its own reader (no cache): bounded, a broken pooled connection cleared and retried once.</summary>
+    private Task<T> ReadAsync<T>(string connectionId, CancellationToken ct, Func<ICatalogReader, CancellationToken, Task<T>> read)
     {
         var (provider, profile, password) = Resolve(connectionId);
-        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        return await reader.GetObjectDetailsAsync(obj, ct).ConfigureAwait(false);
+        return WithReaderAsync(connectionId, provider, profile, password, _limits.Load, ct, async (lease, token) =>
+            await read(await lease.GetAsync().ConfigureAwait(false), token).ConfigureAwait(false));
     }
 
-    public async Task<DdlResult> GetDdlAsync(string connectionId, ObjectRef obj, CancellationToken ct)
-    {
-        var (provider, profile, password) = Resolve(connectionId);
-        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        return await reader.GetDdlAsync(obj, ct).ConfigureAwait(false);
-    }
+    public Task<ObjectDetails> GetObjectDetailsAsync(string connectionId, ObjectRef obj, CancellationToken ct) =>
+        ReadAsync(connectionId, ct, (reader, t) => reader.GetObjectDetailsAsync(obj, t));
 
-    public async Task<IReadOnlyList<ObjectError>> GetCompileErrorsAsync(string connectionId, ObjectRef obj, CancellationToken ct)
-    {
-        var (provider, profile, password) = Resolve(connectionId);
-        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        return await reader.GetCompileErrorsAsync(obj, ct).ConfigureAwait(false);
-    }
+    public Task<DdlResult> GetDdlAsync(string connectionId, ObjectRef obj, CancellationToken ct) =>
+        ReadAsync(connectionId, ct, (reader, t) => reader.GetDdlAsync(obj, t));
 
-    public async Task<IReadOnlyList<SystemTypeInfo>> ListSystemTypesAsync(string connectionId, string? database, CancellationToken ct)
-    {
-        var (provider, profile, password) = Resolve(connectionId);
-        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        return await reader.ListSystemTypesAsync(database, ct).ConfigureAwait(false);
-    }
+    public Task<IReadOnlyList<ObjectError>> GetCompileErrorsAsync(string connectionId, ObjectRef obj, CancellationToken ct) =>
+        ReadAsync(connectionId, ct, (reader, t) => reader.GetCompileErrorsAsync(obj, t));
 
-    public async Task<CatalogObject?> ResolvePublicSynonymAsync(string connectionId, string name, CancellationToken ct)
-    {
-        var (provider, profile, password) = Resolve(connectionId);
-        await using var reader = await provider.OpenCatalogReaderAsync(profile, password, ct).ConfigureAwait(false);
-        return await reader.ResolvePublicSynonymAsync(name, ct).ConfigureAwait(false);
-    }
+    public Task<IReadOnlyList<SystemTypeInfo>> ListSystemTypesAsync(string connectionId, string? database, CancellationToken ct) =>
+        ReadAsync(connectionId, ct, (reader, t) => reader.ListSystemTypesAsync(database, t));
+
+    public Task<CatalogObject?> ResolvePublicSynonymAsync(string connectionId, string name, CancellationToken ct) =>
+        ReadAsync(connectionId, ct, (reader, t) => reader.ResolvePublicSynonymAsync(name, t));
 
     // ------------------------------------------------------------------ refresh / invalidation
 
@@ -302,16 +381,19 @@ public sealed class CatalogService
         await cc.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await using var lease = new ReaderLease(provider, profile, password, ct);
-            cc.DatabaseList = null;
-            var db = await DbAsync(cc, provider.Dialect, database, lease).ConfigureAwait(false);
-            db.DefaultSchema = null;
-            db.SchemaList = null;
-            var targets = schemas is { Count: > 0 } ? schemas.ToList() : db.Loaded.Keys.ToList();
-            var reloaded = await ReloadAsync(db, targets, lease, ct).ConfigureAwait(false);
-            await EnsureDefaultsAsync(db, cc, lease, ct).ConfigureAwait(false);
-            _events.Publish(new CatalogChangedEvent(connectionId, db.Name, reloaded, db.Version));
-            return db.Version;
+            List<string>? targets = null; // decided once: a retry must reload the same schemas (the failed attempt removed them from the cache)
+            return await WithReaderAsync(connectionId, provider, profile, password, _limits.Load, ct, async (lease, token) =>
+            {
+                cc.DatabaseList = null;
+                var db = await DbAsync(cc, provider.Dialect, database, lease, token).ConfigureAwait(false);
+                db.DefaultSchema = null;
+                db.SchemaList = null;
+                targets ??= schemas is { Count: > 0 } ? schemas.ToList() : db.Loaded.Keys.ToList();
+                var reloaded = await ReloadAsync(db, targets, lease, token).ConfigureAwait(false);
+                await EnsureDefaultsAsync(db, cc, lease, token).ConfigureAwait(false);
+                _events.Publish(new CatalogChangedEvent(connectionId, db.Name, reloaded, db.Version));
+                return db.Version;
+            }).ConfigureAwait(false);
         }
         finally
         {
@@ -369,7 +451,7 @@ public sealed class CatalogService
         await cc.Gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var lease = new ReaderLease(provider, profile, _connections.GetPassword(connectionId), CancellationToken.None);
+            var password = _connections.GetPassword(connectionId);
             var work = new Dictionary<string, (DbCatalog Db, HashSet<string> Schemas, bool Whole)>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in targets)
             {
@@ -395,14 +477,25 @@ public sealed class CatalogService
                 work[key] = w;
             }
 
+            // what to reload is decided before the (retryable) reads: a failed attempt removes schemas from the cache
+            var plan = new List<(DbCatalog Db, List<string> Names)>();
             foreach (var (_, (db, schemas, whole)) in work)
             {
                 db.SchemaList = null;
                 var toReload = whole ? db.Loaded.Keys.ToList() : schemas.Where(db.Loaded.ContainsKey).ToList();
                 if (toReload.Count == 0 && !whole) continue;
-                var reloaded = await ReloadAsync(db, toReload, lease, CancellationToken.None).ConfigureAwait(false);
-                _events.Publish(new CatalogChangedEvent(connectionId, db.Name, reloaded, db.Version));
+                plan.Add((db, toReload));
             }
+            if (plan.Count == 0) return;
+            await WithReaderAsync(connectionId, provider, profile, password, _limits.Load, CancellationToken.None, async (lease, token) =>
+            {
+                foreach (var (db, names) in plan)
+                {
+                    var reloaded = await ReloadAsync(db, names, lease, token).ConfigureAwait(false);
+                    _events.Publish(new CatalogChangedEvent(connectionId, db.Name, reloaded, db.Version));
+                }
+                return true;
+            }).ConfigureAwait(false);
         }
         finally
         {

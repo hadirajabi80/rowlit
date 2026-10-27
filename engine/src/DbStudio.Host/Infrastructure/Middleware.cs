@@ -63,6 +63,8 @@ public sealed class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorH
         NotSupportedException => (400, ErrorCodes.NotSupported, ex.Message, null),
         BadHttpRequestException bad => (400, ErrorCodes.Validation, bad.InnerException?.Message ?? bad.Message, null),
         JsonException json => (400, ErrorCodes.Validation, json.Message, null),
+        // the server stopped answering (socket error, stream ended, driver or engine deadline): not a bug of the query
+        _ when ConnectionGuard.IsBrokenConnection(ex) => (503, ErrorCodes.Unreachable, $"Server not reachable: {ConnectionGuard.RootMessage(ex)}", null),
         DbException db => (422, ErrorCodes.ProviderError, db.Message, new { providerCode = db.ErrorCode, sqlState = db.SqlState }),
         FileNotFoundException fnf => (422, ErrorCodes.ProviderError, fnf.Message, null),
         UnauthorizedAccessException ua => (422, ErrorCodes.ProviderError, ua.Message, null),
