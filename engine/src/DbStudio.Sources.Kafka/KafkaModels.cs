@@ -86,7 +86,8 @@ public sealed record KafkaSchemaRef(string? Subject, JsonElement? Version);
 public sealed record KafkaProduceRequest(List<KafkaProduceMessage>? Messages, string? KeyFormat, string? ValueFormat, KafkaSchemaRef? Schema,
     KafkaSchemaRef? KeySchema, string? Compression);
 
-public sealed record KafkaProduceResult(int Partition, long Offset, DateTimeOffset Timestamp);
+/// <param name="Warnings">Input the encoder accepted but did not write, e.g. Avro fields the schema does not have (key and value, null when none).</param>
+public sealed record KafkaProduceResult(int Partition, long Offset, DateTimeOffset Timestamp, IReadOnlyList<string>? Warnings = null);
 
 public sealed record KafkaGroupSummaryDto(string GroupId, string State, string? Protocol, int Members, IReadOnlyList<string> Topics, long? LagTotal,
     KafkaNodeRef? Coordinator);

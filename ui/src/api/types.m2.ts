@@ -94,6 +94,8 @@ export interface RedisStringValue extends RedisKeyHeader {
 export interface RedisHashValue extends RedisKeyHeader {
   type: 'hash';
   fields: { field: string; value: string }[];
+  /** Elements that are not valid UTF-8: display text → base64 bytes (see redis/binary.ts). */
+  bin?: Record<string, string> | null;
   /** Next HSCAN cursor; `'0'` = last page. */
   cursor: string;
   /** shape chosen by M2-0; the feature package may refine — `HLEN`. */
@@ -102,6 +104,7 @@ export interface RedisHashValue extends RedisKeyHeader {
 export interface RedisListValue extends RedisKeyHeader {
   type: 'list';
   items: { index: number; value: string }[];
+  bin?: Record<string, string> | null;
   length: number;
   start: number;
   stop: number;
@@ -109,6 +112,7 @@ export interface RedisListValue extends RedisKeyHeader {
 export interface RedisSetValue extends RedisKeyHeader {
   type: 'set';
   members: string[];
+  bin?: Record<string, string> | null;
   cursor: string;
   /** shape chosen by M2-0; the feature package may refine — `SCARD`. */
   length: number;
@@ -116,6 +120,7 @@ export interface RedisSetValue extends RedisKeyHeader {
 export interface RedisZsetValue extends RedisKeyHeader {
   type: 'zset';
   members: RedisZsetMember[];
+  bin?: Record<string, string> | null;
   cursor: string;
   /** shape chosen by M2-0; the feature package may refine — `ZCARD`. */
   length: number;
@@ -151,17 +156,17 @@ export type RedisKeyValue =
 /** `PUT /keys/{key}/string` (keeps the TTL). */
 export interface RedisSetStringRequest { value: string }
 /** `POST /keys/{key}/hash` (HSET/HDEL). */
-export interface RedisHashEditRequest { set?: Record<string, string>; del?: string[] }
+export interface RedisHashEditRequest { set?: Record<string, string>; del?: string[]; bin?: Record<string, string> }
 /** `POST /keys/{key}/list`: exactly one operation. */
-export type RedisListEditRequest =
+export type RedisListEditRequest = { bin?: Record<string, string> } & (
   | { push: { side: 'left' | 'right'; values: string[] } }
   | { setIndex: { index: number; value: string } }
   /** With `index` the element at that position goes (guarded by `value`, the element the caller saw); without it LREM removes `count` occurrences of `value`. */
-  | { remove: { value: string; count: number; index?: number } };
+  | { remove: { value: string; count: number; index?: number } });
 /** `POST /keys/{key}/set` (SADD/SREM). */
-export interface RedisSetEditRequest { add?: string[]; remove?: string[] }
+export interface RedisSetEditRequest { add?: string[]; remove?: string[]; bin?: Record<string, string> }
 /** `POST /keys/{key}/zset` (ZADD/ZREM). */
-export interface RedisZsetEditRequest { add?: RedisZsetMember[]; remove?: string[] }
+export interface RedisZsetEditRequest { add?: RedisZsetMember[]; remove?: string[]; bin?: Record<string, string> }
 /** `POST /keys/{key}/stream`: exactly one operation. `id` of `add` defaults to `*` (shape chosen by M2-0). */
 export type RedisStreamEditRequest =
   | { add: Record<string, string>; id?: string }
@@ -471,6 +476,8 @@ export interface MongoCreateIndexRequest {
     expireAfterSeconds?: number | null;
     partialFilterExpression?: string | null;
     collation?: string | null;
+    /** A single `$**` index only: the fields to include / exclude (shell document). */
+    wildcardProjection?: string | null;
   };
 }
 /** shape chosen by M2-0; the feature package may refine — `jobId` set when the build outlives 2 s (progress via jobs). */
@@ -744,7 +751,8 @@ export interface KafkaProduceRequest {
   compression?: 'none' | 'gzip' | 'snappy' | 'lz4' | 'zstd';
 }
 /** One per produced message, in order. */
-export interface KafkaProduceResult { partition: number; offset: number; timestamp: string }
+/** `warnings`: input the encoder accepted but did not write (e.g. Avro fields the schema does not have). */
+export interface KafkaProduceResult { partition: number; offset: number; timestamp: string; warnings?: string[] | null }
 
 export type KafkaGroupState = 'Stable' | 'Empty' | 'Dead' | 'PreparingRebalance' | 'CompletingRebalance' | 'Unknown';
 /** Item of `GET …/groups`. */

@@ -1,7 +1,8 @@
 // Kafka workspace against the MSW mock engine (mocks/m2/kafka.ts) and the FakeSocket: explorer tree, commands,
 // overview, topics, message browser (fetch + live tail), configs, groups, offset reset, produce, typed confirmations.
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../../api/client';
 import { engineSocket } from '../../../api/ws';
 import { getCommand, isEnabled, runCommand } from '../../../commands/registry';
 import type { SourceTarget } from '../../../commands/types';
@@ -264,6 +265,40 @@ describe('views', () => {
     // the invalid JSON text would be refused client-side if it were still validated
     await screen.findByRole('table', { name: 'Produced messages' });
     expect(screen.queryByText(/not valid JSON/)).not.toBeInTheDocument();
+  });
+
+  it('produce tells the user which fields the Avro schema did not take', async () => {
+    vi.spyOn(api.kafka, 'produce').mockResolvedValue([
+      { partition: 0, offset: 1, timestamp: '2026-10-18T14:00:00Z', warnings: ['value $.amout: not a field of record shop.Order, so it was not written'] },
+      { partition: 0, offset: 2, timestamp: '2026-10-18T14:00:00Z', warnings: ['value $.amout: not a field of record shop.Order, so it was not written'] },
+    ]);
+    show(openProduce(CID, 'events', { value: 'x', valueFormat: 'string', repeat: 2 }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Produce 2×' }));
+    await screen.findByRole('table', { name: 'Produced messages' });
+    // one line although both messages carry it
+    expect(await screen.findByText(/Produced, but value \$\.amout: not a field of record shop\.Order, so it was not written$/)).toBeInTheDocument();
+  });
+
+  it('a forced reload during a load in flight runs again, so a change made meanwhile is not missed', async () => {
+    const releases: (() => void)[] = [];
+    let calls = 0;
+    vi.spyOn(api.kafka, 'topics').mockImplementation(async () => {
+      const n = ++calls;
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return [{ name: n === 1 ? 'old' : 'old-and-new' }] as never;
+    });
+    const first = loadTopics(CID);
+    const forced = loadTopics(CID, true);
+    const forcedAgain = loadTopics(CID, true);
+    expect(calls).toBe(1);
+    releases[0]();
+    await first;
+    await waitFor(() => expect(calls).toBe(2));
+    // the two forced callers share one follow-up
+    releases[1]();
+    await Promise.all([forced, forcedAgain]);
+    expect(calls).toBe(2);
+    expect(kafkaConn(CID).topics.data?.[0].name).toBe('old-and-new');
   });
 
   it('produce on a read-only connection is disabled', async () => {

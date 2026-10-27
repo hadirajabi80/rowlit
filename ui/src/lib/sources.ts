@@ -117,6 +117,7 @@ export function sourceRow(init: {
   expandable?: boolean;
   detail?: string;
   count?: number;
+  countPartial?: boolean;
   meta?: unknown;
   match?: number[];
   forceOpen?: boolean;
@@ -130,6 +131,7 @@ export function sourceRow(init: {
     label: init.label,
     detail: init.detail,
     count: init.count,
+    countPartial: init.countPartial,
     match: init.match,
     expandable,
     expanded: expandable && (init.forceOpen === true || init.expanded.has(id)),

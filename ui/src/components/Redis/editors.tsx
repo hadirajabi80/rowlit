@@ -10,6 +10,7 @@ import type {
   RedisHashValue, RedisJsonValue, RedisKeyValue, RedisListValue, RedisSetValue, RedisStreamGroupDetail, RedisStreamValue, RedisStringValue,
   RedisZsetValue,
 } from '../../api/types';
+import { binFor, editedValue, mergeBin, type BinMap } from '../../redis/binary';
 import { formatBytes, formatCount, formatScore, prettyJson } from '../../redis/format';
 import { useUi } from '../../store/ui';
 import type { EffectiveTheme } from '../../theme/useTheme';
@@ -339,10 +340,13 @@ export function HashEditor({ cid, db, value, readOnly, reload, registerSave, onE
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const { reset } = pairs;
+  // elements that are not valid UTF-8 travel with their bytes (redis/binary.ts)
+  const bin = useRef<BinMap>(mergeBin(value.bin));
   // a reload of the key replaces the page set
   useEffect(() => {
     reset(value.fields.map((f) => [f.field, f.value]));
     setCursor(value.cursor);
+    bin.current = mergeBin(value.bin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -350,6 +354,7 @@ export function HashEditor({ cid, db, value, readOnly, reload, registerSave, onE
     setLoading(true);
     try {
       const v = await api.redis.getKey(cid, value.key, { db, cursor: from, field: matchPattern(match), count: 200 }) as RedisHashValue;
+      bin.current = append ? mergeBin(bin.current, v.bin) : mergeBin(v.bin);
       const rows = v.fields.map((f) => [f.field, f.value] as [string, string]);
       if (append) pairs.setBase([...pairs.base, ...rows.filter(([f]) => !pairs.base.some(([x]) => x === f))]);
       else pairs.reset(rows);
@@ -364,8 +369,18 @@ export function HashEditor({ cid, db, value, readOnly, reload, registerSave, onE
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      const set: Record<string, string> = Object.fromEntries([...pairs.edits, ...pairs.added]);
-      await api.redis.editHash(cid, db, value.key, { set: Object.keys(set).length ? set : undefined, del: pairs.deleted.size ? [...pairs.deleted] : undefined });
+      const set: Record<string, string> = {};
+      const extra: BinMap = {};
+      for (const [field, v] of [...pairs.edits, ...pairs.added]) {
+        // an edited binary value is read with its \xHH escapes; a new or plain one is sent as typed
+        const sent = pairs.edits.has(field) ? editedValue(v, pairs.base.find(([f]) => f === field)?.[1], bin.current) : { text: v };
+        set[field] = sent.text;
+        if (sent.b64) extra[sent.text] = sent.b64;
+      }
+      const del = pairs.deleted.size ? [...pairs.deleted] : undefined;
+      await api.redis.editHash(cid, db, value.key, {
+        set: Object.keys(set).length ? set : undefined, del, bin: binFor(bin.current, [...Object.keys(set), ...Object.values(set), ...(del ?? [])], extra),
+      });
       onError(null);
       toast('success', `Saved ${pairs.pending} change${pairs.pending === 1 ? '' : 's'}`, value.key);
       reload();
@@ -402,15 +417,18 @@ export function ZsetEditor({ cid, db, value, readOnly, reload, registerSave, onE
   const [desc, setDesc] = useState(false);
   const [saving, setSaving] = useState(false);
   const { reset } = pairs;
+  const bin = useRef<BinMap>(mergeBin(value.bin));
   useEffect(() => {
     reset(toRows(value));
     setCursor(value.cursor);
+    bin.current = mergeBin(value.bin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const fetchPage = async (from: string, match: string, append: boolean) => {
     try {
       const v = await api.redis.getKey(cid, value.key, { db, cursor: from, field: matchPattern(match), count: 200 }) as RedisZsetValue;
+      bin.current = append ? mergeBin(bin.current, v.bin) : mergeBin(v.bin);
       if (append) pairs.setBase([...pairs.base, ...toRows(v)]);
       else pairs.reset(toRows(v));
       setCursor(v.cursor);
@@ -435,7 +453,8 @@ export function ZsetEditor({ cid, db, value, readOnly, reload, registerSave, onE
     }
     setSaving(true);
     try {
-      await api.redis.editZset(cid, db, value.key, { add: add.length ? add : undefined, remove: pairs.deleted.size ? [...pairs.deleted] : undefined });
+      const remove = pairs.deleted.size ? [...pairs.deleted] : undefined;
+      await api.redis.editZset(cid, db, value.key, { add: add.length ? add : undefined, remove, bin: binFor(bin.current, [...add.map((m) => m.member), ...(remove ?? [])]) });
       onError(null);
       toast('success', 'Sorted set saved', value.key);
       reload();
@@ -531,11 +550,17 @@ export function ListEditor({ cid, db, value, readOnly, reload, onError }: Editor
               <tr key={it.index}>
                 <td className="mono muted">{it.index}</td>
                 <td><EditableCell value={it.value} label={`element ${it.index}`} disabled={readOnly}
-                  onCommit={(v) => void act(() => api.redis.editList(cid, db, value.key, { setIndex: { index: it.index, value: v } }), `Element ${it.index} saved (LSET)`)} /></td>
+                  onCommit={(v) => {
+                    // a binary element is edited through its \xHH escapes and goes back byte for byte
+                    const sent = editedValue(v, it.value, view.bin ?? {});
+                    void act(() => api.redis.editList(cid, db, value.key, {
+                      setIndex: { index: it.index, value: sent.text }, bin: binFor(view.bin ?? {}, [sent.text], sent.b64 ? { [sent.text]: sent.b64 } : {}),
+                    }), `Element ${it.index} saved (LSET)`);
+                  }} /></td>
                 {!readOnly && (
                   <td className="redis-col-actions">
                     <button className="icon-btn" aria-label={`Remove element ${it.index}`} title="Remove (LREM 1)"
-                      onClick={() => void act(() => api.redis.editList(cid, db, value.key, { remove: { value: it.value, count: 1, index: it.index } }), 'Element removed')}><Trash2 size={14} /></button>
+                      onClick={() => void act(() => api.redis.editList(cid, db, value.key, { remove: { value: it.value, count: 1, index: it.index }, bin: binFor(view.bin ?? {}, [it.value]) }), 'Element removed')}><Trash2 size={14} /></button>
                   </td>
                 )}
               </tr>
@@ -557,15 +582,18 @@ export function SetEditor({ cid, db, value, readOnly, reload, registerSave, onEr
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const bin = useRef<BinMap>(mergeBin(value.bin));
   useEffect(() => {
     setMembers(value.members);
     setCursor(value.cursor);
     setAdded([]);
     setRemoved(new Set());
+    bin.current = mergeBin(value.bin);
   }, [value]);
   const fetchPage = async (from: string, match: string, append: boolean) => {
     try {
       const v = await api.redis.getKey(cid, value.key, { db, cursor: from, field: matchPattern(match), count: 200 }) as RedisSetValue;
+      bin.current = append ? mergeBin(bin.current, v.bin) : mergeBin(v.bin);
       setMembers(append ? [...members, ...v.members.filter((m) => !members.includes(m))] : v.members);
       setCursor(v.cursor);
     } catch (e) {
@@ -576,7 +604,8 @@ export function SetEditor({ cid, db, value, readOnly, reload, registerSave, onEr
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      await api.redis.editSet(cid, db, value.key, { add: added.length ? added : undefined, remove: removed.size ? [...removed] : undefined });
+      const remove = removed.size ? [...removed] : undefined;
+      await api.redis.editSet(cid, db, value.key, { add: added.length ? added : undefined, remove, bin: binFor(bin.current, [...added, ...(remove ?? [])]) });
       onError(null);
       toast('success', 'Set saved', value.key);
       reload();

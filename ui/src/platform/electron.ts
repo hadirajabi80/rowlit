@@ -22,9 +22,11 @@ export function createElectronPlatform(b: DbStudioBridge): Platform {
       await b.writeTextFile(path, data as unknown as string);
       return path;
     },
-    async openTextFile({ filters }) {
+    async openTextFile({ filters, maxBytes }) {
       const path = await b.showOpenDialog({ filters });
       if (!path) return null;
+      // a caller that only previews the file (the engine reads it by path) asks for the head; older preloads read it all
+      if (maxBytes && typeof b.readTextFileHead === 'function') return { name: baseName(path), path, ...(await b.readTextFileHead(path, maxBytes)) };
       return { name: baseName(path), path, content: await b.readTextFile(path) };
     },
     writeTextFile: (p, c) => b.writeTextFile(p, c),

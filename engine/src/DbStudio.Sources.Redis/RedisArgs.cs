@@ -113,7 +113,11 @@ public static class RedisArgs
     public static string Quote(string value) => Quote(Encoding.UTF8.GetBytes(value));
 
     /// <summary>Text for display: valid UTF-8 is returned as is; otherwise invalid bytes are written as <c>\xHH</c>.</summary>
-    public static string ToDisplay(byte[] value)
+    /// <param name="escapeBackslash">
+    /// For values that travel with a base64 twin (<see cref="Services.BinaryText"/>): a literal backslash in an invalid
+    /// value is written <c>\x5c</c>, so the text is unambiguous and a client can turn an edited copy back into bytes.
+    /// </param>
+    public static string ToDisplay(byte[] value, bool escapeBackslash = false)
     {
         if (IsValidUtf8(value)) return Encoding.UTF8.GetString(value);
         var sb = new StringBuilder(value.Length * 2);
@@ -121,7 +125,12 @@ public static class RedisArgs
         while (i < value.Length)
         {
             var len = Utf8SequenceLength(value, i);
-            if (len > 0)
+            if (escapeBackslash && value[i] == (byte)'\\')
+            {
+                sb.Append("\\x5c");
+                i++;
+            }
+            else if (len > 0)
             {
                 sb.Append(Encoding.UTF8.GetString(value, i, len));
                 i += len;

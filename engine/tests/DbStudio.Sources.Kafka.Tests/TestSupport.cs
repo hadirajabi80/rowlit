@@ -83,12 +83,12 @@ public sealed class Harness : IAsyncDisposable
     public FakeSchemaRegistry Registry { get; } = new();
     public KafkaClientHandle Handle { get; }
 
-    public Harness(bool readOnly = false, bool withRegistry = true)
+    public Harness(bool readOnly = false, bool withRegistry = true, bool versionKnown = true)
     {
         var profile = Profile("c_k", readOnly, withRegistry);
         var settings = KafkaSettings.From(profile, null);
         ISchemaRegistry? sr = withRegistry ? new HttpSchemaRegistry("http://registry.test", null, null, Registry) : null;
-        Handle = new KafkaClientHandle("c_k", profile, settings, Fake, sr, new KafkaLogBuffer(), new ServerInfo("Kafka 3.8 (3 brokers, controller 1)", "3.8", "broker1:9092", null, null));
+        Handle = new KafkaClientHandle("c_k", profile, settings, Fake, sr, new KafkaLogBuffer(), versionKnown ? new ServerInfo("Kafka 3.8 (3 brokers, controller 1)", "3.8", "broker1:9092", null, null) : new ServerInfo("Kafka (3 brokers, controller 1)", null, "broker1:9092", null, null));
     }
 
     public static ConnectionProfile Profile(string id = "c_k", bool readOnly = false, bool withRegistry = true) => new()

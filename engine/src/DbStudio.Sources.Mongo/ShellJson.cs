@@ -195,6 +195,8 @@ public static class ShellJson
 
         private BsonValue Negate(BsonValue v, int start) => v switch
         {
+            // an integer has no negative zero; the shell's -0 is the double -0 (it compares equal to 0, so filters are unaffected)
+            BsonInt32 { Value: 0 } => new BsonDouble(-0.0),
             BsonInt32 i => i.Value == int.MinValue ? new BsonInt64(-(long)i.Value) : new BsonInt32(-i.Value),
             BsonInt64 l => NegLong(l.Value),
             BsonDouble d when d.Value == 9223372036854775808d => new BsonInt64(long.MinValue),

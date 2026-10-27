@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { EngineInfo } from '../../../ui/src/platform/bridge';
 import { IPC } from '../shared/channels';
-import { atomicWriteFile, readTextFileDecoded, SerialQueue } from './fs-utils';
+import { atomicWriteFile, readTextFileDecoded, readTextFileHead, SerialQueue } from './fs-utils';
 import { workspaceFile } from './paths';
 import type { UpdateController } from './updater-core';
 import {
@@ -14,6 +14,7 @@ import {
   validateExportedFilePath,
   validateFileContent,
   validateFilePath,
+  validateHeadBytes,
   validateMenuPosition,
   validateMenuShortcuts,
   validateOpenDialogArgs,
@@ -110,6 +111,8 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.readTextFile, async (_e, p) => readTextFileDecoded(validateFilePath(p), LIMITS.readBytes));
+
+  handle(IPC.readTextFileHead, async (_e, p, n) => readTextFileHead(validateFilePath(p), validateHeadBytes(n)));
 
   handle(IPC.writeTextFile, async (_e, p, content) => {
     await atomicWriteFile(validateFilePath(p), validateFileContent(content));

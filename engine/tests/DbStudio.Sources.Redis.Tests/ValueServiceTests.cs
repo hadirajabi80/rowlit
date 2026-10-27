@@ -415,4 +415,91 @@ public sealed class ValueServiceTests
         Assert.Equal(ErrorCodes.ProviderError, ex.Code);
         Assert.StartsWith("WRONGTYPE", ex.Message);
     }
+
+    // ---- QA round open items
+
+    [Fact]
+    public async Task Hash_and_list_values_with_invalid_utf8_round_trip_byte_for_byte()
+    {
+        var (h, c) = await StartAsync();
+        await using var _ = h;
+        byte[] raw = [0x61, 0xff, 0x5c, 0x78, 0x00, 0xc3, 0xa9];
+        await c.Db(0).ExecuteAsync("HSET", "binhash", "plain", "ok", "bin", raw);
+        await c.Db(0).ExecuteAsync("RPUSH", "binlist", "a", raw, "z");
+        var hv = Assert.IsType<RedisHashValue>(await _values.GetAsync(c, 0, "binhash", new RedisKeyQuery()));
+        var shown = hv.Fields.Single(f => f.Field == "bin").Value;
+        // the display text carries \xHH for the invalid bytes (and \x5c for a backslash); the exact bytes are in bin
+        Assert.Equal("a\\xff\\x5c" + "x\0é", shown);
+        Assert.Equal(Convert.ToBase64String(raw), Assert.Single(hv.Bin!).Value);
+        Assert.Null(Assert.IsType<RedisSetValue>(await _values.GetAsync(c, 0, "tags", new RedisKeyQuery())).Bin);
+        var lv = Assert.IsType<RedisListValue>(await _values.GetAsync(c, 0, "binlist", new RedisKeyQuery()));
+        Assert.Equal(shown, lv.Items[1].Value);
+
+        // writing the shown text back with its bin entry writes the same bytes, not the escape text
+        await _values.EditHashAsync(c, 0, "binhash", new RedisHashEditRequest(new() { ["copy"] = shown }, null, hv.Bin));
+        Assert.Equal(raw, (byte[]?)await c.Db(0).ExecuteAsync("HGET", "binhash", "copy"));
+        // without a bin entry the text is literal
+        await _values.EditHashAsync(c, 0, "binhash", new RedisHashEditRequest(new() { ["lit"] = shown }, null));
+        Assert.Equal(shown, Encoding.UTF8.GetString((byte[])(await c.Db(0).ExecuteAsync("HGET", "binhash", "lit"))!));
+
+        // list: LSET, and remove-by-index guarded by the exact bytes
+        await _values.EditListAsync(c, 0, "binlist", new RedisListEditRequest(null, new RedisListSetIndex(0, shown), null, lv.Bin));
+        Assert.Equal(raw, (byte[]?)await c.Db(0).ExecuteAsync("LINDEX", "binlist", 0));
+        await _values.EditListAsync(c, 0, "binlist", new RedisListEditRequest(null, null, new RedisListRemove(shown, 1, 1), lv.Bin));
+        var after = Assert.IsType<RedisListValue>(await _values.GetAsync(c, 0, "binlist", new RedisKeyQuery()));
+        Assert.Equal(2, after.Length);
+        Assert.Equal([shown, "z"], after.Items.Select(i => i.Value));
+    }
+
+    [Fact]
+    public void Binary_display_escapes_the_backslash_so_it_parses_back()
+    {
+        byte[] raw = [0x5c, 0x78, 0x34, 0x31, 0xff];
+        Assert.Equal("\\x5cx41\\xff", RedisArgs.ToDisplay(raw, escapeBackslash: true));
+        Assert.Equal(raw, Resp.KeyBytes("\\x5cx41\\xff"));
+        // valid text is never rewritten
+        Assert.Equal("C:\\x41", RedisArgs.ToDisplay("C:\\x41"u8.ToArray(), escapeBackslash: true));
+        Assert.Throws<EngineException>(() => BinaryText.Arg("k", new Dictionary<string, string> { ["k"] = "***" }));
+    }
+
+    [Fact]
+    public async Task Saving_a_string_whose_key_was_deleted_or_changed_type_tells_the_user()
+    {
+        var (h, c) = await StartAsync();
+        await using var _ = h;
+        // gone: nothing is re-created
+        var gone = await Assert.ThrowsAsync<EngineException>(() => _values.SetStringAsync(c, 0, "no:such:key", new RedisSetStringRequest("x")));
+        Assert.Equal(ErrorCodes.NotFound, gone.Code);
+        Assert.Contains("no longer exists", gone.Message);
+        Assert.Equal(0L, (long)await c.Db(0).ExecuteAsync("EXISTS", "no:such:key"));
+        // another type now: it is not overwritten
+        var wrong = await Assert.ThrowsAsync<EngineException>(() => _values.SetStringAsync(c, 0, "tags", new RedisSetStringRequest("x")));
+        Assert.Equal(ErrorCodes.Validation, wrong.Code);
+        Assert.Contains("set now", wrong.Message);
+        Assert.Equal("set", (string?)await c.Db(0).ExecuteAsync("TYPE", "tags"));
+        // the normal save still works and keeps the TTL
+        await c.Db(0).ExecuteAsync("SET", "withttl", "a", "EX", 100);
+        await _values.SetStringAsync(c, 0, "withttl", new RedisSetStringRequest("b"));
+        Assert.Equal("b", (string?)await c.Db(0).ExecuteAsync("GET", "withttl"));
+        Assert.InRange((long)await c.Db(0).ExecuteAsync("TTL", "withttl"), 1, 100);
+    }
+
+    [Fact]
+    public async Task A_json_null_root_can_be_saved_and_read_back()
+    {
+        var (h, c) = await StartAsync();
+        await using var _ = h;
+        var req = JsonSerializer.Deserialize<RedisJsonSetRequest>("{\"path\":\"$\",\"value\":null}", CoreJson.Options)!;
+        Assert.Equal(JsonValueKind.Null, req.Value!.Value.ValueKind);
+        await _values.SetJsonAsync(c, 0, "doc:1", req);
+        var v = Assert.IsType<RedisJsonValue>(await _values.GetAsync(c, 0, "doc:1", new RedisKeyQuery()));
+        Assert.Equal(JsonValueKind.Null, v.Json.ValueKind);
+        // a body without value is still "missing"
+        var missing = JsonSerializer.Deserialize<RedisJsonSetRequest>("{\"path\":\"$\"}", CoreJson.Options)!;
+        var ex = await Assert.ThrowsAsync<EngineException>(() => _values.SetJsonAsync(c, 0, "doc:1", missing));
+        Assert.Equal(ErrorCodes.Validation, ex.Code);
+        var create = JsonSerializer.Deserialize<RedisCreateKeyRequest>("{\"key\":\"nulldoc\",\"db\":0,\"type\":\"rejson\",\"json\":null}", CoreJson.Options)!;
+        await _values.CreateAsync(c, create);
+        Assert.Equal(JsonValueKind.Null, ((RedisJsonValue)await _values.GetAsync(c, 0, "nulldoc", new RedisKeyQuery())).Json.ValueKind);
+    }
 }

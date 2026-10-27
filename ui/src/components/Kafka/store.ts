@@ -45,26 +45,42 @@ function patch(cid: string, fn: (c: KafkaConnData) => Partial<KafkaConnData>) {
 }
 
 const inflight = new Map<string, Promise<unknown>>();
+/** Forced reloads waiting for the load in flight to settle (one per list). */
+const rerun = new Map<string, Promise<unknown>>();
 
 function load<K extends 'cluster' | 'topics' | 'groups' | 'subjects', T>(cid: string, key: K, force: boolean, fetch: () => Promise<T>): Promise<T | undefined> {
   const cur = kafkaConn(cid)[key] as Loadable<T>;
   if (!force && (cur.data !== undefined || cur.loading)) return Promise.resolve(cur.data);
   const id = `${key}:${cid}`;
+  const start = (): Promise<T | undefined> => {
+    patch(cid, (c) => ({ [key]: { ...c[key], loading: true, error: undefined } }) as Partial<KafkaConnData>);
+    const p = fetch()
+      .then((data) => {
+        patch(cid, () => ({ [key]: { data, at: Date.now() } }) as Partial<KafkaConnData>);
+        return data;
+      })
+      .catch((e: unknown) => {
+        patch(cid, () => ({ [key]: { error: errorMessage(e) } }) as Partial<KafkaConnData>);
+        return undefined;
+      })
+      .finally(() => inflight.delete(id));
+    inflight.set(id, p);
+    return p;
+  };
   const running = inflight.get(id) as Promise<T | undefined> | undefined;
-  if (running) return running;
-  patch(cid, (c) => ({ [key]: { ...c[key], loading: true, error: undefined } }) as Partial<KafkaConnData>);
-  const p = fetch()
-    .then((data) => {
-      patch(cid, () => ({ [key]: { data, at: Date.now() } }) as Partial<KafkaConnData>);
-      return data;
-    })
-    .catch((e: unknown) => {
-      patch(cid, () => ({ [key]: { error: errorMessage(e) } }) as Partial<KafkaConnData>);
-      return undefined;
-    })
-    .finally(() => inflight.delete(id));
-  inflight.set(id, p);
-  return p;
+  if (!running) return start();
+  if (!force) return running;
+  // A forced reload asked while a load is in flight: that load may have read the list before the change (topic created /
+  // deleted) that asks for this one, so its answer can be stale. Run once more when it settles; callers that force in the
+  // meantime share that single follow-up.
+  const waiting = rerun.get(id) as Promise<T | undefined> | undefined;
+  if (waiting) return waiting;
+  const next = running.then(() => {
+    rerun.delete(id);
+    return start();
+  });
+  rerun.set(id, next);
+  return next;
 }
 
 export const loadCluster = (cid: string, force = false) => load(cid, 'cluster', force, () => api.kafka.cluster(cid));

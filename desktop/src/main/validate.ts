@@ -103,6 +103,12 @@ export function validateSaveDialogArgs(v: unknown): SaveDialogArgs {
   };
 }
 
+/** How many bytes of a file a preview may read: a positive integer, at most one editor-sized read. */
+export function validateHeadBytes(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > LIMITS.readBytes) throw new ValidationError(`maxBytes must be an integer from 1 to ${LIMITS.readBytes}`);
+  return v;
+}
+
 export function validateOpenDialogArgs(v: unknown): OpenDialogArgs {
   const o = v === undefined || v === null ? {} : v;
   if (!isPlainObject(o)) throw new ValidationError('options must be an object');

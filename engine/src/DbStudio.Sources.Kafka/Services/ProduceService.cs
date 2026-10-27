@@ -34,14 +34,18 @@ public sealed class ProduceService
         var keySchema = await SchemaAsync(h, req.KeySchema, keyFormat, "keySchema", ct).ConfigureAwait(false);
 
         var records = new List<KProduceRecord>(messages.Count);
+        var warnings = new List<string[]>(messages.Count);
         long bytes = 0;
         for (var i = 0; i < messages.Count; i++)
         {
             var m = messages[i] ?? throw EngineException.Validation($"messages[{i}] is null.", new { field = $"messages[{i}]" });
             if (m.Partition is { } p && meta.Partitions.All(x => x.Id != p))
                 throw EngineException.Validation($"messages[{i}].partition {p} does not exist (0–{meta.Partitions.Count - 1}).", new { field = $"messages[{i}].partition" });
-            var key = MessageCodec.Encode(m.Key, keyFormat, keySchema, null, $"messages[{i}].key");
-            var value = MessageCodec.Encode(m.Value, valueFormat, valueSchema, null, $"messages[{i}].value");
+            var keyWarnings = new List<string>();
+            var valueWarnings = new List<string>();
+            var key = MessageCodec.Encode(m.Key, keyFormat, keySchema, null, $"messages[{i}].key", keyWarnings);
+            var value = MessageCodec.Encode(m.Value, valueFormat, valueSchema, null, $"messages[{i}].value", valueWarnings);
+            warnings.Add([.. keyWarnings.Select(x => "key " + x), .. valueWarnings.Select(x => "value " + x)]);
             var headers = (m.Headers ?? []).Select((hd, j) => string.IsNullOrEmpty(hd?.Key)
                 ? throw EngineException.Validation($"messages[{i}].headers[{j}].key is required.", new { field = $"messages[{i}].headers" })
                 : new KHeader(hd.Key, hd.Value is null ? null : Encoding.UTF8.GetBytes(hd.Value))).ToList();
@@ -52,7 +56,7 @@ public sealed class ProduceService
         }
         var deliveries = await KafkaErrors.Call(() => h.Gateway.ProduceAsync(topic, records, compression == "none" ? null : compression, ct), topic)
             .ConfigureAwait(false);
-        return deliveries.Select(d => new KafkaProduceResult(d.Partition, d.Offset, d.Timestamp)).ToList();
+        return deliveries.Select((d, i) => new KafkaProduceResult(d.Partition, d.Offset, d.Timestamp, i < warnings.Count && warnings[i].Length > 0 ? warnings[i] : null)).ToList();
     }
 
     private static async Task<ParsedSchema?> SchemaAsync(KafkaClientHandle h, KafkaSchemaRef? reference, string format, string field, CancellationToken ct)

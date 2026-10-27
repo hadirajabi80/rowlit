@@ -25,6 +25,8 @@ export interface DbStudioBridge {
   showSaveDialog(opts: { title?: string; defaultPath?: string; filters?: FileFilter[] }): Promise<string | null>;
   showOpenDialog(opts: { title?: string; filters?: FileFilter[]; createIfMissing?: boolean }): Promise<string | null>;
   readTextFile(path: string): Promise<string>;
+  /** Additive (older preloads lack it): only the first `maxBytes` bytes, decoded; `size` is the whole file. */
+  readTextFileHead?(path: string, maxBytes: number): Promise<{ content: string; size: number; truncated: boolean }>;
   writeTextFile(path: string, content: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   /** Additive (optional, older preloads lack them): open an exported data file with its default app / show it in its folder. */
