@@ -583,6 +583,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   const title =
     r.kind === 'column' ? `${r.label} ${r.detail ?? ''}${r.column?.pk ? ' · primary key' : ''}${r.column?.fk ? ' · foreign key' : ''}`
       : r.kind === 'connection' && conn ? `${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}${conn.readOnly ? ' · read-only' : ''}`
+        : r.kind === 'status' && r.status === 'error' ? r.label
         : r.kind === 'query' && r.savedQuery ? savedQueryTooltip(r.savedQuery.name, r.savedQuery.description, r.savedQuery.sql)
           : scopeNode && scopeText ? `${r.label} · ${scopeText}`
             : r.object?.cm ?? undefined;
@@ -656,6 +657,30 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       <span className={`tree-label${r.kind === 'connection' ? ' strong' : ''}`} dir="auto">
         <Highlight text={r.label} positions={r.match} />
       </span>
+      {r.kind === 'status' && r.loadTarget && r.status === 'loading' && r.slow && (
+        <button
+          className="link-btn tree-status-action"
+          title="Stop waiting for the server"
+          onClick={(e) => {
+            e.stopPropagation();
+            useCatalog.getState().cancelLoad(r.loadTarget!);
+          }}
+        >
+          Cancel
+        </button>
+      )}
+      {r.kind === 'status' && r.loadTarget && r.status === 'error' && (
+        <button
+          className="link-btn tree-status-action"
+          title="Try again"
+          onClick={(e) => {
+            e.stopPropagation();
+            void useCatalog.getState().retryLoad(r.loadTarget!);
+          }}
+        >
+          Retry
+        </button>
+      )}
       {conn?.readOnly && <Lock size={11} className="tree-lock" aria-label="Read-only" />}
       {r.busy && <LoaderCircle size={12} className="spin tree-spinner" aria-label="Loading" />}
       {active && !r.busy && (

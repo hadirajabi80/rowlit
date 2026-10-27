@@ -3,7 +3,7 @@ import { fuzzyMatchLower } from '../../lib/fuzzy';
 import { getSourceModule, sourceNodeId } from '../../lib/sources';
 import { dialectOf, hasDatabaseLevel, providerKind } from '../../store/connections';
 import { isTabular, objectTypeLabel, OBJECT_TYPE_ORDER } from '../../lib/sql';
-import { dbKey, type ConnCatalog, type DbCatalog } from '../../store/catalog';
+import { dbKey, type ConnCatalog, type DbCatalog, type LoadTarget } from '../../store/catalog';
 import type { ConnQueries, SavedQuery } from '../../store/savedQueries';
 import type { SystemTypesEntry } from '../../store/systemTypes';
 import { compareSystemCategories, compareTypeKinds, systemTypeDetail, typeKindInfo, typeKindOf } from '../../lib/typeKinds';
@@ -38,6 +38,13 @@ export interface TreeRow {
   busy?: boolean;
   /** status 'load': the schema to load when activated. */
   loadSchema?: string;
+  /**
+   * status 'loading' / 'error' of a catalog load: what Cancel (shown once the load is `slow`, "Still connecting…") and Retry
+   * (shown on the error) act on.
+   */
+  loadTarget?: LoadTarget;
+  /** status 'loading': the load has been running for SLOW_LOAD_MS. */
+  slow?: boolean;
   /** M2: rows of a source module (kind 'source'): node type ('db', 'key', 'collection', 'topic'...), path from the connection. */
   source?: { providerId: ProviderId; nodeType: string; path: string[]; meta?: unknown };
   /** kind 'query': the saved query. */
@@ -234,8 +241,11 @@ function addConnection(rows: TreeRow[], input: TreeInput, c: ConnectionProfile, 
   if (isSourceConnection(c)) return addSourceChildren(rows, input, c, depth + 1, id);
   // A list that is already shown stays while it reloads (refresh, save): never collapse it into a status row.
   const shown = !!cat?.databases && cat.status !== 'error';
-  if (!cat || (!shown && (cat.status === 'loading' || cat.status === 'idle'))) return status(rows, id, depth + 1, 'loading', 'Connecting…');
-  if (cat.status === 'error') return status(rows, id, depth + 1, 'error', cat.error ?? 'Failed to connect');
+  const target: LoadTarget = { level: 'conn', connectionId: c.id, database: null };
+  if (!cat || (!shown && (cat.status === 'loading' || cat.status === 'idle'))) {
+    return status(rows, id, depth + 1, 'loading', cat?.slow ? 'Still connecting…' : 'Connecting…', { loadTarget: target, slow: !!cat?.slow });
+  }
+  if (cat.status === 'error') return status(rows, id, depth + 1, 'error', cat.error ?? 'Failed to connect', { loadTarget: target });
   const dbs = databasesOf(c, cat) ?? [];
   if (dbs.length === 1 && (dbs[0] === null || c.providerId === 'sqlite')) {
     // No database level (Oracle), or SQLite's lone "main": show its schemas/objects directly.
@@ -258,8 +268,11 @@ function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, db: string |
   const d = input.dbs[dbKey(cid, db)];
   // A schema list that is already shown stays while it reloads: only a first load shows "Loading schemas…".
   const shown = !!d?.schemasResp && d.schemasStatus !== 'error';
-  if (!d || (!shown && (d.schemasStatus === 'idle' || d.schemasStatus === 'loading'))) return status(rows, parent, depth, 'loading', 'Loading schemas…');
-  if (d.schemasStatus === 'error') return status(rows, parent, depth, 'error', d.schemasError ?? 'Failed to load schemas');
+  const target: LoadTarget = { level: 'schemas', connectionId: cid, database: db };
+  if (!d || (!shown && (d.schemasStatus === 'idle' || d.schemasStatus === 'loading'))) {
+    return status(rows, parent, depth, 'loading', d?.schemasSlow ? 'Still loading schemas…' : 'Loading schemas…', { loadTarget: target, slow: !!d?.schemasSlow });
+  }
+  if (d.schemasStatus === 'error') return status(rows, parent, depth, 'error', d.schemasError ?? 'Failed to load schemas', { loadTarget: target });
   const list = d.schemasResp?.schemas ?? [];
   if (list.length === 0) return status(rows, parent, depth, 'empty', 'No schemas');
   const single = singleSchema(d);
@@ -326,8 +339,10 @@ function addFolders(rows: TreeRow[], input: TreeInput, cid: string, db: string |
   const st = d?.schemaStatus[schema];
   const loaded = d?.loaded[schema];
   if (!loaded) {
-    if (st === 'error') return status(rows, parent, depth, 'error', d?.schemaError[schema] ?? 'Failed to load objects');
-    return status(rows, parent, depth, 'loading', 'Loading objects…');
+    const target: LoadTarget = { level: 'schema', connectionId: cid, database: db, schema };
+    if (st === 'error') return status(rows, parent, depth, 'error', d?.schemaError[schema] ?? 'Failed to load objects', { loadTarget: target });
+    const slow = !!d?.schemaSlow?.[schema];
+    return status(rows, parent, depth, 'loading', slow ? 'Still loading objects…' : 'Loading objects…', { loadTarget: target, slow });
   }
   const types = input.typesFor?.(cid) ?? null;
   const groups = groupObjects(loaded.objects, types);

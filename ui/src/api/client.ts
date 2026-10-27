@@ -194,13 +194,15 @@ export const api = {
     json<TestConnectionResult>('POST', '/connections/test', { body: req, signal }),
 
   // 3.3 Catalog
-  databases: (cid: string) => json<DatabasesResponse>('GET', `/connections/${enc(cid)}/catalog/databases`),
-  schemas: (cid: string, database: string | null) =>
-    json<SchemasResponse>('GET', `/connections/${enc(cid)}/catalog/schemas`, { query: { database } }),
-  async catalog(cid: string, database: string | null, schemas: string[] | null, etag?: string | null): Promise<CatalogFetchResult> {
+  // The `signal` aborts the request (Cancel in the explorer): the engine sees the closed request and stops the metadata read.
+  databases: (cid: string, signal?: AbortSignal) => json<DatabasesResponse>('GET', `/connections/${enc(cid)}/catalog/databases`, { signal }),
+  schemas: (cid: string, database: string | null, signal?: AbortSignal) =>
+    json<SchemasResponse>('GET', `/connections/${enc(cid)}/catalog/schemas`, { query: { database }, signal }),
+  async catalog(cid: string, database: string | null, schemas: string[] | null, etag?: string | null, signal?: AbortSignal): Promise<CatalogFetchResult> {
     const res = await send('GET', `/connections/${enc(cid)}/catalog`, {
       query: { database, schemas: schemas?.length ? schemas.join(',') : undefined },
       headers: etag ? { 'If-None-Match': etag } : undefined,
+      signal,
     });
     const newTag = res.headers.get('ETag');
     if (res.status === 304) return { notModified: true, etag: newTag ?? etag ?? null };
@@ -220,7 +222,7 @@ export const api = {
     json<{ version: number }>('POST', `/connections/${enc(cid)}/catalog/refresh`, { body: { database, schemas } }),
 
   // 3.4 Sessions and execution
-  createSession: (req: CreateSessionRequest) => json<SessionInfo>('POST', '/sessions', { body: req }),
+  createSession: (req: CreateSessionRequest, signal?: AbortSignal) => json<SessionInfo>('POST', '/sessions', { body: req, signal }),
   listSessions: () => json<SessionInfo[]>('GET', '/sessions'),
   closeSession: (sid: string, force = false) =>
     json<void>('DELETE', `/sessions/${enc(sid)}`, { query: { force: force ? 'true' : undefined } }),

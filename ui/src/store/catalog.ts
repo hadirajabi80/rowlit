@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
-import { api, errorMessage } from '../api/client';
+import { api, errorMessage, isApiError } from '../api/client';
 import type { CatalogSchema, CatalogSnapshot, DatabasesResponse, Dialect, SchemasResponse, WsEventOf } from '../api/types';
 import type { ForeignCatalogInput } from '../intel';
 
@@ -16,6 +16,8 @@ export interface ConnCatalog {
   error: string | null;
   /** A forced reload of an already loaded list is on its way: `status` stays 'ready' and the old list stays shown. */
   revalidating?: boolean;
+  /** The first load has been running for SLOW_LOAD_MS: the explorer offers Cancel ("Still connecting…"). */
+  slow?: boolean;
 }
 
 export interface DbCatalog {
@@ -41,6 +43,20 @@ export interface DbCatalog {
    */
   schemasRevalidating?: boolean;
   revalidating?: Record<string, boolean>;
+  /** First loads running for SLOW_LOAD_MS (the schema list, or one schema's objects): "Still loading…" with Cancel. */
+  schemasSlow?: boolean;
+  schemaSlow?: Record<string, boolean>;
+}
+
+/** A first catalog load that takes this long shows "Still connecting…" with Cancel (a server that does not answer). */
+export const SLOW_LOAD_MS = 15_000;
+
+/** What a "Cancel" / "Retry" in the explorer refers to: the connection's database list, a database's schema list, or one schema. */
+export interface LoadTarget {
+  level: 'conn' | 'schemas' | 'schema';
+  connectionId: string;
+  database: string | null;
+  schema?: string;
 }
 
 export const dbKey = (connectionId: string, database: string | null | undefined) => `${connectionId}\u0001${database ?? ''}`;
@@ -92,6 +108,10 @@ interface CatalogState {
   close(connectionId: string, database?: string | null): void;
   /** Clears the closed mark of the connection (and every database of it), or of one database (and the connection). */
   reopen(connectionId: string, database?: string | null): void;
+  /** Aborts the running first load behind a "Still connecting…" row (the request is cancelled; the row turns into "Cancelled." + Retry). */
+  cancelLoad(target: LoadTarget): void;
+  /** Loads again what failed or was cancelled (a user action: clears the closed mark). */
+  retryLoad(target: LoadTarget): Promise<void>;
   loadDatabases(connectionId: string, force?: boolean): Promise<DatabasesResponse | null>;
   loadSchemas(connectionId: string, database: string | null, force?: boolean): Promise<SchemasResponse | null>;
   /** Default schema(s), the engine decides which (GET /catalog without `schemas`). */
@@ -148,6 +168,22 @@ function once<T>(key: string, fn: () => Promise<T>): Promise<T> {
   inflight.set(key, p);
   return p;
 }
+
+/** The abort controller and slow-load timer of each running load, by the same key as `once`. */
+const tracked = new Map<string, { abort: AbortController; timer: ReturnType<typeof setTimeout> }>();
+function track(key: string, onSlow: () => void): { signal: AbortSignal; end: () => void } {
+  const abort = new AbortController();
+  const t = { abort, timer: setTimeout(onSlow, SLOW_LOAD_MS) };
+  tracked.set(key, t);
+  return {
+    signal: abort.signal,
+    end() {
+      clearTimeout(t.timer);
+      if (tracked.get(key) === t) tracked.delete(key);
+    },
+  };
+}
+const loadError = (e: unknown): string => (isApiError(e, 'ABORTED') ? 'Cancelled.' : errorMessage(e));
 
 export const useCatalog = create<CatalogState>((set, get) => {
   const patchDb = (cid: string, db: string | null, fn: (d: DbCatalog) => Partial<DbCatalog>) => {
@@ -247,10 +283,11 @@ export const useCatalog = create<CatalogState>((set, get) => {
       return once(`db:${cid}`, async () => {
         // A list that is already shown stays shown (and 'ready') while it reloads: no "Connecting…" flash.
         const shown = get().conns[cid]?.status === 'ready' && !!get().conns[cid]?.databases;
-        patchConn(cid, shown ? { revalidating: true } : { status: 'loading', error: null });
+        patchConn(cid, shown ? { revalidating: true } : { status: 'loading', error: null, slow: false });
+        const t = track(`db:${cid}`, () => { if (!shown) patchConn(cid, { slow: true }); });
         try {
-          const r = await api.databases(cid);
-          patchConn(cid, { databases: r, status: 'ready', error: null, revalidating: false });
+          const r = await api.databases(cid, t.signal);
+          patchConn(cid, { databases: r, status: 'ready', error: null, revalidating: false, slow: false });
           return r;
         } catch (e) {
           if (shown) {
@@ -258,10 +295,29 @@ export const useCatalog = create<CatalogState>((set, get) => {
             patchConn(cid, { revalidating: false });
             return get().conns[cid]?.databases ?? null;
           }
-          patchConn(cid, { status: 'error', error: errorMessage(e) });
+          patchConn(cid, { status: 'error', error: loadError(e), slow: false });
           return null;
+        } finally {
+          t.end();
         }
       });
+    },
+
+    cancelLoad(target) {
+      const { connectionId: cid, database: db } = target;
+      if (target.level === 'conn') tracked.get(`db:${cid}`)?.abort.abort();
+      else if (target.level === 'schemas') {
+        tracked.get(`sc:${dbKey(cid, db)}`)?.abort.abort();
+        tracked.get(`def:${dbKey(cid, db)}`)?.abort.abort();
+      } else if (target.schema) tracked.get(`s:${dbKey(cid, db)}:${target.schema}`)?.abort.abort();
+    },
+
+    async retryLoad(target) {
+      const { connectionId: cid, database: db } = target;
+      get().reopen(cid, target.level === 'conn' ? undefined : db); // a user action
+      if (target.level === 'conn') await get().loadDatabases(cid, true);
+      else if (target.level === 'schemas') await get().loadSchemas(cid, db, true);
+      else if (target.schema) await get().loadSchema(cid, db, target.schema, true);
     },
 
     loadSchemas(cid, db, force = false) {
@@ -269,12 +325,13 @@ export const useCatalog = create<CatalogState>((set, get) => {
       if (!force && cur?.schemasStatus === 'ready') return Promise.resolve(cur.schemasResp);
       return once(`sc:${dbKey(cid, db)}`, async () => {
         const shown = get().dbs[dbKey(cid, db)]?.schemasStatus === 'ready' && !!get().dbs[dbKey(cid, db)]?.schemasResp;
-        patchDb(cid, db, () => (shown ? { schemasRevalidating: true } : { schemasStatus: 'loading', schemasError: null }));
+        patchDb(cid, db, () => (shown ? { schemasRevalidating: true } : { schemasStatus: 'loading', schemasError: null, schemasSlow: false }));
+        const t = track(`sc:${dbKey(cid, db)}`, () => { if (!shown) patchDb(cid, db, () => ({ schemasSlow: true })); });
         try {
-          const r = await api.schemas(cid, db);
+          const r = await api.schemas(cid, db, t.signal);
           patchDb(cid, db, (d) => {
             const next: DbCatalog = {
-              ...d, schemasResp: r, schemasStatus: 'ready', schemasError: null, schemasRevalidating: false,
+              ...d, schemasResp: r, schemasStatus: 'ready', schemasError: null, schemasRevalidating: false, schemasSlow: false,
               defaultSchema: r.defaultSchema ?? d.defaultSchema, searchPath: d.searchPath ?? searchPathOf(r),
             };
             // The schema list (and a search_path learned from it) reaches an already built snapshot too.
@@ -287,8 +344,10 @@ export const useCatalog = create<CatalogState>((set, get) => {
             patchDb(cid, db, () => ({ schemasRevalidating: false }));
             return get().dbs[dbKey(cid, db)]?.schemasResp ?? null;
           }
-          patchDb(cid, db, () => ({ schemasStatus: 'error', schemasError: errorMessage(e) }));
+          patchDb(cid, db, () => ({ schemasStatus: 'error', schemasError: loadError(e), schemasSlow: false }));
           return null;
+        } finally {
+          t.end();
         }
       });
     },
@@ -302,13 +361,16 @@ export const useCatalog = create<CatalogState>((set, get) => {
         return Promise.resolve();
       }
       return once(`def:${dbKey(cid, db)}`, async () => {
+        const t = track(`def:${dbKey(cid, db)}`, () => undefined);
         try {
-          const r = await api.catalog(cid, db, null);
+          const r = await api.catalog(cid, db, null, undefined, t.signal);
           if (!r.notModified) mergeSnapshot(cid, db, r.snapshot, null, null);
           // the schema list too, so IntelliSense can offer (and lazy-load) the other schemas
           void get().loadSchemas(cid, db);
         } catch (e) {
           console.warn('[catalog] default load failed', e);
+        } finally {
+          t.end();
         }
       });
     },
@@ -328,10 +390,14 @@ export const useCatalog = create<CatalogState>((set, get) => {
         };
         patchDb(cid, db, (d) => (shown
           ? { revalidating: { ...d.revalidating, [schema]: true } }
-          : { schemaStatus: { ...d.schemaStatus, [schema]: 'loading' } }));
+          : { schemaStatus: { ...d.schemaStatus, [schema]: 'loading' }, schemaSlow: { ...d.schemaSlow, [schema]: false } }));
+        const t = track(`s:${dbKey(cid, db)}:${schema}`, () => {
+          if (!shown) patchDb(cid, db, (d) => ({ schemaSlow: { ...d.schemaSlow, [schema]: true } }));
+        });
+        const unslow = (d: DbCatalog) => ({ ...d.schemaSlow, [schema]: false });
         try {
           const etag = force ? get().dbs[dbKey(cid, db)]?.etags[schema] : undefined;
-          const r = await api.catalog(cid, db, [schema], etag);
+          const r = await api.catalog(cid, db, [schema], etag, t.signal);
           if (r.notModified) {
             patchDb(cid, db, (d) => ({ schemaStatus: { ...d.schemaStatus, [schema]: 'ready' }, revalidating: done(d) }));
           } else {
@@ -345,8 +411,11 @@ export const useCatalog = create<CatalogState>((set, get) => {
           }
           patchDb(cid, db, (d) => ({
             schemaStatus: { ...d.schemaStatus, [schema]: 'error' },
-            schemaError: { ...d.schemaError, [schema]: errorMessage(e) },
+            schemaError: { ...d.schemaError, [schema]: loadError(e) },
           }));
+        } finally {
+          t.end();
+          if (get().dbs[dbKey(cid, db)]?.schemaSlow?.[schema]) patchDb(cid, db, (d) => ({ schemaSlow: unslow(d) }));
         }
       });
     },

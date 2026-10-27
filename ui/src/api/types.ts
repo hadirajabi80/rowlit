@@ -30,7 +30,9 @@ export type ApiErrorCode =
   // 403 the server denied a system view (`detail.needs` names the grant), 409 offset reset on an active group (7.5).
   | 'SOURCE_UNAVAILABLE' | 'STREAM_LIMIT' | 'PRIVILEGE' | 'GROUP_ACTIVE'
   // Resources (docs/resources.md): closing a connection would roll back a transaction or cancel running work (detail.blockers).
-  | 'RESOURCE_BUSY';
+  | 'RESOURCE_BUSY'
+  // 503: the database server does not answer (message "Server not reachable: …").
+  | 'SERVER_UNREACHABLE';
 
 // ---------- 3.1 Meta ----------
 export interface Health { status: 'ok'; version: string; pid: number; dev: boolean }

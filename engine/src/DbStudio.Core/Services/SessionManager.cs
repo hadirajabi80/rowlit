@@ -229,7 +229,7 @@ public sealed class SessionManager : IAsyncDisposable
                 throw new EngineException(429, "SESSION_LIMIT",
                     $"The connection '{profile.Name}' already has {open} open sessions (limit {limit}). Close idle tabs or raise the limit in Settings.",
                     new { connectionId, limit, open });
-            var session = await provider.OpenSessionAsync(profile, _connections.GetPassword(connectionId), options, ct).ConfigureAwait(false);
+            var session = await OpenBoundedAsync(provider, profile, _connections.GetPassword(connectionId), options, ct).ConfigureAwait(false);
             handle = new SessionHandle(id, profile, provider, session, options, _time)
             {
                 Presence = _presence,
@@ -245,6 +245,17 @@ public sealed class SessionManager : IAsyncDisposable
         _log.LogInformation("Session {SessionId} opened on {ConnectionId} ({Provider})", id, connectionId, provider.Id);
         return handle;
     }
+
+    /// <summary>How long opening a session (connect + server info) may take before the server counts as not reachable.</summary>
+    public TimeSpan OpenTimeout { get; init; } = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// <see cref="IDbProvider.OpenSessionAsync"/> with a deadline: a server that accepts the socket but never answers (a restarted
+    /// Docker port proxy) must not leave the tab on "Loading…". A connection that opens after the deadline is disposed.
+    /// </summary>
+    private Task<IDbSession> OpenBoundedAsync(IDbProvider provider, ConnectionProfile profile, string? password, SessionOptions options, CancellationToken ct) =>
+        ConnectionGuard.BoundedAsync(t => provider.OpenSessionAsync(profile, password, options, t), OpenTimeout, ct, "The server",
+            late => late.DisposeAsync());
 
     /// <summary>settings connections.maxSessionsPerProfile (0 = unlimited).</summary>
     public int MaxSessionsPerProfile()
@@ -494,7 +505,7 @@ public sealed class SessionManager : IAsyncDisposable
         try
         {
             var profile = _connections.Find(h.Profile.Id) is { } p ? _connections.WithSecrets(p) : h.Profile;
-            fresh = await h.Provider.OpenSessionAsync(profile, _connections.GetPassword(profile.Id), h.Options, ct).ConfigureAwait(false);
+            fresh = await OpenBoundedAsync(h.Provider, profile, _connections.GetPassword(profile.Id), h.Options, ct).ConfigureAwait(false);
             h.Profile = profile;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -572,7 +583,7 @@ public sealed class SessionManager : IAsyncDisposable
         {
             var profile = _connections.Find(h.Profile.Id) is { } p ? _connections.WithSecrets(p) : h.Profile;
             var options = h.Options with { Database = old.CurrentDatabase ?? h.Options.Database, TxMode = old.TxMode };
-            fresh = await h.Provider.OpenSessionAsync(profile, _connections.GetPassword(profile.Id), options, ct).ConfigureAwait(false);
+            fresh = await OpenBoundedAsync(h.Provider, profile, _connections.GetPassword(profile.Id), options, ct).ConfigureAwait(false);
             h.Profile = profile;
             h.Options = options;
         }
@@ -603,7 +614,7 @@ public sealed class SessionManager : IAsyncDisposable
             var old = h.Session;
             var profile = _connections.Find(h.Profile.Id) is { } p ? _connections.WithSecrets(p) : h.Profile;
             var options = h.Options with { Database = database.Trim(), TxMode = old.TxMode };
-            var fresh = await h.Provider.OpenSessionAsync(profile, _connections.GetPassword(profile.Id), options, ct).ConfigureAwait(false);
+            var fresh = await OpenBoundedAsync(h.Provider, profile, _connections.GetPassword(profile.Id), options, ct).ConfigureAwait(false);
             h.Session = fresh;
             h.Released = false;
             h.ReleasedReason = null;

@@ -654,6 +654,12 @@ body.resizing-row .splitter-horizontal {
   color: var(--danger);
   font-style: normal;
 }
+/* "Cancel" on a slow load, "Retry" on a failed one */
+.tree-row.status .tree-status-action {
+  flex-shrink: 0;
+  font-style: normal;
+  margin-left: 6px;
+}
 .tree-twisty {
   width: 16px;
   height: 16px;

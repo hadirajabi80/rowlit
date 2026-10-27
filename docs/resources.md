@@ -144,3 +144,19 @@ Existing related keys: `connections.maxSessionsPerProfile` (8), `connections.orp
   or `409 RESOURCE_BUSY { blockers: [{ kind, label, sessionId?, tabId?, jobId?, streamId? }] }`.
 - Events: `session.changed` gains `released`, `releasedReason`, `hasTempObjects`; `resources.released
   { connectionId, connectionName, reason, sessions, sourceClient }`; `resources.pressure { level, usedBytes, limitBytes }`.
+
+## Dead connections (server restarted, socket half open)
+
+A pooled catalog connection whose server vanished without a reset (Docker Desktop restarted) is handed out unchecked and
+its first query blocks. Catalog and metadata calls are therefore bounded (`CatalogService`, `ConnectionGuard`):
+
+- Opening a catalog reader runs a liveness probe (`GetCurrentDatabaseAsync`, 15 s); PostgreSQL also checks `SELECT 1` (10 s) when it opens.
+- Database / schema lists have a 30 s deadline, schema loads, object details and DDL 5 min. The deadline ends the wait even
+  when the driver ignores its token; the request's abort token reaches every driver call.
+- A deadline or a transport failure (socket / IO error) clears the provider's pooled connections (`ClearPooledConnections`)
+  and runs the call once more on new connections. A second failure is `503 SERVER_UNREACHABLE`, "Server not reachable: …".
+- Opening a session (`POST /sessions`, reconnect, reopen) is bounded at 45 s the same way; a connection that opens late is disposed.
+- UI: a first load that takes 15 s shows "Still connecting…" (explorer) / "Still loading…" (data tab) with Cancel (aborts the
+  request) and Retry; failures show the engine's message with Retry.
+
+Not covered: a statement already running on an open session whose connection died keeps the driver's own behaviour (use Cancel).
