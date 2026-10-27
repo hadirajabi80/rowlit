@@ -18,12 +18,11 @@ import { Splitter } from '../common/Splitter';
 import { commandMenuItems } from '../layout/commandMenu';
 import type { TabViewProps } from '../layout/tabViews';
 import { copyKeyName, copyValueJson, deleteKey, deletePattern, isWritable, newKey, onKeysChanged, renameKey, setTtl } from './actions';
-import { KeyDetail, valueAsJson, type KeyDetailHandle } from './KeyDetail';
+import { KeyDetail, type KeyDetailHandle } from './KeyDetail';
 import { KeyList, type KeyListHandle } from './KeyList';
 import type { BrowserState } from './open';
 import { errorText, loadServer, rememberKeys, useRedis } from './store';
 import { useRedisViewEvents } from './viewEvents';
-import { copyText } from '../../app/actions';
 
 export const MAX_BROWSER_KEYS = 100_000;
 const PAGE_TARGET = 500;
@@ -356,7 +355,7 @@ export function BrowserView({ tab, theme, visible }: TabViewProps) {
             <KeyDetail key={`${st.db}:${selected}`} cid={cid} db={st.db} keyName={selected} readOnly={readOnly} theme={theme} now={now}
               onMissing={onMissing} onLoaded={onLoaded}
               onRename={() => renameKey(cid, st.db, selected)} onTtl={(t) => void setTtl(cid, st.db, selected, t)} onDelete={() => void deleteKey(cid, st.db, selected)}
-              onCopyKey={() => void copyKeyName(selected)} onCopyJson={(v) => void copyText(valueAsJson(v), 'Value copied as JSON')}
+              onCopyKey={() => void copyKeyName(selected)} onCopyJson={() => void copyValueJson(cid, st.db, selected)}
               handle={(h) => { detailHandle.current = h; }} />
           ) : (
             <div className="redis-empty-detail muted">

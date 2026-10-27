@@ -216,6 +216,7 @@ internal sealed partial class FakeRedisServer
                 if (c.Subscribed) return new object?[] { "pong", a.Count > 1 ? a[1] : "" };
                 return a.Count > 1 ? a[1] : new Simple("PONG");
             case "ECHO": return a.Count == 2 ? a[1] : Arity(cmd);
+            case "ACL": return a.Count == 2 && Arg(1).Equals("WHOAMI", StringComparison.OrdinalIgnoreCase) ? c.User : new Err("ERR unknown subcommand");
             case "SELECT":
             {
                 var n = (int)L(1);
@@ -420,6 +421,13 @@ internal sealed partial class FakeRedisServer
                 return (long)l.Count;
             }
             case "LLEN": return db.Get(Arg(1)) is { } lle ? (long)((List<byte[]>)lle.Value).Count : 0L;
+            case "LINDEX":
+            {
+                if (db.Get(Arg(1)) is not { } e) return null;
+                var l = (List<byte[]>)e.Value;
+                var i = L(2) < 0 ? l.Count + L(2) : L(2);
+                return i < 0 || i >= l.Count ? null : l[(int)i];
+            }
             case "LRANGE":
             {
                 var l = db.Get(Arg(1)) is { } e ? (List<byte[]>)e.Value : [];

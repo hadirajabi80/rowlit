@@ -862,13 +862,17 @@ export function createRedisHandlers(ctx: M2MockContext): RequestHandler[] {
 
     http.post(`${P}/keys/:key/list`, route(async ({ params, request }) => {
       const server = writable(String(params.cid), 'editing list items');
-      const b = await body<{ push: { side: 'left' | 'right'; values: string[] }; setIndex: { index: number; value: string }; remove: { value: string; count: number } }>(request);
+      const b = await body<{ push: { side: 'left' | 'right'; values: string[] }; setIndex: { index: number; value: string }; remove: { value: string; count: number; index?: number } }>(request);
       const d = server.db(dbParam(request.url));
       const l = getOrCreate(d, keyOf(request.url), 'list', () => []);
       if (b.push) { if (b.push.side === 'left') l.unshift(...[...b.push.values].reverse()); else l.push(...b.push.values); }
       else if (b.setIndex) {
         if (b.setIndex.index >= l.length) throw new Refusal(400, 'PROVIDER_ERROR', 'ERR index out of range');
         l[b.setIndex.index] = b.setIndex.value;
+      } else if (b.remove && b.remove.index !== undefined) {
+        // by position, guarded by the element the caller saw (the engine's LSET tombstone + LREM in MULTI)
+        if (l[b.remove.index] !== b.remove.value) throw new Refusal(400, 'VALIDATION', `Element ${b.remove.index} of the list changed since it was loaded: refresh the list and try again.`);
+        l.splice(b.remove.index, 1);
       } else if (b.remove) {
         let n = 0;
         for (let i = 0; i < l.length && (b.remove.count === 0 || n < Math.abs(b.remove.count));) { if (l[i] === b.remove.value) { l.splice(i, 1); n++; } else i++; }

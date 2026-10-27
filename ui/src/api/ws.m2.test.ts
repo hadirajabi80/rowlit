@@ -39,4 +39,22 @@ describe('EngineSocket streams and jobs', () => {
     expect(seen).toEqual(['job.progress:j_1', 'job.done:j_1']);
     expect(typed).toHaveLength(2);
   });
+
+  it('replays job.done to a subscriber that arrives after a fast job finished (once, asynchronously)', async () => {
+    const s = new EngineSocket();
+    s.dispatch({ type: 'job.progress', ts, jobId: 'j_fast', kind: 'k', done: 1, total: 1, message: null });
+    s.dispatch({ type: 'job.done', ts, jobId: 'j_fast', kind: 'k', status: 'ok', error: null, result: { deleted: 3 } });
+    const seen: string[] = [];
+    const off = s.onJob('j_fast', (e) => seen.push(e.type));
+    expect(seen).toEqual([]); // never synchronously: the caller has not stored `off` yet
+    await Promise.resolve();
+    expect(seen).toEqual(['job.done']);
+    off();
+
+    // An unsubscribe before the microtask runs suppresses the replay.
+    const seen2: string[] = [];
+    s.onJob('j_fast', (e) => seen2.push(e.type))();
+    await Promise.resolve();
+    expect(seen2).toEqual([]);
+  });
 });

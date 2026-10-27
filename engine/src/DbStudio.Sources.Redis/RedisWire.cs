@@ -104,7 +104,8 @@ public sealed record RedisListPush(string? Side, IReadOnlyList<string>? Values);
 
 public sealed record RedisListSetIndex(long? Index, string? Value);
 
-public sealed record RedisListRemove(string? Value, long? Count);
+/// <summary><c>Index</c> removes that exact position (guarded by <c>Value</c>); without it, LREM removes <c>Count</c> occurrences of <c>Value</c>.</summary>
+public sealed record RedisListRemove(string? Value, long? Count, long? Index = null);
 
 public sealed record RedisListEditRequest(RedisListPush? Push, RedisListSetIndex? SetIndex, RedisListRemove? Remove);
 

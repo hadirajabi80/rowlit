@@ -35,14 +35,19 @@ public sealed class InfoService
         var text = (await RedisErrors.Guard(() => primary.ExecuteAsync("INFO"), "info").ConfigureAwait(false)).ToString() ?? "";
         var sections = InfoParser.Parse(text);
         var dbSize = await KeyBrowser.DbSizeAsync(c, c.IsCluster ? 0 : c.Settings.Database).ConfigureAwait(false);
-        long clients;
-        try
+        // The Info view polls this every 2 s. CLIENT LIST is O(clients) and blocks the server while it renders, so a
+        // single node answers from INFO (connected_clients) instead; only a cluster sums over its primaries.
+        long clients = InfoParser.Long(sections.GetValueOrDefault("clients")?.GetValueOrDefault("connected_clients"));
+        if (c.IsCluster)
         {
-            clients = (await ClientsAsync(c).ConfigureAwait(false)).Count;
-        }
-        catch (EngineException)
-        {
-            clients = InfoParser.Long(sections.GetValueOrDefault("clients")?.GetValueOrDefault("connected_clients"));
+            try
+            {
+                clients = (await ClientsAsync(c).ConfigureAwait(false)).Count;
+            }
+            catch (EngineException)
+            {
+                // keep the single node's figure
+            }
         }
         List<RedisClusterNode>? nodes = null;
         if (c.IsCluster)
@@ -156,7 +161,8 @@ public sealed class InfoService
             var reply = await RedisErrors.Guard(() => string.IsNullOrEmpty(pattern)
                 ? server.ExecuteAsync("PUBSUB", "CHANNELS")
                 : server.ExecuteAsync("PUBSUB", "CHANNELS", pattern), "pubsub|channels").ConfigureAwait(false);
-            foreach (var n in Resp.Arr(reply)) names.Add(Resp.Text(n));
+            // __Booksleeve_*: the driver's own master-change subscription, not one of the user's channels
+            foreach (var n in Resp.Arr(reply).Select(Resp.Text).Where(n => !n.StartsWith("__Booksleeve_", StringComparison.Ordinal))) names.Add(n);
             patterns += Resp.Long(await RedisErrors.Guard(() => server.ExecuteAsync("PUBSUB", "NUMPAT"), "pubsub|numpat").ConfigureAwait(false));
         }
         var counts = new Dictionary<string, long>(StringComparer.Ordinal);

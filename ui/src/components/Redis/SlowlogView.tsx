@@ -78,7 +78,7 @@ export function SlowlogView({ tab, visible }: TabViewProps) {
 
   const saveThreshold = async () => {
     if (!/^-?\d+$/.test(draft.trim())) return toast('error', 'The threshold is a number of microseconds (-1 disables, 0 logs everything).');
-    const ok = await useUi.getState().askConfirm({ title: 'Change slowlog threshold', confirmLabel: 'CONFIG SET', message: `Log commands slower than ${formatDuration(Number(draft))} (CONFIG SET slowlog-log-slower-than ${draft.trim()})?` });
+    const ok = await useUi.getState().askConfirm({ title: 'Change slowlog threshold', confirmLabel: 'CONFIG SET', message: `${Number(draft) < 0 ? 'Stop logging slow commands' : `Log commands slower than ${formatDuration(Number(draft))}`} (CONFIG SET slowlog-log-slower-than ${draft.trim()})?` });
     if (!ok) return;
     try {
       await api.redis.setConfig(cid, { name: 'slowlog-log-slower-than', value: draft.trim() });
@@ -101,7 +101,7 @@ export function SlowlogView({ tab, visible }: TabViewProps) {
         <input id={`sl-th-${tab.id}`} className="input redis-narrow mono" value={draft} disabled={threshold === null || readOnly} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void saveThreshold(); }} />
         {threshold !== null && draft !== threshold && !readOnly && <button className="btn btn-xs" onClick={() => void saveThreshold()}>Apply</button>}
-        {threshold !== null && <span className="muted">{formatDuration(Number(threshold))}</span>}
+        {threshold !== null && <span className="muted">{Number(threshold) < 0 ? 'logging disabled' : formatDuration(Number(threshold))}</span>}
         <span className="flex-1" />
         {readOnly && <span className="pill pill-muted"><Lock size={11} /> read-only</span>}
         <button className="btn btn-xs btn-danger-outline" disabled={readOnly || !rows?.length} onClick={() => void reset()}><Trash2 size={13} /> Reset</button>

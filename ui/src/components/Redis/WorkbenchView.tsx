@@ -12,9 +12,10 @@ import { commandLines, tryParseArgs } from '../../redis/args';
 import { findCommand } from '../../redis/catalog';
 import { prettyJson, replyTable, replyText, type ReplyTable } from '../../redis/format';
 import { useTabs } from '../../store/tabs';
+import { toast } from '../../store/ui';
 import { Select } from '../common/Select';
 import type { TabViewProps } from '../layout/tabViews';
-import { CodeEditor } from './CodeEditor';
+import { CodeEditor, type CodeEditorApi } from './CodeEditor';
 import type { WorkbenchState } from './open';
 import { cachedKeyNames, errorText, loadHistory, loadServer, pushHistory, useRedis } from './store';
 import { useRedisViewEvents } from './viewEvents';
@@ -124,7 +125,11 @@ export function WorkbenchView({ tab, theme }: TabViewProps) {
 
   const run = useCallback(async (source: string) => {
     const lines = commandLines(source).map((l) => l.line);
-    if (!lines.length || running) return;
+    if (running) return;
+    if (!lines.length) {
+      toast('info', 'Nothing to run', 'The line or selection is empty or a comment. Run all (F5) runs every line.');
+      return;
+    }
     setRunning(true);
     try {
       const r = await runLines(cid, dbRef.current, lines);
@@ -136,10 +141,12 @@ export function WorkbenchView({ tab, theme }: TabViewProps) {
     }
   }, [cid, running]);
 
-  const editorSel = useRef<{ text: string } | null>(null);
+  // The line under the caret or the selection *now* (the toolbar and the palette must not replay the last Ctrl+Enter).
+  const editorApi = useRef<CodeEditorApi | null>(null);
+  const currentText = () => editorApi.current?.selectionOrLine()?.text ?? textRef.current.split('\n')[0] ?? '';
   useRedisViewEvents(tab.id, (a) => {
     if (a === 'runAll') void run(textRef.current);
-    else if (a === 'runLine') void run(editorSel.current?.text ?? textRef.current.split('\n')[0] ?? '');
+    else if (a === 'runLine') void run(currentText());
     else if (a === 'clear') setCards([]);
   });
 
@@ -152,7 +159,7 @@ export function WorkbenchView({ tab, theme }: TabViewProps) {
           <Select size="sm" aria-label="Database" mono value={db} onChange={(v) => setDb(Number(v))}
             options={Array.from({ length: server?.databases ?? 16 }, (_, i) => ({ value: i, label: `db${i}` }))} />
         )}
-        <button className="btn btn-xs btn-primary" disabled={running} onClick={() => void run(editorSel.current?.text ?? textRef.current)} title={`Run line or selection (${displayShortcut('Mod+Enter')})`}><Play size={13} /> Run</button>
+        <button className="btn btn-xs btn-primary" disabled={running} onClick={() => void run(currentText())} title={`Run line or selection (${displayShortcut('Mod+Enter')})`}><Play size={13} /> Run</button>
         <button className="btn btn-xs" disabled={running} onClick={() => void run(textRef.current)} title="Run all lines (F5)"><ListEnd size={13} /> Run all</button>
         <Select size="sm" aria-label="History" value={null} placeholder={`History (${history.length})`} searchable menuMinWidth={360}
           options={[...history].reverse().map((h) => ({ value: h, label: h }))} mono
@@ -164,7 +171,7 @@ export function WorkbenchView({ tab, theme }: TabViewProps) {
       <div className="redis-workbench-split">
         <div className="redis-workbench-editor">
           <CodeEditor value={text} onChange={setText} language="redis" theme={theme} ariaLabel="Redis commands" keys={keys} autoFocus
-            onRunSelection={(t) => { editorSel.current = { text: t }; void run(t); }} onRunAll={() => void run(textRef.current)} />
+            apiRef={editorApi} onRunSelection={(t) => void run(t)} onRunAll={() => void run(textRef.current)} />
         </div>
         <div className="redis-results" aria-label="Results" aria-live="polite">
           {running && <div className="muted redis-running" role="status">Running…</div>}

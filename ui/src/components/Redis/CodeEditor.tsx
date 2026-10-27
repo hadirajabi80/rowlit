@@ -1,8 +1,13 @@
 // Code editor of the Redis views (Workbench, string and JSON values). The real editor is Monaco (lazy chunk, the
 // dbstudio-redis / dbstudio-redis-json languages of redis/language.ts); under the unit tests (jsdom) a textarea with
 // the same props and key handling stands in.
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef, type MutableRefObject } from 'react';
 import type { EffectiveTheme } from '../../theme/useTheme';
+
+/** What a host can ask of the editor right now (the toolbar Run button needs the *current* selection or line). */
+export interface CodeEditorApi {
+  selectionOrLine: () => { text: string; line: number } | null;
+}
 
 export interface CodeEditorProps {
   value: string;
@@ -23,6 +28,8 @@ export interface CodeEditorProps {
   autoFocus?: boolean;
   wordWrap?: boolean;
   className?: string;
+  /** Filled with the editor's imperative API while it is mounted. */
+  apiRef?: MutableRefObject<CodeEditorApi | null>;
 }
 
 const MonacoCodeEditor = lazy(() => import('./monacoEditor'));
@@ -40,8 +47,18 @@ export function selectionOrLine(el: HTMLTextAreaElement): { text: string; line: 
 }
 
 function TextareaEditor(p: CodeEditorProps) {
+  const el = useRef<HTMLTextAreaElement>(null);
+  const { apiRef } = p;
+  useEffect(() => {
+    if (!apiRef) return;
+    apiRef.current = { selectionOrLine: () => (el.current ? selectionOrLine(el.current) : null) };
+    return () => {
+      apiRef.current = null;
+    };
+  }, [apiRef]);
   return (
     <textarea
+      ref={el}
       className={`input mono redis-code-textarea ${p.className ?? ''}`}
       aria-label={p.ariaLabel}
       value={p.value}

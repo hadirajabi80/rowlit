@@ -33,6 +33,8 @@ export class EngineSocket {
   private byExec = new Map<string, Set<Handler>>();
   private byStream = new Map<string, Set<Handler>>();
   private byJob = new Map<string, Set<Handler>>();
+  /** Recently finished jobs: a fast job can emit `job.done` before the 202 reaches the caller that subscribes. */
+  private recentJobDone = new Map<string, JobDoneEvent>();
   private statusHandlers = new Set<(s: WsStatus) => void>();
   private _status: WsStatus = 'idle';
   private attempt = 0;
@@ -90,7 +92,16 @@ export class EngineSocket {
 
   /** M2: `job.progress` / `job.done` events of one job (from a `202 { jobId }` endpoint). */
   onJob(jobId: string, fn: (ev: JobProgressEvent | JobDoneEvent) => void): () => void {
-    return this.add(this.byJob, jobId, fn as Handler);
+    const off = this.add(this.byJob, jobId, fn as Handler);
+    // The job already finished before we subscribed (fast job, slow 202): replay its `job.done` once, asynchronously
+    // so the caller can store the unsubscribe function first.
+    const early = this.recentJobDone.get(jobId);
+    if (early) {
+      queueMicrotask(() => {
+        if (this.byJob.get(jobId)?.has(fn as Handler)) safe(fn as Handler, early);
+      });
+    }
+    return off;
   }
 
   /**
@@ -125,6 +136,10 @@ export class EngineSocket {
       const hs = this.byStream.get(ev.streamId);
       if (hs) for (const h of [...hs]) safe(h, ev);
     } else if (ev.type === 'job.progress' || ev.type === 'job.done') {
+      if (ev.type === 'job.done') {
+        this.recentJobDone.set(ev.jobId, ev);
+        if (this.recentJobDone.size > 50) this.recentJobDone.delete(this.recentJobDone.keys().next().value as string);
+      }
       const hs = this.byJob.get(ev.jobId);
       if (hs) for (const h of [...hs]) safe(h, ev);
     }
