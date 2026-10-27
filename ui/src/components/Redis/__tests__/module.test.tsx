@@ -47,6 +47,11 @@ describe('explorer subtree', () => {
     expect(folder).toMatchObject({ source: { nodeType: 'folder' }, expandable: true });
     expect(mod().contextMenuId(folder)).toBe('explorer.redis.folder');
     expect(r.some((x) => x.kind === 'status' && /open the browser/.test(x.label))).toBe(true);
+    // the folder counts come from a partial scan: they are lower bounds ("340+")
+    expect(folder.countPartial).toBe(true);
+    // a folder scanned on its own is complete
+    useRedis.setState((s) => ({ conns: { ...s.conns, c_redis: { ...s.conns.c_redis, dbs: { 0: { ...s.conns.c_redis.dbs[0], scanned: new Set(['', folder.source!.path[1]]) } } } } }));
+    expect(rows([db0]).find((x) => x.label === 'user')!.countPartial).toBe(false);
     const inner = rows([db0, folder.id]).filter((x) => x.depth === 3);
     expect(inner.length).toBeGreaterThan(0);
   });

@@ -158,7 +158,7 @@ public sealed class KafkaProvider(
         return new ServerInfo(text, version, controllerHost, settings.User, null);
     }
 
-    private static async Task<string?> BrokerVersionAsync(IKafkaGateway gateway, KClusterInfo cluster, CancellationToken ct)
+    internal static async Task<string?> BrokerVersionAsync(IKafkaGateway gateway, KClusterInfo cluster, CancellationToken ct)
     {
         var broker = cluster.Nodes.FirstOrDefault(n => n.Id == cluster.ControllerId) ?? cluster.Nodes.FirstOrDefault();
         if (broker is null) return null;

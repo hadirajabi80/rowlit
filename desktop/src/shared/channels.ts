@@ -7,6 +7,8 @@ export const IPC = {
   showSaveDialog: 'dbstudio:show-save-dialog',
   showOpenDialog: 'dbstudio:show-open-dialog',
   readTextFile: 'dbstudio:read-text-file',
+  /** Additive: the first bytes of a text file (a preview of a file the engine reads by path). */
+  readTextFileHead: 'dbstudio:read-text-file-head',
   writeTextFile: 'dbstudio:write-text-file',
   openExternal: 'dbstudio:open-external',
   /** Export dialog: open an exported data file / show it in its folder. */

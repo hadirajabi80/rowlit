@@ -15,8 +15,12 @@ export interface Platform {
   showOpenDialog(opts: { title?: string; filters?: FileFilter[]; createIfMissing?: boolean }): Promise<string | null>;
   /** Save content the browser way (<a download>) or, in Electron, through a save dialog. Returns the path or file name. */
   saveFile(opts: { suggestedName: string; filters?: FileFilter[]; content: Blob | string; mime?: string }): Promise<string | null>;
-  /** Pick a text file and read it. */
-  openTextFile(opts: { filters?: FileFilter[] }): Promise<{ name: string; path: string | null; content: string } | null>;
+  /**
+   * Pick a text file and read it. With `maxBytes` and a file-system path (Electron) only the first bytes are read and
+   * `truncated` says so: for callers that hand the *path* to the engine and only show a preview. Without it, or in the
+   * browser (no path, the caller needs the whole content), the file is read in full as before.
+   */
+  openTextFile(opts: { filters?: FileFilter[]; maxBytes?: number }): Promise<{ name: string; path: string | null; content: string; truncated?: boolean; size?: number } | null>;
   writeTextFile(path: string, content: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   /** Desktop only: open an exported data file with the default app / show a file in its folder. */

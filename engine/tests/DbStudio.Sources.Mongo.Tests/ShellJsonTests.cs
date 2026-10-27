@@ -14,6 +14,20 @@ public sealed class ShellJsonTests
     [InlineData("/* block */")]
     public void Empty_text_is_an_empty_document(string text) => Assert.Equal(new BsonDocument(), P(text));
 
+    [Theory]
+    [InlineData("{ a: -0.0 }")]
+    [InlineData("{ a: -0e0 }")]
+    [InlineData("{ a: -.0 }")]
+    [InlineData("""{ "a": { "$numberDouble": "-0.0" } }""")]
+    [InlineData("{ a: Double(-0) }")]
+    [InlineData("{ a: Double('-0') }")]
+    public void Negative_zero_keeps_its_sign(string text)
+    {
+        var a = P(text)["a"];
+        Assert.True(a.IsDouble, text);
+        Assert.True(double.IsNegative(a.AsDouble), text);
+    }
+
     [Fact]
     public void Plain_json() =>
         Assert.Equal(new BsonDocument { { "a", 1 }, { "b", "x" }, { "c", true }, { "d", BsonNull.Value }, { "e", new BsonArray { 1, 2 } } },

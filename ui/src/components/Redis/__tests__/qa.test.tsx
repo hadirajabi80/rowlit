@@ -89,6 +89,30 @@ describe('hash and sorted set editors', () => {
   });
 });
 
+describe('binary elements', () => {
+  it('an edited binary hash value is saved with its bytes, the untouched binary field name travels as bytes', async () => {
+    const real = api.redis.getKey.bind(api.redis);
+    vi.spyOn(api.redis, 'getKey').mockImplementation(async (cid, key, q) => {
+      const v = await real(cid, key, q);
+      if (key !== 'user:1001:profile' || v.type !== 'hash') return v;
+      return { ...v, fields: [{ field: 'k\\xff', value: 'v\\xfe' }, ...v.fields], bin: { 'k\\xff': '/w==', 'v\\xfe': '/g==' } };
+    });
+    await showKey('user:1001:profile');
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Value of k\\xff/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /^Value of k\\xff/ }));
+    const edit = screen.getByRole('textbox', { name: 'Edit Value of k\\xff' });
+    fireEvent.change(edit, { target: { value: 'v\\xfe\\xfd' } });
+    fireEvent.keyDown(edit, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(env.hits('/hash', 'POST')).toHaveLength(1));
+    expect(env.hits('/hash', 'POST')[0].body).toEqual({
+      set: { 'k\\xff': 'v\\xfe\\xfd' },
+      // the field name keeps its bytes; the edited value is the new bytes 76 fe fd
+      bin: { 'k\\xff': '/w==', 'v\\xfe\\xfd': 'dv79' },
+    });
+  });
+});
+
 describe('list editor', () => {
   it('removes the element at the clicked position (duplicates elsewhere stay)', async () => {
     await showKey('queue:jobs');

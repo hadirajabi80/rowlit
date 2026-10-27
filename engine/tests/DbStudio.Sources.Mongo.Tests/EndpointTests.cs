@@ -267,6 +267,28 @@ public sealed class EndpointTests
     }
 
     [Fact]
+    public async Task A_failed_export_keeps_the_existing_file_and_leaves_no_partial_one()
+    {
+        await using var host = await EndpointHost.StartAsync();
+        var file = Path.Combine(T.TempDir(), "orders.jsonl");
+        File.WriteAllText(file, "precious\n");
+        host.Fake.Fail("find", new InvalidOperationException("the server went away"));
+        var exp = await host.Post("/db/shop/coll/orders/export", new { format = "jsonl", filter = "{}", path = file });
+        Assert.Equal(HttpStatusCode.Accepted, exp.StatusCode);
+        var done = await host.Events.JobDone((await EndpointHost.Json(exp)).GetProperty("jobId").GetString()!);
+        Assert.Equal(ExecutionStatus.Error, done.Status);
+        Assert.Equal("precious\n", File.ReadAllText(file));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(file)!, "orders.jsonl.*.part"));
+        // and a successful one replaces it, still without leaving the temp file
+        host.Fake.ClearFailures();
+        var ok = await host.Post("/db/shop/coll/orders/export", new { format = "jsonl", filter = "{}", path = file });
+        var okDone = await host.Events.JobDone((await EndpointHost.Json(ok)).GetProperty("jobId").GetString()!);
+        Assert.Equal(ExecutionStatus.Ok, okDone.Status);
+        Assert.Equal(100, File.ReadAllLines(file).Length);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(file)!, "orders.jsonl.*.part"));
+    }
+
+    [Fact]
     public async Task Schema_job_indexes_validation_explain_fields()
     {
         await using var host = await EndpointHost.StartAsync();

@@ -54,6 +54,22 @@ public static class MongoValidate
         return path;
     }
 
+    /// <summary>
+    /// A field of an index key: an ordinary path, or a wildcard (<c>$**</c> for every field, <c>a.b.$**</c> for the fields
+    /// below <c>a.b</c>). The wildcard is the last segment; what the server allows alongside it (no unique, no TTL, one
+    /// wildcard...) is the server's to say.
+    /// </summary>
+    public static string IndexFieldPath(string? path, string field)
+    {
+        if (path is not null && path.EndsWith("$**", StringComparison.Ordinal) && (path.Length == 3 || path[^4] == '.'))
+        {
+            if (path.Length > 3) FieldPath(path[..^4], field);
+            return path;
+        }
+        if (path is not null && path.Contains("$**", StringComparison.Ordinal)) throw Fail(field, "A wildcard ($**) is the last part of the field: $** or a.b.$**.");
+        return FieldPath(path, field);
+    }
+
     /// <summary>A pipeline stage: a document with exactly one <c>$stage</c> key.</summary>
     public static BsonDocument Stage(BsonDocument stage, string field)
     {

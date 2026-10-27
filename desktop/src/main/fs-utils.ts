@@ -46,6 +46,30 @@ export async function readTextFileDecoded(file: string, maxBytes: number): Promi
   return decodeText(buf);
 }
 
+/**
+ * The first `maxBytes` bytes of a text file, decoded like `readTextFileDecoded`, without
+ * reading the rest: a preview of a file that may be gigabytes (the engine reads it by path). A multi-byte character cut at the
+ * end is dropped; `size` is the whole file.
+ */
+export async function readTextFileHead(file: string, maxBytes: number): Promise<{ content: string; size: number; truncated: boolean }> {
+  const st = await fs.promises.stat(file);
+  if (!st.isFile()) throw new Error(`Not a file: ${file}`);
+  const want = Math.min(st.size, maxBytes);
+  const handle = await fs.promises.open(file, 'r');
+  try {
+    const buf = Buffer.alloc(want);
+    const { bytesRead } = await handle.read(buf, 0, want, 0);
+    const truncated = st.size > bytesRead;
+    // UTF-16 reads whole code units; UTF-8 may end inside a character, which decodes to U+FFFD: cut that off
+    const head = bytesRead % 2 === 1 && buf[0] === 0xff && buf[1] === 0xfe ? buf.subarray(0, bytesRead - 1) : buf.subarray(0, bytesRead);
+    let content = decodeText(head);
+    if (truncated) content = content.replace(/�$/, '');
+    return { content, size: st.size, truncated };
+  } finally {
+    await handle.close();
+  }
+}
+
 export function decodeText(buf: Buffer): string {
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return buf.subarray(3).toString('utf8');
   if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');

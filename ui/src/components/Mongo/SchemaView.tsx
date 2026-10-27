@@ -30,6 +30,19 @@ function exampleText(v: unknown): string {
   }
 }
 
+/** The engine cuts example strings at this many characters (SchemaService.Example). */
+export const EXAMPLE_CUT = 100;
+
+/** An example string that may have been cut by the engine: it only says how the value starts. */
+export const isCutExample = (v: unknown): v is string => typeof v === 'string' && v.length >= EXAMPLE_CUT;
+
+/** `{ field: <filter> }` value for an example: the value itself, or, for a cut string, a "starts with" regex. */
+export function exampleFilterValue(v: unknown): string {
+  if (!isCutExample(v)) return exampleText(v);
+  const escaped = v.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+  return `/^${escaped}/`;
+}
+
 function FieldRow({ f, depth, mixed, onFilter }: { f: MongoSchemaField; depth: number; mixed: Set<string>; onFilter: (path: string, value: unknown) => void }) {
   const [open, setOpen] = useState(false);
   const name = f.path.slice(f.path.lastIndexOf('.') + 1);
@@ -61,7 +74,8 @@ function FieldRow({ f, depth, mixed, onFilter }: { f: MongoSchemaField; depth: n
         </div>
         <div className="mg-sfield-ex" role="cell">
           {f.examples.slice(0, 5).map((e, i) => (
-            <button key={i} className="mg-chip" title="Use as filter" onClick={() => onFilter(f.path, e)}>{exampleText(e)}</button>
+            <button key={i} className="mg-chip" title={isCutExample(e) ? `Use as filter: starts with these ${EXAMPLE_CUT} characters (the example is cut)` : 'Use as filter'}
+              onClick={() => onFilter(f.path, e)}>{exampleText(e)}{isCutExample(e) ? '…' : ''}</button>
           ))}
           {f.stats && (
             <span className="mg-sfield-stats muted">
@@ -88,7 +102,7 @@ export default function SchemaView({ cid, db, coll, state, patch, theme }: SubVi
   };
 
   const useAsFilter = (path: string, value: unknown) => {
-    const filterText = `{ ${shellKey(path)}: ${exampleText(value)} }`;
+    const filterText = `{ ${shellKey(path)}: ${exampleFilterValue(value)} }`;
     patch({ sub: 'documents', query: { ...DEFAULT_QUERY, ...state.query, filter: filterText, skip: 0 } });
   };
 

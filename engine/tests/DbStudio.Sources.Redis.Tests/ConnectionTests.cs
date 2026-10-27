@@ -53,6 +53,34 @@ public sealed class ConnectionTests
     }
 
     [Fact]
+    public async Task A_host_that_accepts_but_never_answers_fails_after_about_one_timeout_not_two()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+            var accepting = Task.Run(async () =>
+            {
+                var held = new List<System.Net.Sockets.TcpClient>();
+                while (true) held.Add(await listener.AcceptTcpClientAsync());
+            });
+            var profile = Profile(port, props: new() { ["connectTimeout"] = 2 });
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = await new RedisProvider().TestAsync(profile, null, CancellationToken.None);
+            sw.Stop();
+            Assert.False(r.Ok);
+            Assert.Equal(ErrorCodes.SourceUnavailable, r.Error!.Code);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3.4), $"took {sw.Elapsed.TotalSeconds:F1} s for a 2 s connect timeout");
+            _ = accepting;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
     public async Task Password_is_sent_with_auth()
     {
         await using var h = await RedisHarness.StartAsync(password: "s3cret");

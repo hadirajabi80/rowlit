@@ -27,6 +27,9 @@ public sealed class KafkaFake : IKafkaGateway
     public bool Disposed { get; private set; }
     public TimeSpan WatermarkDelay { get; set; } = TimeSpan.Zero;
 
+    /// <summary>A reader returns nothing for this long after Assign (the consumer connecting to the brokers).</summary>
+    public TimeSpan ReaderStartupDelay { get; set; } = TimeSpan.Zero;
+
     public string LibraryVersion => "fake";
 
     public sealed class FakePartition
@@ -354,6 +357,7 @@ public sealed class KafkaFake : IKafkaGateway
         private readonly Dictionary<KTopicPartition, long> _positions = [];
         private readonly HashSet<KTopicPartition> _eofSent = [];
         private int _next;
+        private DateTime _readyAt = DateTime.MinValue;
 
         public string Purpose { get; } = purpose;
         public bool Paused { get; private set; }
@@ -362,6 +366,7 @@ public sealed class KafkaFake : IKafkaGateway
 
         public void Assign(IReadOnlyList<(KTopicPartition Tp, long Offset)> start)
         {
+            _readyAt = DateTime.UtcNow + fake.ReaderStartupDelay;
             lock (fake.Gate)
             {
                 foreach (var (tp, off) in start)
@@ -378,7 +383,7 @@ public sealed class KafkaFake : IKafkaGateway
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                if (!Paused)
+                if (!Paused && DateTime.UtcNow >= _readyAt)
                 {
                     lock (fake.Gate)
                     {

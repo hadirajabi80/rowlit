@@ -63,6 +63,9 @@ public sealed record FetchRange(int Partition, long Start, long End);
 /// </summary>
 public sealed class MessageBrowser
 {
+    /// <summary>Extra time for the consumer's connection setup before the first record: not counted in the fetch timeout.</summary>
+    public static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(10);
+
     public static async Task<IReadOnlyList<FetchRange>> PlanAsync(KafkaClientHandle h, string topic, FetchOptions o, CancellationToken ct)
     {
         var meta = await TopicService.TopicMetaAsync(h, topic, ct).ConfigureAwait(false);
@@ -117,7 +120,11 @@ public sealed class MessageBrowser
         {
             using var reader = h.Gateway.CreateReader("browse");
             reader.Assign(active.Select(r => (new KTopicPartition(topic, r.Partition), r.Start)).ToList());
-            var deadline = DateTimeOffset.UtcNow + o.Timeout;
+            // The consumer connects and joins the partition leaders on its first poll, which can take seconds on a slow or
+            // loaded cluster. That startup is not browsing time: the timeout clock starts at the first record (or EOF),
+            // and until then a separate grace applies.
+            var started = false;
+            var deadline = DateTimeOffset.UtcNow + o.Timeout + StartupGrace;
             while (done.Count < ranges.Count && !stopped)
             {
                 ct.ThrowIfCancellationRequested();
@@ -131,6 +138,11 @@ public sealed class MessageBrowser
                 try { r = reader.Consume(remaining < TimeSpan.FromMilliseconds(250) ? remaining : TimeSpan.FromMilliseconds(250), ct); }
                 catch (KafkaGatewayException ex) { throw KafkaErrors.ToEngine(ex, topic); }
                 if (r is null) continue;
+                if (!started)
+                {
+                    started = true;
+                    deadline = DateTimeOffset.UtcNow + o.Timeout;
+                }
                 if (r.Eof is { } eof)
                 {
                     if (eof.Topic == topic) done.Add(eof.Partition);

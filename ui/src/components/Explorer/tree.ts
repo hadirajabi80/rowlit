@@ -34,6 +34,8 @@ export interface TreeRow {
   /** Highlighted label positions when filtering. */
   match?: number[];
   count?: number;
+  /** `count` is a lower bound (the data behind it is only partly loaded): shown as "340+". */
+  countPartial?: boolean;
   /** Connection root: catalog is loading (per-root spinner). */
   busy?: boolean;
   /** status 'load': the schema to load when activated. */

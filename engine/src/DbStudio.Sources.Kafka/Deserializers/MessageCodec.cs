@@ -190,7 +190,7 @@ public sealed class MessageCodec(SchemaCache schemas)
     // ---------------------------------------------------------------- produce
 
     /// <summary>Serializes produce input: string / json (validated) / hex / avro / protobuf / jsonschema (with a registry subject).</summary>
-    public static byte[]? Encode(string? text, string format, ParsedSchema? schema, string? protobufMessage, string field)
+    public static byte[]? Encode(string? text, string format, ParsedSchema? schema, string? protobufMessage, string field, List<string>? warnings = null)
     {
         if (text is null) return null;
         switch (format)
@@ -222,7 +222,7 @@ public sealed class MessageCodec(SchemaCache schemas)
             switch (format)
             {
                 case "avro" when schema.Avro is not null:
-                    return [.. header, .. AvroCodec.Encode(schema.Avro, json)];
+                    return [.. header, .. AvroCodec.Encode(schema.Avro, json, warnings)];
                 case "protobuf" when schema.Protobuf is not null:
                     var indexes = schema.Protobuf.IndexesOf(protobufMessage);
                     return [.. header, .. ProtobufIndexes.Write(indexes), .. schema.Protobuf.Encode(schema.Protobuf.MessageAt(indexes), json)];

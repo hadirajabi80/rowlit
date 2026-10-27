@@ -98,7 +98,7 @@ public sealed class IndexesService
         for (var i = 0; i < req.Key.Count; i++)
         {
             var part = req.Key[i];
-            var field = MongoValidate.FieldPath(part.Field, $"key[{i}].field");
+            var field = MongoValidate.IndexFieldPath(part.Field, $"key[{i}].field");
             if (key.Contains(field)) throw MongoValidate.Fail($"key[{i}].field", $"'{field}' appears twice in the index key.");
             key[field] = ParseKeyType(part.Type, $"key[{i}].type");
         }
@@ -122,6 +122,13 @@ public sealed class IndexesService
                 if (o.Sparse == true) throw MongoValidate.Fail("options.partialFilterExpression", "An index cannot be both sparse and partial.");
                 spec["partialFilterExpression"] = pf;
             }
+        }
+        if (!string.IsNullOrWhiteSpace(o.WildcardProjection))
+        {
+            if (key.ElementCount != 1 || key.GetElement(0).Name != "$**")
+                throw MongoValidate.Fail("options.wildcardProjection", "A wildcard projection belongs to a single $** index on the whole document.");
+            var wp = ShellJson.ParseDocument(o.WildcardProjection, "options.wildcardProjection");
+            if (wp.ElementCount > 0) spec["wildcardProjection"] = wp;
         }
         if (!string.IsNullOrWhiteSpace(o.Collation))
         {

@@ -42,7 +42,7 @@ public sealed record RedisStringValue(string Key, int Db, long Ttl, string? Obje
 
 public sealed record RedisHashField(string Field, string Value);
 
-public sealed record RedisHashValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisHashField> Fields, string Cursor, long Length)
+public sealed record RedisHashValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisHashField> Fields, string Cursor, long Length, Dictionary<string, string>? Bin = null)
     : RedisKeyValue(Key, Db, Ttl, ObjectEncoding, Memory)
 {
     public override string Type => "hash";
@@ -50,13 +50,13 @@ public sealed record RedisHashValue(string Key, int Db, long Ttl, string? Object
 
 public sealed record RedisListItem(long Index, string Value);
 
-public sealed record RedisListValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisListItem> Items, long Length, long Start, long Stop)
+public sealed record RedisListValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisListItem> Items, long Length, long Start, long Stop, Dictionary<string, string>? Bin = null)
     : RedisKeyValue(Key, Db, Ttl, ObjectEncoding, Memory)
 {
     public override string Type => "list";
 }
 
-public sealed record RedisSetValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<string> Members, string Cursor, long Length)
+public sealed record RedisSetValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<string> Members, string Cursor, long Length, Dictionary<string, string>? Bin = null)
     : RedisKeyValue(Key, Db, Ttl, ObjectEncoding, Memory)
 {
     public override string Type => "set";
@@ -64,7 +64,7 @@ public sealed record RedisSetValue(string Key, int Db, long Ttl, string? ObjectE
 
 public sealed record RedisZsetMember(string Member, double Score);
 
-public sealed record RedisZsetValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisZsetMember> Members, string Cursor, long Length)
+public sealed record RedisZsetValue(string Key, int Db, long Ttl, string? ObjectEncoding, long? Memory, IReadOnlyList<RedisZsetMember> Members, string Cursor, long Length, Dictionary<string, string>? Bin = null)
     : RedisKeyValue(Key, Db, Ttl, ObjectEncoding, Memory)
 {
     public override string Type => "zset";
@@ -98,7 +98,7 @@ public sealed record RedisStreamGroupDetail(string Group, IReadOnlyList<RedisStr
 
 public sealed record RedisSetStringRequest(string? Value);
 
-public sealed record RedisHashEditRequest(Dictionary<string, string>? Set, IReadOnlyList<string>? Del);
+public sealed record RedisHashEditRequest(Dictionary<string, string>? Set, IReadOnlyList<string>? Del, Dictionary<string, string>? Bin = null);
 
 public sealed record RedisListPush(string? Side, IReadOnlyList<string>? Values);
 
@@ -107,11 +107,11 @@ public sealed record RedisListSetIndex(long? Index, string? Value);
 /// <summary><c>Index</c> removes that exact position (guarded by <c>Value</c>); without it, LREM removes <c>Count</c> occurrences of <c>Value</c>.</summary>
 public sealed record RedisListRemove(string? Value, long? Count, long? Index = null);
 
-public sealed record RedisListEditRequest(RedisListPush? Push, RedisListSetIndex? SetIndex, RedisListRemove? Remove);
+public sealed record RedisListEditRequest(RedisListPush? Push, RedisListSetIndex? SetIndex, RedisListRemove? Remove, Dictionary<string, string>? Bin = null);
 
-public sealed record RedisSetEditRequest(IReadOnlyList<string>? Add, IReadOnlyList<string>? Remove);
+public sealed record RedisSetEditRequest(IReadOnlyList<string>? Add, IReadOnlyList<string>? Remove, Dictionary<string, string>? Bin = null);
 
-public sealed record RedisZsetEditRequest(IReadOnlyList<RedisZsetMember>? Add, IReadOnlyList<string>? Remove);
+public sealed record RedisZsetEditRequest(IReadOnlyList<RedisZsetMember>? Add, IReadOnlyList<string>? Remove, Dictionary<string, string>? Bin = null);
 
 public sealed record RedisStreamAck(string? Group, IReadOnlyList<string>? Ids);
 
@@ -120,11 +120,30 @@ public sealed record RedisStreamGroupCreate(string? Name, string? Id);
 public sealed record RedisStreamEditRequest(Dictionary<string, string>? Add, string? Id, IReadOnlyList<string>? Delete, RedisStreamAck? Ack,
     RedisStreamGroupCreate? GroupCreate, string? GroupDestroy);
 
-public sealed record RedisJsonSetRequest(string? Path, JsonElement? Value);
+/// <param name="Value">A JSON <c>null</c> is a value (a document whose root is null), not a missing one: see <see cref="JsonNullKeepingConverter"/>.</param>
+public sealed record RedisJsonSetRequest(string? Path, [property: JsonConverter(typeof(JsonNullKeepingConverter))] JsonElement? Value);
+
+/// <summary>Reads JSON <c>null</c> as a <see cref="JsonElement"/> of kind Null instead of a missing (C# null) value.</summary>
+public sealed class JsonNullKeepingConverter : JsonConverter<JsonElement?>
+{
+    public override bool HandleNull => true;
+
+    public override JsonElement? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var doc = JsonDocument.ParseValue(ref reader);
+        return doc.RootElement.Clone();
+    }
+
+    public override void Write(Utf8JsonWriter writer, JsonElement? value, JsonSerializerOptions options)
+    {
+        if (value is { } v) v.WriteTo(writer);
+        else writer.WriteNullValue();
+    }
+}
 
 /// <param name="Members">set: string[]; zset: [{member, score}].</param>
 public sealed record RedisCreateKeyRequest(string? Key, int? Db, long? Ttl, string? Type, string? Value, Dictionary<string, string>? Fields,
-    IReadOnlyList<string>? Values, JsonElement? Members, JsonElement? Json);
+    IReadOnlyList<string>? Values, JsonElement? Members, [property: JsonConverter(typeof(JsonNullKeepingConverter))] JsonElement? Json);
 
 public sealed record RedisRenameRequest(string? NewKey, bool? Overwrite);
 

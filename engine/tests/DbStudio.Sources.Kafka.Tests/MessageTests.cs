@@ -46,6 +46,17 @@ public sealed class BrowserTests
     }
 
     [Fact]
+    public async Task A_slow_consumer_start_does_not_eat_the_browse_timeout()
+    {
+        await using var h = Seeded();
+        // the reader needs 1.2 s before its first record; the fetch timeout is 0.5 s
+        h.Fake.ReaderStartupDelay = TimeSpan.FromMilliseconds(1200);
+        var (r, msgs) = await Fetch(h, O("oldest", limit: 5, timeoutMs: 500));
+        Assert.False(r.TimedOut);
+        Assert.Equal(5, msgs.Count);
+    }
+
+    [Fact]
     public async Task Latest_offset_math_is_per_partition_high_minus_count()
     {
         await using var h = Seeded();
@@ -313,6 +324,23 @@ public sealed class ProduceTests
         var decoded = await h.Handle.Codec.DecodeAsync(rec.Value, "auto", false, default);
         Assert.Equal(e.Id, decoded.SchemaId);
         Assert.Equal(7, decoded.Json!.Value.GetProperty("id").GetInt64());
+    }
+
+    [Fact]
+    public async Task Avro_produce_warns_about_fields_the_schema_does_not_have()
+    {
+        await using var h = new Harness();
+        h.Fake.AddTopic("orders");
+        h.Registry.Register("orders-value", "AVRO", CodecTests.OrderAvro);
+        var typo = """{"id":7,"customer":"c","totl":9,"total":1.5,"status":"NEW","tags":[],"attrs":{},"created":0}""";
+        var clean = """{"id":8,"customer":"c","total":1.5,"status":"NEW","tags":[],"attrs":{},"created":0}""";
+        var results = await new ProduceService().ProduceAsync(h.Handle, "orders", new KafkaProduceRequest([new(null, typo, null, null), new(null, clean, null, null)],
+            "string", "avro", new KafkaSchemaRef("orders-value", Util.Json("\"latest\"")), null, null), default);
+        // still produced (the schema is the contract), but the dropped field is reported
+        Assert.Equal(2, h.Fake.Topics["orders"].Partitions[0].Log.Count);
+        var warning = Assert.Single(results[0].Warnings!);
+        Assert.StartsWith("value $.totl:", warning);
+        Assert.Null(results[1].Warnings);
     }
 
     [Fact]

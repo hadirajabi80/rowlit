@@ -35,15 +35,19 @@ the fixes; those are covered by unit tests only (see "Not verified live").
 
 ## Open / not fixed
 
-- UI shell parser accepts a few things the engine rejects (duplicate field names `{ a: 1, a: 2 }`, `ISODate("2024-05")`,
-  regex flag `g`). The engine error is shown with its position, so nothing is lost; the Find button is just not disabled early.
-- Engine parses `-0.0` as `0.0` (sign of negative zero lost on insert).
-- Wildcard indexes (`$**`) cannot be created from the dialog (`Field paths cannot start with '$'`); they are listed correctly.
-- Schema example chips show strings cut at 100 characters; "use as filter" on such a chip does not match.
-- Node.js code export of an object with integer-like keys cannot keep the order (JavaScript object semantics).
-- JSON import reads the whole file into memory; CSV export does not neutralise leading `=`/`+`/`-`/`@` cells.
-- Import / export failing midway leaves a partial file at the chosen path.
+Fixed in the follow-up round:
 
+- Wildcard indexes (`$**`, `a.b.$**`) can be created from the dialog; a single whole-document `$**` also takes a wildcard projection. `IndexFieldPath` allows the wildcard only as the last segment (`SchemaIndexValidationTests.Wildcard_indexes_are_accepted_with_an_optional_projection`; dialog test "offers a wildcard projection only for a $** index…").
+- `-0.0` / `-0e0` / `-.0` and `{ $numberDouble: "-0.0" }` already kept their sign; what lost it was the integer literal `-0` (an Int32 has no negative zero). It is now the double -0 like the shell's `-0` (`ShellJsonTests.Negative_zero_keeps_its_sign`).
+- Schema example chips: a string example is cut at 100 characters, so a filter built from it matched nothing. A cut example (100 characters or more) now filters by a "starts with" regex (`{ field: /^…/ }`, escaped), the chip ends in "…" and its tooltip says so (`schemaExamples.test.ts`). The engine keeps a surrogate pair whole at the cut.
+- Export to a path is written to `<path>.<guid>.part` and moved over the target when complete; a failed or cancelled export keeps the existing file and leaves no partial one (like Elasticsearch). Import only reads the file, so it never left a partial file (`EndpointTests.A_failed_export_keeps_the_existing_file_and_leaves_no_partial_one`).
+
+Left, with the reason:
+
+- UI shell parser accepts a few things the engine rejects (duplicate field names `{ a: 1, a: 2 }`, `ISODate("2024-05")`, regex flag `g`). The engine error is shown with its position, so nothing is lost; the Find button is just not disabled early. Duplicating the engine's parser rules in the UI would drift; not worth it.
+- Node.js code export of an object with integer-like keys cannot keep the order (JavaScript object semantics): a language limit.
+- JSON import reads the whole file into memory: a streaming JSON reader for the shell syntax is a rewrite of `ShellJson.ParseMany`; JSONL and CSV already stream. Left.
+- CSV export does not neutralise leading `=`/`+`/`-`/`@` cells: prefixing would change the data (every negative number starts with `-`) and break an export / import round trip; the file is a data exchange format, not a spreadsheet. Left.
 ## Not verified live
 
 Docker stopped answering after the fixes (out of memory on the host). Import / export / preview endpoints, schema job,
