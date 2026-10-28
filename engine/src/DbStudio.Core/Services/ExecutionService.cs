@@ -183,6 +183,8 @@ public sealed partial class ExecutionService
             h.Release();
         }
 
+        // Before exec.done: whoever reacts to it (the idle reaper, a client) must already see HasTempObjects.
+        InvalidateCatalog(h, cmd, sink);
         var session = h.Session;
         _events.Publish(new ExecDoneEvent(executionId, h.Id, summary.Status, summary.ElapsedMs, summary.ResultSets, summary.RowsAffected, session.TxOpen)
         {
@@ -190,7 +192,6 @@ public sealed partial class ExecutionService
         });
         _sessions.PublishChanged(h);
 
-        InvalidateCatalog(h, cmd, sink);
         if (!cmd.SkipHistory) await RecordHistoryAsync(h, cmd, startedAt, summary, sink).ConfigureAwait(false);
     }
 

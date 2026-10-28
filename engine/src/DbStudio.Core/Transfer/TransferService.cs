@@ -14,7 +14,7 @@ public sealed class EngineTransferEnvironment(ConnectionStore connections, Provi
 
     public TransferConnection Resolve(string connectionId)
     {
-        var profile = connections.WithSecrets(connections.Get(connectionId));
+        var profile = connections.ResolveForOpen(connections.Get(connectionId));
         var provider = providers.Find(profile.ProviderId)
                        ?? throw EngineException.Validation($"The connection '{profile.Name}' ({profile.ProviderId}) is not a relational database.", new { field = "connectionId" });
         return new TransferConnection(profile, connections.GetPassword(connectionId), provider);

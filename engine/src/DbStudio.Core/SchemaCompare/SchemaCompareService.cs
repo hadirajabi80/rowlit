@@ -70,7 +70,7 @@ public sealed class SchemaCompareService(ConnectionStore connections, ProviderRe
     private ProviderContext Resolve(CompareEndpoint endpoint, string field)
     {
         if (string.IsNullOrWhiteSpace(endpoint.ConnectionId)) throw EngineException.Validation($"{field}.connectionId is required.", new { field });
-        var profile = connections.WithSecrets(connections.Get(endpoint.ConnectionId));
+        var profile = connections.ResolveForOpen(connections.Get(endpoint.ConnectionId));
         var provider = providers.Find(profile.ProviderId)
                        ?? throw new EngineException(400, ErrorCodes.NotSupported, $"Schema compare needs a relational connection; '{profile.Name}' is not one.");
         if (!Supported.Contains(provider.Id))

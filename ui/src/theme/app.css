@@ -1913,7 +1913,7 @@ body.resizing-row .splitter-horizontal {
 .form-section-toggle .form-section-state {
   margin-left: 6px;
   color: var(--text-muted);
-  font-weight: normal;
+  font-weight: var(--weight-regular);
   font-size: var(--fs-xs);
 }
 .form-note {
