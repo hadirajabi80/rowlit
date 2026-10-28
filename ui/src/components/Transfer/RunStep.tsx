@@ -1,11 +1,12 @@
 // Step 5: review before the transfer starts, the running transfer (overall and per-table progress, rows/s, cancel) and
 // its result (per table, errors with the refused statement, open the target).
-import { ArrowRight, CircleAlert, CircleCheck, CircleSlash, Database, FileCode2, FolderOpen, LoaderCircle, TableProperties } from 'lucide-react';
+import { ArrowRight, CircleAlert, CircleCheck, CircleSlash, Database, FileCode2, FolderOpen, LoaderCircle, Rows3, TableProperties } from 'lucide-react';
 import { useEffect, useState, type Ref } from 'react';
 import { errorMessage } from '../../api/client';
 import { runCommand } from '../../commands/registry';
 import { getPlatform } from '../../platform';
 import { toast } from '../../store/ui';
+import { openDataCompare, side } from '../DataCompare/open';
 import { fileNameOf } from '../ImportWizard/files';
 import { formatBytes, formatCount, formatDuration } from '../ImportWizard/model';
 import { StepHeader } from '../ImportWizard/parts';
@@ -112,6 +113,12 @@ export function RunStep({ t, headingRef }: { t: Transfer; headingRef: Ref<HTMLHe
     const schema = s.targetSchema.trim() || t.target.defaultSchema;
     runCommand('data.open', { kind: 'object', connectionId: s.targetCid, database: s.targetDb, ref: { database: s.targetDb, schema, name, type: 'table' } });
   };
+  // WP-10: compare the rows of a copied table with its source (a light import: the Data compare view is a lazy chunk)
+  const compareTable = (name: string, targetName: string) => {
+    const schema = s.targetSchema.trim() || t.target.defaultSchema;
+    openDataCompare(side({ connectionId: t.cid, database: t.sourceDb, schema: s.sourceSchema, table: name }),
+      side({ connectionId: s.targetCid, database: s.targetDb, schema: schema || null, table: targetName }));
+  };
   const platform = getPlatform();
   const openFile = async (path: string) => {
     try {
@@ -212,6 +219,11 @@ export function RunStep({ t, headingRef }: { t: Transfer; headingRef: Ref<HTMLHe
                       {s.targetKind === 'connection' && r.status !== 'error' && (
                         <button type="button" className="btn btn-xs" onClick={() => openTable(r.targetName)} aria-label={`Open data of ${r.targetName}`}>
                           <TableProperties size={12} aria-hidden="true" /> Open
+                        </button>
+                      )}
+                      {s.targetKind === 'connection' && r.status !== 'error' && r.rows > 0 && (
+                        <button type="button" className="btn btn-xs" onClick={() => compareTable(r.name, r.targetName)} aria-label={`Compare data of ${r.name} and ${r.targetName}`}>
+                          <Rows3 size={12} aria-hidden="true" /> Compare
                         </button>
                       )}
                     </td>

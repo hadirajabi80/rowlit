@@ -150,6 +150,7 @@ export const MENUS: MenuDef[] = [
       cmd('transfer.open', 'Transfer data…', undefined, { optional: true }),
       cmd('codegen.open', 'Generate code…', 'Mod+Alt+G', { optional: true }),
       cmd('schemaCompare.open', 'Compare schema…', undefined, { optional: true }),
+      cmd('data.compare', 'Compare data…', undefined, { optional: true }),
       sep,
       cmd('connections.refreshCatalog', 'Refresh catalog'),
       cmd('connections.disconnectAll', 'Disconnect all'),
