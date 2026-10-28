@@ -1,6 +1,7 @@
 using DbStudio.Core.Providers;
 using DbStudio.Core.Services;
 using DbStudio.Logs.Endpoints;
+using DbStudio.Logs.Monitor;
 using DbStudio.Logs.Providers.Kafka;
 using DbStudio.Logs.Providers.Mongo;
 using DbStudio.Logs.Providers.Oracle;
@@ -49,6 +50,17 @@ public sealed class LogsModule : IEngineModule
         Keyed<KafkaLogSource>(services, "kafka");
 
         services.AddSingleton(LogService.FromServices);
+
+        // WP-12 server monitor: the readers only need the SQL runner, so every provider's keyed reader is registered here
+        // (the provider modules are untouched); MySQL and MariaDB share one implementation under two ids.
+        services.AddKeyedSingleton<IMetricsReader>("postgresql", (sp, _) => new PgMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>()));
+        services.AddKeyedSingleton<IMetricsReader>("sqlserver", (sp, _) => new SqlServerMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>()));
+        services.AddKeyedSingleton<IMetricsReader>("mysql", (sp, _) => new MySqlMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>(), "mysql"));
+        services.AddKeyedSingleton<IMetricsReader>("mariadb", (sp, _) => new MySqlMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>(), "mariadb"));
+        services.AddKeyedSingleton<IMetricsReader>("clickhouse", (sp, _) => new ClickHouseMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>()));
+        services.AddKeyedSingleton<IMetricsReader>("oracle", (sp, _) => new OracleMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>()));
+        services.AddKeyedSingleton<IMetricsReader>("snowflake", (sp, _) => new SnowflakeMetricsReader(sp.GetRequiredService<ISqlRunnerFactory>()));
+        services.AddSingleton(MonitorService.FromServices);
         services.AddKeyedSingleton<IStreamFactory>(LogTailStreamFactory.Kind, (sp, _) =>
             new LogTailStreamFactory(sp.GetRequiredService<LogService>(), () => TailInterval(sp.GetService<SettingsService>())));
         services.AddKeyedSingleton<IStreamFactory>(ActivityPollStreamFactory.Kind, (sp, _) => new ActivityPollStreamFactory(sp.GetRequiredService<LogService>()));
@@ -67,5 +79,9 @@ public sealed class LogsModule : IEngineModule
         return node is null ? 2000 : (int)Math.Clamp(SettingsService.Number(node), 250, 600_000);
     }
 
-    public void MapEndpoints(RouteGroupBuilder api) => api.MapLogs();
+    public void MapEndpoints(RouteGroupBuilder api)
+    {
+        api.MapLogs();
+        api.MapMonitor(); // WP-12
+    }
 }
