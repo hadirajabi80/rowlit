@@ -5,6 +5,7 @@
 import { ArrowLeftRight, GitCompare, LoaderCircle, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { errorMessage } from '../../api/client';
+import { displayShortcut } from '../../commands/keys';
 import type {
   CompareItemDetail, CompareOptions, CompareResult, CompareScript, CompareSupport,
 } from '../../api/types.schemaCompare';
@@ -261,7 +262,7 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
             </button>
           ) : (
             <button type="button" className="btn btn-primary" data-primary-focus onClick={() => void compare()} disabled={!!invalid}
-              title={invalid ?? 'Compare (Ctrl+Enter)'}>
+              title={invalid ?? `Compare (${displayShortcut('Mod+Enter')})`}>
               <GitCompare size={14} aria-hidden="true" /> Compare
             </button>
           )}
