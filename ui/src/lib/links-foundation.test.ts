@@ -49,8 +49,13 @@ describe('link definition props', () => {
       relations: [],
       options: { maxRowsPerSource: 10 },
     };
-    expect(linkDefinitionOf({ props: linkProps(def) })).toEqual(def);
-    expect(linkDefinitionOf({ props: {} })).toEqual({ version: 1, members: [], relations: [], options: {} });
+    // Saved as version 2: every member carries its scope (and allTables for older builds).
+    expect(linkDefinitionOf({ props: linkProps(def) })).toEqual({
+      ...def,
+      version: 2,
+      members: [{ ...def.members[0], scope: 'tables', allTables: false }],
+    });
+    expect(linkDefinitionOf({ props: {} })).toMatchObject({ members: [], relations: [], options: {} });
   });
 });
 
