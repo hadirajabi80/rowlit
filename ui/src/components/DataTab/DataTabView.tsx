@@ -5,7 +5,7 @@
 // through `exclusive`. The session is released after a few idle minutes (auto mode, nothing pending) and
 // re-created on the next load.
 import {
-  ChevronDown, CircleX, Code2, Download, Funnel, FileInput, LoaderCircle, Lock, PencilLine, PencilRuler, Plus, PanelRight, Redo2, RefreshCw, Rows3,
+  ChevronDown, CircleX, Code2, Dices, Download, Funnel, FileInput, LoaderCircle, Lock, PencilLine, PencilRuler, Plus, PanelRight, Redo2, RefreshCw, Rows3,
   Search, Table2, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -799,6 +799,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const designCmd = cv('dataTab.design', tabArgs);
   const importTarget = { kind: 'object' as const, connectionId, database: tab.database, ref: { database: tab.database, schema: state.schema, name: state.name, type: state.type ?? 'table' } };
   const importCmd = cv('import.open', importTarget);
+  const generateCmd = cv('data.generate', importTarget);
   const filterTip = cv('grid.filter').tooltip;
   const idle = data.errorCode === 'SESSION_LIMIT' ? idleSessionTabs(connectionId).filter((t) => t !== tab.id) : [];
 
@@ -866,6 +867,11 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         {importCmd.enabled && (
           <button className="btn btn-xs" aria-label="Import data" title="Import data from a CSV, Excel or JSON file into this table" onClick={() => runCommand('import.open', importTarget)}>
             <FileInput size={12} /> <span className="dt-btn-label">Import…</span>
+          </button>
+        )}
+        {generateCmd.enabled && (
+          <button className="btn btn-xs" aria-label="Generate data" title="Fill this table with generated test rows" onClick={() => runCommand('data.generate', importTarget)}>
+            <Dices size={12} /> <span className="dt-btn-label">Generate…</span>
           </button>
         )}
         <button className="btn btn-xs" aria-label="Generate code" title={codeCmd.tooltip} disabled={!codeCmd.enabled} onClick={() => runCommand('dataTab.codegen', tabArgs)}>

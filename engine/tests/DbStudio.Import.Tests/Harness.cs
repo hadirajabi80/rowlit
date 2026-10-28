@@ -32,6 +32,7 @@ public sealed class Harness : IDisposable
     public CapturingPublisher Events { get; } = new();
     public JobManager Jobs { get; }
     public ImportService Service { get; }
+    public DbStudio.Import.Generate.GenerateService Generate { get; }
     public CatalogService Catalog { get; }
     public IServiceProvider Services { get; } = new ServiceCollection().BuildServiceProvider();
     public string ReportDir => Service.ReportDirectory;
@@ -45,6 +46,7 @@ public sealed class Harness : IDisposable
         Catalog = new CatalogService(Providers, Connections, Events);
         Jobs = new JobManager(Events);
         Service = new ImportService(Connections, Providers, Catalog, Jobs, paths, Services, Microsoft.Extensions.Logging.Abstractions.NullLogger<ImportService>.Instance);
+        Generate = new DbStudio.Import.Generate.GenerateService(Connections, Providers, Catalog, Jobs, paths, Services, Microsoft.Extensions.Logging.Abstractions.NullLogger<DbStudio.Import.Generate.GenerateService>.Instance);
     }
 
     public string AddConnection(ConnectionProfile profile, string? password) => Connections.Create(profile, password).Id;
