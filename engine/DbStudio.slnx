@@ -32,6 +32,7 @@
     <Project Path="tests/DbStudio.Providers.Snowflake.Tests/DbStudio.Providers.Snowflake.Tests.csproj" />
     <Project Path="tests/DbStudio.Providers.Sqlite.Tests/DbStudio.Providers.Sqlite.Tests.csproj" />
     <Project Path="tests/DbStudio.Providers.SqlServer.Tests/DbStudio.Providers.SqlServer.Tests.csproj" />
+    <Project Path="tests/DbStudio.SchemaCompare.Tests/DbStudio.SchemaCompare.Tests.csproj" />
     <Project Path="tests/DbStudio.Sources.Elasticsearch.Tests/DbStudio.Sources.Elasticsearch.Tests.csproj" />
     <Project Path="tests/DbStudio.Sources.Kafka.Tests/DbStudio.Sources.Kafka.Tests.csproj" />
     <Project Path="tests/DbStudio.Sources.Mongo.Tests/DbStudio.Sources.Mongo.Tests.csproj" />
