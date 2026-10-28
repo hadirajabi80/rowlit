@@ -40,6 +40,8 @@ import { editableColumnsFor, foreignKeys, referencingTables, resultEditability, 
 import { overlayRows } from '../Grid/overlay';
 import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
+import { chartBodyClass, chartToggleMenu, useResultView } from '../Charts/chartMode';
+import { ChartPanel, ChartToggle } from '../Charts/ChartToggle';
 import { MessagesPane } from '../MessagesPane/MessagesPane';
 import { PendingBar } from '../PendingChanges/PendingBar';
 import { usePendingChanges } from '../PendingChanges/usePendingChanges';
@@ -207,6 +209,8 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   const key = viewKey(exec.localId, rs.id);
   const view = useResults((s) => s.views[key]) ?? EMPTY_VIEW;
   const setGridView = useResults((s) => s.setGridView);
+  const resultView = useResultView(viewKey(exec.localId, rs.id));
+  const chartOn = resultView !== 'grid';
   const { nullText, dateFormat } = useSettings((s) => s.settings.results);
   const viewerWidth = useUi((s) => s.cellViewerWidth);
   const setLayout = useUi((s) => s.setLayout);
@@ -431,6 +435,10 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
       ),
     },
   ];
+  toolbarItems.push({
+    id: 'chart', priority: 6, menu: () => chartToggleMenu(key, rs.columns.length === 0),
+    node: <ChartToggle viewKey={key} disabled={rs.columns.length === 0} />,
+  });
   if (view.sort.length > 0) {
     toolbarItems.push({
       id: 'sort', priority: 3, menu: () => commandMenuItems([{ command: 'grid.clearSort' }], gridArgs),
@@ -581,7 +589,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
         </div>
       )}
       {rs.released && <ReleasedBanner exec={exec} rs={rs} />}
-      <div className="resultset-body">
+      <div className={`resultset-body${chartBodyClass(resultView)}`}>
         <div className="resultset-grid">
           {rs.columns.length === 0 ? (
             <div className="results-empty">Statement returned no columns.</div>
@@ -629,6 +637,12 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
             </>
           )}
         </div>
+        {chartOn && (
+          <ChartPanel
+            viewKey={key} columns={columns} rows={rs.rows} rev={rs.rev} done={rs.done} truncated={rs.truncated}
+            queryText={stmt ?? `result ${columns.map((c) => c.name).join(',')}`} name={tableCol?.table ?? `result_${rs.id + 1}`}
+          />
+        )}
         {side && (
           <>
             <Splitter direction="vertical" onDragStart={() => setDragStart(viewerWidth)} onDrag={(d) => setLayout({ cellViewerWidth: Math.max(220, Math.min(900, dragStart - d)) })} />

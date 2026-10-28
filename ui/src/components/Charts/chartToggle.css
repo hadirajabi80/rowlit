@@ -1,0 +1,26 @@
+/* Eager part of the charts feature: the Grid | Chart switch and the chart-mode layout of a result set. */
+.chart-toggle {
+  height: var(--input-h-sm);
+}
+.chart-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.resultset-body.chart-on:not(.chart-both) > .resultset-grid,
+.resultset-body.chart-on:not(.chart-both) > .resultset-viewer,
+.resultset-body.chart-on:not(.chart-both) > .splitter {
+  display: none;
+}
+/* grid and chart side by side: both share the width, the chart keeps its own border */
+.resultset-body.chart-both > .chart-panel,
+.resultset-body.chart-both > .chart-loading {
+  border-left: 1px solid var(--border);
+}
+.chart-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
