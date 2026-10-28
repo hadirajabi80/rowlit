@@ -1,5 +1,5 @@
 // Snapshot triggers of the local history: new console baseline, Run, Save, close, the 2-minute autosave, the settings gate.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { useResults } from '../../../store/results';
 import { DEFAULT_SETTINGS, useSettings } from '../../../store/settings';
 import { useTabs, type ConsoleTab } from '../../../store/tabs';
@@ -7,7 +7,7 @@ import type { SnapshotInput } from '../api';
 import { AUTO_INTERVAL_MS, startLocalHistoryCapture, stopLocalHistoryCapture } from '../capture';
 
 let sent: SnapshotInput[];
-let prune: ReturnType<typeof vi.fn>;
+let prune: Mock<(days: number) => Promise<unknown>>;
 
 const consoleOf = (id: string) => useTabs.getState().tabs.find((t) => t.id === id) as ConsoleTab;
 
@@ -20,7 +20,7 @@ function newConsole(text: string): string {
 beforeEach(() => {
   vi.useFakeTimers();
   sent = [];
-  prune = vi.fn().mockResolvedValue({ removed: 0, bytes: 0 });
+  prune = vi.fn<(days: number) => Promise<unknown>>().mockResolvedValue({ removed: 0, bytes: 0 });
   useTabs.setState({ tabs: [], activeId: null, mru: [], closed: [] });
   useResults.setState({ byTab: {}, executions: {}, views: {}, activeView: {} });
   useSettings.setState({ settings: DEFAULT_SETTINGS });

@@ -270,8 +270,9 @@ export function LocalHistoryView({ tab, theme, visible }: TabViewProps) {
                 </form>
               )}
               <div className="lh-sides muted">
-                <span>Snapshot</span>
-                <span>{current === null ? 'Editor closed (empty)' : 'Current text in the editor'}</span>
+                {current === null
+                  ? 'The editor is closed: the snapshot is compared with an empty text.'
+                  : 'Compared with the text in the editor now (red: only in the snapshot, green: only in the editor).'}
               </div>
               {identical && (
                 <div className="lh-banner" role="status">

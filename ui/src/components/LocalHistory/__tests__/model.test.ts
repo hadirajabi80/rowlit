@@ -27,7 +27,7 @@ describe('history keys', () => {
 
   it('a saved query wins over the file, an "Edit:" console is keyed by its object', () => {
     expect(primaryKey(consoleTab({ filePath: 'x.sql', savedQuery: { id: 'q_1', connectionId: 'c1', database: null, schema: null, name: 'n' } }))).toBe('q:q_1');
-    const edit = consoleTab({ edit: { connectionId: 'c1', database: 'Shop', ref: { database: 'Shop', schema: 'dbo', name: 'vOrders', type: 'view' }, dialect: 'sqlserver' } });
+    const edit = consoleTab({ edit: { connectionId: 'c1', database: 'Shop', ref: { database: 'Shop', schema: 'dbo', name: 'vOrders', type: 'view' }, dialect: 'tsql' } });
     expect(primaryKey(edit)).toBe('o:c1|Shop|dbo|view|vOrders');
     expect(historyKeys(edit)).toEqual(['o:c1|Shop|dbo|view|vOrders', 't:t_1']);
   });

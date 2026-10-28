@@ -53,8 +53,9 @@ describe('Local history command', () => {
   it('is registered with Ctrl+Alt+H, only enabled for a console, and opens one tab per editor', () => {
     const c = getCommand('editor.localHistory')!;
     expect(c.shortcut).toBe('Mod+Alt+H');
-    expect(c.when?.({ tabId })).toBe(true);
-    expect(c.when?.({ tabId: 'nope' })).toBe(false);
+    const when = c.when as (a?: unknown) => boolean;
+    expect(when({ tabId })).toBe(true);
+    expect(when({ tabId: 'nope' })).toBe(false);
     const view = open();
     expect(view.state).toMatchObject({ tabId, keys: [`t:${tabId}`], title: 'Console 1' });
     open();
