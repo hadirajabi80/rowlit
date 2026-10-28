@@ -149,6 +149,8 @@ All six orders live in block 0. Run `UPDATE orders SET total = total WHERE id = 
 [VACUUM](../glossary.md#vacuum) removes it ([chapter 10](10-concurrency-locking-mvcc.md)). `ctid` is therefore a
 physical address, not an identity: never store it in an application.
 
+<a id="heaps-and-clustered-tables"></a>
+
 ### 2.3 Heaps and clustered tables
 
 A table's rows are stored in one of two ways.
@@ -219,6 +221,8 @@ EXPLAIN QUERY PLAN SELECT v FROM kv_norowid WHERE code = 'C0001234';
 
 The clustered version is half the size and needs one tree search instead of two.
 
+<a id="rows-that-grow"></a>
+
 ### 2.4 Rows that grow, move or do not fit
 
 A row's size changes when you update a variable-length column. Engines handle "the row no longer fits where it was" in
@@ -261,6 +265,8 @@ SELECT pagetype, count(*) FROM dbstat WHERE name = 'docs' GROUP BY pagetype;
 Practical rules: `SELECT *` on a table with large text columns reads the off-row pages too (and de-TOASTs, which costs
 CPU); list the columns you need. Big values make rows wide, and wide rows mean fewer rows per page, so every scan reads
 more pages.
+
+<a id="free-space-and-fill-factor"></a>
 
 ### 2.5 Free space and fill factor
 
