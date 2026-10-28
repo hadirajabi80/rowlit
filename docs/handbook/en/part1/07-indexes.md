@@ -191,7 +191,7 @@ A [composite index](../glossary.md#composite-index) has several key columns, sor
 first column, then by the second inside equal first values, and so on. An index on `(LastName, FirstName)` is sorted by
 last name; inside "Ahmadi" the first names are sorted.
 
-**Figure 7.3 — What a composite index on (LastName, FirstName) can do. Green paths are seeks; the dashed path must scan.**
+**Figure 7.3 — What a composite index on (LastName, FirstName) can do. Solid paths are seeks; the dashed path must scan.**
 
 ```mermaid
 flowchart TD
@@ -220,7 +220,7 @@ EXPLAIN QUERY PLAN SELECT LastName, FirstName FROM Customers WHERE FirstName = '
 The last query cannot *seek* on `FirstName`, but the index contains both columns, so scanning the narrow index is
 cheaper than scanning the table: the engine reads the index from end to end and filters.
 
-**Skip scan.** If the leading column has few distinct values, an engine can seek once per distinct leading value: "for
+**[Skip scan](../glossary.md#skip-scan).** If the leading column has few distinct values, an engine can seek once per distinct leading value: "for
 each `a`, seek `b = 500`". Oracle (`INDEX SKIP SCAN`), MySQL 8.0.13+ ("Using index for skip scan"), SQLite (after
 `ANALYZE`) and PostgreSQL 18 do this; PostgreSQL 17 and SQL Server 2022 do not. Real SQLite output on a scratch table of
 one million rows where `a` has 10 distinct values:
@@ -255,7 +255,7 @@ MongoDB states rule 1 as the [ESR rule](../glossary.md#esr-rule): Equality, then
 
 ### 2.5 Covering indexes, INCLUDE and lookups
 
-An index **covers** a query when every column the query needs (in `SELECT`, `WHERE`, `JOIN`, `ORDER BY`, `GROUP BY`) is
+An index **covers** a query (it is a [covering index](../glossary.md#covering-index) for it) when every column the query needs (in `SELECT`, `WHERE`, `JOIN`, `ORDER BY`, `GROUP BY`) is
 in the index. Then the table itself is never read. This matters because the step after the seek, fetching each row, is
 usually the expensive part: one random page read per row on a heap, one more tree search per row on a clustered table.
 
@@ -461,8 +461,9 @@ and JSON fields (`(meta->>'tier')` in PostgreSQL, `JSON_VALUE` computed columns 
 
 A [unique index](../glossary.md#unique-index) refuses a second entry with the same key. `PRIMARY KEY` and `UNIQUE`
 constraints ([chapter 5](05-modelling-and-normalisation.md)) are enforced by one, created automatically (SQLite names
-it `sqlite_autoindex_<table>_<n>`; you saw `sqlite_autoindex_Customers_1` serve `WHERE Email = …` above because of
-`UQ_Customers_Email`). Uniqueness also helps the optimizer: an equality on a unique key returns at most one row, so the
+it `sqlite_autoindex_<table>_<n>`; in the sample, `UQ_Customers_Email` created
+`sqlite_autoindex_Customers_1`, and real output for `WHERE Email = …` is
+`SEARCH Customers USING INDEX sqlite_autoindex_Customers_1 (Email=?)`). Uniqueness also helps the optimizer: an equality on a unique key returns at most one row, so the
 plan can stop after one match (PostgreSQL, SQL Server and Oracle use this for join elimination and better estimates).
 
 NULL handling differs, and it bites when you migrate:
@@ -513,7 +514,7 @@ about 2. `4523 4 1` says an order has about 4 lines and `(OrderId, LineNo)` is u
 rows is fine for most customers and wrong by a factor of 6 for customer 1. That is why the big engines keep more than an
 average:
 
-- **Most common values (MCV)** with their frequencies: PostgreSQL `pg_stats.most_common_vals` / `most_common_freqs`;
+- **[Most common values (MCV)](../glossary.md#most-common-values)** with their frequencies: PostgreSQL `pg_stats.most_common_vals` / `most_common_freqs`;
   Oracle frequency and top-frequency histograms. An equality on a common value uses its exact frequency.
 - **Histograms** for the rest: the sorted values are cut into buckets. PostgreSQL uses an *equi-depth* histogram
   (`histogram_bounds`: each bucket holds the same number of rows; `default_statistics_target = 100` gives up to 100
@@ -570,7 +571,7 @@ changed by default); InnoDB recalculates persistent statistics after about 10% o
 | Covered, no table access | `Index Only Scan` (+ `Heap Fetches`) | seek/scan with no lookup operator | no `TABLE ACCESS` line under the index | `Extra: Using index` | `USING COVERING INDEX` |
 | Row fetch after the index | inside `Index Scan`; `Bitmap Heap Scan` | `Key Lookup` / `RID Lookup` + `Nested Loops` | `TABLE ACCESS BY INDEX ROWID [BATCHED]` | implicit (PK lookup) | implicit (`DeferredSeek` in bytecode) |
 | Condition applied after reading | `Filter:` + `Rows Removed by Filter` | `Predicate` (vs `Seek Predicates`) | `filter(…)` (vs `access(…)`) | `Extra: Using where` | not shown in EQP |
-| Condition checked inside the index before the row fetch | (index quals on non-leading columns) | `Predicate` on the index operator | `filter` on the index line | `Extra: Using index condition` | — |
+| Condition checked inside the index before the row fetch | (index quals on non-leading columns) | `Predicate` on the index operator | `filter` on the index line | `Extra: Using index condition` ([index condition pushdown](../glossary.md#index-condition-pushdown)) | — |
 | Several indexes combined | `BitmapAnd` / `BitmapOr` | index intersection (rare) | `BITMAP AND` / `BITMAP CONVERSION` | `type: index_merge` | `MULTI-INDEX OR` |
 | Sort needed | `Sort` (+ `Sort Method`) | `Sort` | `SORT ORDER BY` | `Extra: Using filesort` | `USE TEMP B-TREE FOR ORDER BY` |
 
@@ -735,7 +736,7 @@ Over time an index loses shape in two ways:
 - **Logical [fragmentation](../glossary.md#fragmentation):** the next leaf in key order is not the next page in the
   file, so range scans become random I/O on spinning disks. This matters much less on SSDs.
 
-Measuring and fixing:
+Measuring and fixing ([rebuild / reorganize](../glossary.md#index-rebuild)):
 
 | Engine | Measure | Fix online | Fix offline |
 |---|---|---|---|
@@ -850,7 +851,8 @@ flowchart LR
     PK["primary.idx<br/>mark 0: id 1<br/>mark 1: id 8193<br/>mark 2: id 16385"] --> G0["Granule 0<br/>rows 1 ... 8192"]
     PK --> G1["Granule 1<br/>rows 8193 ... 16384"]
     PK --> G2["Granule 2<br/>rows 16385 ..."]
-    SKIP["Skip index minmax(customer_id)<br/>granule 0: 1..900<br/>granule 1: 2..40<br/>granule 2: 300..999"] -.->|"WHERE customer_id = 4<br/>reads granules 0 and 1 only"| G1
+    SKIP["Skip index minmax(customer_id)<br/>granule 0: 1..900<br/>granule 1: 2..40<br/>granule 2: 300..999"] -.->|"customer_id = 4 may match"| G0
+    SKIP -.->|"customer_id = 4 may match"| G1
 ```
 
 Illustrative ClickHouse 24.8 output on the seed (its six orders sit in three monthly partitions, so three parts):
@@ -964,7 +966,7 @@ SQL Server plans carry the server's missing-index hints into the plan nodes (`Sq
    `IX_Orders_CustomerId` and a `Key Lookup` on `PK_Orders` for every row. Give two different index changes that remove
    the lookup, with one advantage and one disadvantage each.
 5. Using Rowlit's SQLite sample, explain why `SELECT * FROM Customers WHERE LastName LIKE 'Ah%'` scans the table, and give
-   two different fixes. Verify them with `EXPLAIN QUERY PLAN`.
+   at least two different fixes. Verify them with `EXPLAIN QUERY PLAN`.
 6. `sqlite_stat1` says `Orders IX_Orders_CustomerId 1500 6`. Customer 1 has 37 orders. Explain what estimate SQLite uses
    for `WHERE CustomerId = 1`, how PostgreSQL would estimate the same predicate with default statistics on an identical
    table, and why the difference matters for a join.
