@@ -1,0 +1,98 @@
+/* Data Transfer: the Import wizard's look (../ImportWizard/importWizard.css) plus the few parts it does not have. */
+
+.tr-tables-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.tr-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+.tr-search .input { flex: 1; min-width: 0; }
+
+.tr-table-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-1) var(--space-4);
+  max-height: 340px;
+  overflow: auto;
+}
+.tr-table-list .iw-check { min-width: 0; }
+.tr-table-list .iw-check span[dir] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.tr-badge-error { background: var(--danger-soft); color: var(--danger-text); }
+.tr-badge-warn { color: var(--warning); }
+
+.tr-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.tr-recent li { display: flex; align-items: center; gap: var(--space-2); }
+
+.tr-path { flex: 1 1 360px; }
+.tr-path-row { display: flex; gap: var(--space-2); }
+.tr-path-row .input { flex: 1; min-width: 0; }
+
+.tr-map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.tr-map-card { gap: var(--space-3); }
+.tr-map-card.tr-error { border-color: var(--danger); }
+.tr-map-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.tr-map-body { display: flex; flex-direction: column; gap: var(--space-3); }
+.tr-where { flex: 1 1 320px; }
+.tr-mono { font-family: var(--font-mono); font-size: var(--text-xs); }
+.tr-type { min-width: 140px; }
+.tr-excluded td:not(:first-child) { color: var(--text-muted); text-decoration: line-through; }
+.tr-note { color: var(--text-muted); font-size: var(--text-xs); }
+.tr-warnings { margin: 0; padding-inline-start: 18px; color: var(--text-muted); font-size: var(--fs-sm); }
+
+.tr-flags { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-2) var(--space-5); }
+
+.tr-order { margin: 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
+.tr-order .tr-error { color: var(--danger-text); }
+
+.tr-progress-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); }
+.tr-progress-list li { display: flex; align-items: center; gap: var(--space-2); }
+.tr-progress-list .tr-done { color: var(--text-muted); }
+.tr-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border-strong); display: inline-block; }
+
+.tr-sql {
+  display: block;
+  max-width: 420px;
+  max-height: 5.5em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

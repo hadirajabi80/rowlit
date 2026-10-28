@@ -36,6 +36,7 @@
     <Project Path="tests/DbStudio.Sources.Kafka.Tests/DbStudio.Sources.Kafka.Tests.csproj" />
     <Project Path="tests/DbStudio.Sources.Mongo.Tests/DbStudio.Sources.Mongo.Tests.csproj" />
     <Project Path="tests/DbStudio.Sources.Redis.Tests/DbStudio.Sources.Redis.Tests.csproj" />
+    <Project Path="tests/DbStudio.Transfer.Tests/DbStudio.Transfer.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/DbStudio.Providers.Conformance/">
     <Project Path="tests/DbStudio.Providers.Conformance/DbStudio.Providers.Conformance.Tests.csproj" />

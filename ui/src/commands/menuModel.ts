@@ -146,6 +146,7 @@ export const MENUS: MenuDef[] = [
       cmd('designer.edit', 'Design / edit object', 'F4', { optional: true }),
       cmd('data.open', 'Open table data', 'Mod+Alt+D', { optional: true }),
       cmd('import.open', 'Import data…', undefined, { optional: true }),
+      cmd('transfer.open', 'Transfer data…', undefined, { optional: true }),
       cmd('codegen.open', 'Generate code…', 'Mod+Alt+G', { optional: true }),
       sep,
       cmd('connections.refreshCatalog', 'Refresh catalog'),
