@@ -4,8 +4,7 @@
 import { extendContextMenu } from '../../commands/menuModel';
 import { registerCommands, type Command } from '../../commands/registry';
 import { registerTabView } from '../layout/tabViews';
-import { SCHEMA_COMPARE_VIEW_ID } from './model';
-import { compareSourceOf, openSchemaCompare } from './open';
+import { compareSourceOf, openSchemaCompare, SCHEMA_COMPARE_VIEW_ID } from './open';
 import { SchemaCompareTab } from './views';
 
 const KEYWORDS = 'schema compare diff structure synchronization sync migration script ddl datagrip navicat';

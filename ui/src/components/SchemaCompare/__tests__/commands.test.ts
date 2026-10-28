@@ -5,7 +5,7 @@ import { useConnections } from '../../../store/connections';
 import { useTabs, type ViewTab } from '../../../store/tabs';
 import { getTabView } from '../../layout/tabViews';
 import { registerSchemaCompareCommands } from '../commands';
-import { SCHEMA_COMPARE_VIEW_ID, type SchemaCompareTabState } from '../model';
+import { SCHEMA_COMPARE_VIEW_ID, type SchemaCompareTabState } from '../open';
 
 const conn = (id: string, providerId: string) =>
   ({ id, name: id, providerId, color: null, folder: null, readOnly: false, props: {}, hasPassword: false, savePassword: false, createdAt: '', lastUsedAt: null }) as never;

@@ -20,9 +20,9 @@ import { ItemDiff } from './ItemDiff';
 import { ItemList, StatusBadge } from './ItemList';
 import { listenForJobs, waitForCompareJob, type CompareProgress } from './jobs';
 import {
-  changedOptions, DEFAULT_FILTER, defaultSelection, EMPTY_SIDE, selectedIds, validateSides, withDefaults,
-  type ItemFilter, type SchemaCompareTabState, type SideState,
+  changedOptions, DEFAULT_FILTER, defaultSelection, selectedIds, validateSides, withDefaults, type ItemFilter,
 } from './model';
+import { EMPTY_SIDE, type SchemaCompareTabState, type SideState } from './open';
 import { OptionsPopover } from './OptionsPopover';
 import { StatementList, ScriptView, WarningList } from './ScriptView';
 import './schemaCompare.css';

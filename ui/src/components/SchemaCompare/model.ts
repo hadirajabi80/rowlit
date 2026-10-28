@@ -1,28 +1,9 @@
-// Pure model of the Schema compare tab: persisted tab state, options, item grouping / filtering / selection and the
-// warnings shown before an apply. No React, no stores: unit-tested on its own.
+// Pure model of the Schema compare tab: options, item grouping / filtering / selection and the
+// warnings shown before an apply. No React, no stores (the tab state types live in ./open.ts).
 import type {
   CompareItem, CompareKind, CompareOptions, CompareScript, CompareSeverity, CompareStatus, ItemWarning,
 } from '../../api/types.schemaCompare';
-
-export const SCHEMA_COMPARE_VIEW_ID = 'schema-compare';
-
-/** One side of the comparison as the pickers hold it (catalog keys, not yet an engine endpoint). */
-export interface SideState {
-  connectionId: string | null;
-  /** Catalog database key (null: the connection's default / providers without a database level). */
-  database: string | null;
-  /** Schema (MySQL/MariaDB: the database; Oracle: the user). Null: the default schema. */
-  schema: string | null;
-}
-
-/** What a schema-compare tab persists in the workspace: the two sides and the options (never the result). */
-export interface SchemaCompareTabState {
-  source: SideState;
-  target: SideState;
-  options?: Partial<CompareOptions>;
-}
-
-export const EMPTY_SIDE: SideState = { connectionId: null, database: null, schema: null };
+import type { SideState } from './open'; // type only: no store import at runtime
 
 export const DEFAULT_OPTIONS: CompareOptions = {
   tables: true, columns: true, primaryKeys: true, foreignKeys: true, uniques: true, checks: true, indexes: true, defaults: true,
