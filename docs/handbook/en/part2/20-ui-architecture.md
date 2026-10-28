@@ -251,12 +251,12 @@ Auto-update is the main process's job (electron-updater over GitHub Releases, [c
 
 | Topic | Fact | Source |
 |---|---|---|
-| Max editor groups | 3, minimum group share 0.12 | `store/editorGroups.ts:14-16` |
+| Max editor groups | 3, minimum group share 0.12 | `store/editorGroups.ts:13-15` |
 | Workspace autosave | 800 ms after a change, and on `beforeunload` | `app/boot.ts:164-173` |
 | Settings PUT debounce | 600 ms | `store/settings.ts:129` |
 | Chord timeout | 1 500 ms; at most 2 strokes | `dispatcher.ts:31`, `keymap.ts:28-30` |
 | Shortcuts per command | 4 | `keymap.ts:28` |
-| Zoom range | 0.6-2, 10 % steps | `app/zoom.ts:11-12` |
+| Zoom range | 0.6-2, 10 % steps | `app/zoom.ts:8-9` |
 | Bundle gate | +1 400 KB total, +120 KB initial (gzipped) over the baseline | `ci.yml:115`, `bundle-size.mjs` |
 | Themes | 7 app, 22 code (11 lazy) | `theme/themes.ts` |
 | Orphan WS events | 30 s | `store/results.ts:118` |

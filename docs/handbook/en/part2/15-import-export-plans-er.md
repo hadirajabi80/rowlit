@@ -168,7 +168,7 @@ Each provider supplies an `IPlanReader` (keyed DI by provider id) with `CreateSc
 
 Open one from a schema node, with the selected tables, or "related tables" (a table plus every table one foreign key away): `Ctrl+Alt+E` (`er.open`), `er.openRelated`, `er.openSelected` (`ErDiagram/commands.ts`).
 
-**Engine side.** Only layouts are stored. `DiagramStore` writes `diagrams.json` in the data directory (same guarantees as the filter store: thread-safe, atomic, corrupt file kept as `.corrupt`). One layout per (connection, scope key): `ScopeKey` is `db|schema` or `db|t:a,b` with sorted table names, identical to `layoutScopeKey` in `ui/src/api/er.ts` (`DiagramStore.cs:55-66`). A `DiagramLayout` holds positions (`schema.table` to `[x, y]`), hidden tables, zoom, pan, an `Auto` layout name (`layered-lr`, `layered-tb`, `grid`), added and pinned cards and an opaque `Options` object. Routes: `GET/PUT/DELETE /connections/{cid}/er/layouts[/{id}]` (`DiagramEndpoints.cs`). Limits: 2 000 layouts, 20 000 tables per layout, zoom 0.05-4 (`DiagramStore.cs:35-42`). **The diagram data itself is the catalog snapshot** of [chapter 10](./10-catalog-and-metadata.md): `refBy` names the schemas that point into this one, so the diagram can load one hop of neighbours; `fkHidden` counts keys the login cannot see.
+**Engine side.** Only layouts are stored. `DiagramStore` writes `diagrams.json` in the data directory (same guarantees as the filter store: thread-safe, atomic, corrupt file kept as `.corrupt`). One layout per (connection, scope key): `ScopeKey` is `db|schema` or `db|t:a,b` with sorted table names, identical to `layoutScopeKey` in `ui/src/api/er.ts` (`DiagramStore.cs:55-66`). A `DiagramLayout` holds positions (`schema.table` to `[x, y]`), hidden tables, zoom, pan, an `Auto` layout name (`layered-lr`, `layered-tb`, `grid`), added and pinned cards and an opaque `Options` object. Routes: `GET/PUT/DELETE /connections/{cid}/er/layouts[/{id}]` (`DiagramEndpoints.cs`). Limits: 2 000 layouts, 20 000 tables per layout, zoom 0.05-4 (`DiagramStore.cs:35-48`). **The diagram data itself is the catalog snapshot** of [chapter 10](./10-catalog-and-metadata.md): `refBy` names the schemas that point into this one, so the diagram can load one hop of neighbours; `fkHidden` counts keys the login cannot see.
 
 **UI side** (`ui/src/components/ErDiagram`):
 
@@ -216,11 +216,11 @@ One correction to the planning notes: there is no "synthetic relationship" featu
 | Job progress throttle | 250 ms in the runner | `ImportRunner.cs:128` |
 | Import into Cassandra | refused | `ImportService.cs:130-133` |
 | Read-only target | `canImport = false` with a reason | `ImportService.cs:142-147` |
-| Export progress interval | 500 ms | `ExportService.cs:166` |
-| Export cancel grace in the UI | 8 s | `Export/serverExport.ts:32` |
+| Export progress interval | 500 ms | `ExportService.cs:200` |
+| Export cancel grace in the UI | 8 s | `Export/serverExport.ts:31` |
 | Export errors | `400 VALIDATION` (path, format, sql), `403 READ_ONLY`, `409 SESSION_BUSY` | `ExportService.cs:70-100` |
 | ER auto-layout clustering | above 300 tables | `layout.ts:CLUSTER_THRESHOLD` |
-| ER zoom (UI) / (stored) | 0.1-3 / 0.05-4 | `viewport.ts:9-10`, `DiagramStore.cs:40-41` |
+| ER zoom (UI) / (stored) | 0.1-3 / 0.05-4 | `viewport.ts:9-10`, `DiagramStore.cs:47-48` |
 | ER PNG limits | 16 000 px per side, 200 M pixels | `exportPng.ts:6-8` |
 | Plan heat thresholds | 10 %, 25 %, 50 % | `PlanView/model.ts` |
 | `estimateOff` | 10x difference | `PlanView/model.ts` |

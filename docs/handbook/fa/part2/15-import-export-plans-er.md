@@ -183,7 +183,7 @@ flowchart TD
 
 یکی را از گره طرحواره، با جدول‌های انتخاب‌شده یا «جدول‌های مرتبط» (جدول به‌علاوه‌ی هر جدول با یک گام کلید خارجی) باز کنید: `Ctrl+Alt+E` (`er.open`)، `er.openRelated`، `er.openSelected` (`ErDiagram/commands.ts`).
 
-**سمت موتور.** فقط چیدمان‌ها ذخیره می‌شوند. `DiagramStore` فایل `diagrams.json` را در پوشه‌ی داده می‌نویسد (همان ضمانت‌های ذخیره‌گاه فیلتر: نخ‌ایمن، اتمی، فایل خراب با پسوند `.corrupt`). برای هر (اتصال، کلید scope) یک چیدمان: `ScopeKey` برابر `db|schema` یا `db|t:a,b` با نام جدول‌های مرتب است، یکسان با `layoutScopeKey` در `ui/src/api/er.ts` (`DiagramStore.cs:55-66`). `DiagramLayout` موقعیت‌ها (`schema.table` ← `[x, y]`)، جدول‌های پنهان، zoom، pan، نام چیدمان خودکار `Auto` (`layered-lr`، `layered-tb`، `grid`)، کارت‌های افزوده و سنجاق‌شده و شیء مات `Options` را نگه می‌دارد. مسیرها: `GET/PUT/DELETE /connections/{cid}/er/layouts[/{id}]` (`DiagramEndpoints.cs`). سقف‌ها: ۲٬۰۰۰ چیدمان، ۲۰٬۰۰۰ جدول در هر چیدمان، zoom بین 0.05 تا 4 (`DiagramStore.cs:35-42`). **خود داده‌ی نمودار snapshot کاتالوگ** [فصل 10](./10-catalog-and-metadata.md) است: `refBy` طرحواره‌هایی را نام می‌برد که به این‌جا اشاره می‌کنند تا نمودار بتواند یک گام همسایه بارگذاری کند؛ `fkHidden` کلیدهایی را می‌شمارد که کاربر نمی‌بیند.
+**سمت موتور.** فقط چیدمان‌ها ذخیره می‌شوند. `DiagramStore` فایل `diagrams.json` را در پوشه‌ی داده می‌نویسد (همان ضمانت‌های ذخیره‌گاه فیلتر: نخ‌ایمن، اتمی، فایل خراب با پسوند `.corrupt`). برای هر (اتصال، کلید scope) یک چیدمان: `ScopeKey` برابر `db|schema` یا `db|t:a,b` با نام جدول‌های مرتب است، یکسان با `layoutScopeKey` در `ui/src/api/er.ts` (`DiagramStore.cs:55-66`). `DiagramLayout` موقعیت‌ها (`schema.table` ← `[x, y]`)، جدول‌های پنهان، zoom، pan، نام چیدمان خودکار `Auto` (`layered-lr`، `layered-tb`، `grid`)، کارت‌های افزوده و سنجاق‌شده و شیء مات `Options` را نگه می‌دارد. مسیرها: `GET/PUT/DELETE /connections/{cid}/er/layouts[/{id}]` (`DiagramEndpoints.cs`). سقف‌ها: ۲٬۰۰۰ چیدمان، ۲۰٬۰۰۰ جدول در هر چیدمان، zoom بین 0.05 تا 4 (`DiagramStore.cs:35-48`). **خود داده‌ی نمودار snapshot کاتالوگ** [فصل 10](./10-catalog-and-metadata.md) است: `refBy` طرحواره‌هایی را نام می‌برد که به این‌جا اشاره می‌کنند تا نمودار بتواند یک گام همسایه بارگذاری کند؛ `fkHidden` کلیدهایی را می‌شمارد که کاربر نمی‌بیند.
 
 **سمت رابط** (`ui/src/components/ErDiagram`):
 
@@ -235,11 +235,11 @@ flowchart TD
 | تنظیم پیشرفت job | ۲۵۰ ms در runner | `ImportRunner.cs:128` |
 | درون‌ریزی به Cassandra | رد می‌شود | `ImportService.cs:130-133` |
 | هدف فقط‌خواندنی | `canImport = false` با دلیل | `ImportService.cs:142-147` |
-| فاصله‌ی پیشرفت برون‌ریزی | ۵۰۰ ms | `ExportService.cs:166` |
-| مهلت لغو برون‌ریزی در رابط | ۸ s | `Export/serverExport.ts:32` |
+| فاصله‌ی پیشرفت برون‌ریزی | ۵۰۰ ms | `ExportService.cs:200` |
+| مهلت لغو برون‌ریزی در رابط | ۸ s | `Export/serverExport.ts:31` |
 | خطاهای برون‌ریزی | `400 VALIDATION` (مسیر، قالب، sql)، `403 READ_ONLY`، `409 SESSION_BUSY` | `ExportService.cs:70-100` |
 | خوشه‌بندی چیدمان خودکار ER | بالای ۳۰۰ جدول | `layout.ts:CLUSTER_THRESHOLD` |
-| zoom ER (رابط) / (ذخیره‌شده) | 0.1-3 / 0.05-4 | `viewport.ts:9-10`، `DiagramStore.cs:40-41` |
+| zoom ER (رابط) / (ذخیره‌شده) | 0.1-3 / 0.05-4 | `viewport.ts:9-10`، `DiagramStore.cs:47-48` |
 | سقف PNG در ER | 16٬۰۰۰ px در هر ضلع، 200 میلیون پیکسل | `exportPng.ts:6-8` |
 | آستانه‌های heat طرح | ۱۰٪، ۲۵٪، ۵۰٪ | `PlanView/model.ts` |
 | `estimateOff` | تفاوت ۱۰ برابر | `PlanView/model.ts` |
