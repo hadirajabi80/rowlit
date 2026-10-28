@@ -36,6 +36,8 @@ export const KEYMAP_PRESETS: readonly KeymapPreset[] = [
       'run.script': ['Mod+Shift+F10'],
       'run.cancel': ['Mod+F2'],
       'format.document': ['Mod+Alt+L'],
+      'editor.nextBookmark': ['F2'],
+      'editor.previousBookmark': ['Shift+F2'],
       'view.goToObject': ['Mod+Shift+N', 'Mod+P'],
       'file.newConnection': ['Mod+Alt+Insert'],
       'view.commandPalette': ['Mod+Shift+A', 'Mod+Shift+P'],

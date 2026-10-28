@@ -707,6 +707,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
                 onSubmit={pendingActions.save}
                 onToggleRecord={toggleRecord}
                 onShowDistinct={(col, pos) => setDistinct({ col, x: pos.clientX, y: pos.clientY })}
+                columnStats
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}

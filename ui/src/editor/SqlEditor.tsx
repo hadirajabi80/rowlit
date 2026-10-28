@@ -27,6 +27,8 @@ import { runCommand, shortcutLabelOf } from '../commands/registry';
 import { bindCommandActions, commandHasKey, type ActionHost, type KeyActionDef, type MonacoKeys } from './keyActions';
 import { resolveRunTarget } from './run-target';
 import { LatestRequest, MARKER_OWNERS, serverMarkers, softMarkers, type MarkerSeverities } from './markers-core';
+import { installBookmarks } from './bookmarks';
+import './bookmarks.css';
 
 export type { SqlEditorHandle, SqlEditorProps } from './SqlEditor.types';
 
@@ -243,6 +245,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       fontLigatures: false,
       automaticLayout: true,
       minimap: { enabled: false },
+      glyphMargin: true,
       scrollBeyondLastLine: false,
       fixedOverflowWidgets: true,
       renderLineHighlight: 'line',
@@ -292,6 +295,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     const unbind = bindModel(binding);
 
     const subs: monaco.IDisposable[] = [];
+    subs.push({ dispose: installBookmarks(p.tabId, ed) });
     subs.push(model.onDidChangeContent((e) => {
       if (e.changes.length === 1) {
         const c = e.changes[0];

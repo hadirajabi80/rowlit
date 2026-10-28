@@ -983,6 +983,10 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                 onSubmit={pendingActions.save}
                 onToggleRecord={() => setRecordOpen((o) => !o)}
                 onShowDistinct={(col, pos) => setDistinct({ col, x: pos.clientX, y: pos.clientY })}
+                columnStats={{ request: {
+                  connectionId, database, schema: state.schema ?? null, table: state.name,
+                  where: shownPred?.where ?? null, params: shownPred?.params ?? [], sample: 'auto',
+                } }}
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}

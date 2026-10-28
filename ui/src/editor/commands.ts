@@ -19,6 +19,8 @@ import { getActiveConsole, useTabs } from '../store/tabs';
 import { activeBinding } from './registry';
 import { getEditorConfig, setEditorConfig } from './config';
 import { openSnippetsSettings, registerSnippetsView } from '../components/SnippetsSettings/open';
+import { bookmarkLines, navigateBookmark, toggleBookmark } from './bookmarks';
+import { openBookmarks } from '../components/Bookmarks/open';
 
 // Monaco-dependent code is loaded on first use, so registering the commands never pulls Monaco in.
 type Actions = typeof import('./actions');
@@ -53,6 +55,8 @@ const writable = () => {
   const b = activeBinding();
   return !!b && !b.editor.getRawOptions().readOnly;
 };
+
+const bookmarkTab = () => activeBinding()?.tabId ?? consoleInFocus();
 
 function withEditor(handle: (h: NonNullable<ReturnType<typeof getEditor>>) => boolean, fn: (a: Actions, b: Binding) => void) {
   return () => {
@@ -115,6 +119,25 @@ export const EDITOR_COMMANDS: Command[] = [
       const b = activeBinding();
       if (b) void import('./monaco-setup').then((m) => m.openDefinitionDdl(b));
     },
+  },
+  {
+    id: 'editor.toggleBookmark', title: 'Toggle bookmark', category: 'Edit', shortcut: 'Mod+K Mod+K', scope: 'editor', keyHandler: 'host',
+    icon: 'Bookmark', keywords: 'bookmark marker line favorite', when: () => !!bookmarkTab(),
+    run: () => { const id = bookmarkTab(); if (id) toggleBookmark(id); },
+  },
+  {
+    id: 'editor.nextBookmark', title: 'Next bookmark', category: 'Edit', shortcut: 'Mod+K Mod+N', scope: 'editor', keyHandler: 'host',
+    icon: 'Bookmark', keywords: 'bookmark next navigate', when: () => { const id = bookmarkTab(); return !!id && bookmarkLines(id).length > 0; },
+    run: () => { const id = bookmarkTab(); if (id) navigateBookmark(id, 1); },
+  },
+  {
+    id: 'editor.previousBookmark', title: 'Previous bookmark', category: 'Edit', shortcut: 'Mod+K Mod+P', scope: 'editor', keyHandler: 'host',
+    icon: 'Bookmark', keywords: 'bookmark previous navigate', when: () => { const id = bookmarkTab(); return !!id && bookmarkLines(id).length > 0; },
+    run: () => { const id = bookmarkTab(); if (id) navigateBookmark(id, -1); },
+  },
+  {
+    id: 'editor.listBookmarks', title: 'Bookmarks…', category: 'Edit', shortcut: 'Mod+K Mod+L', icon: 'List', keywords: 'bookmark list panel lines',
+    run: () => openBookmarks(),
   },
   {
     id: 'snippets.manage', title: 'Manage snippets…', category: 'Preferences', icon: 'Braces', keywords: 'snippets templates settings',

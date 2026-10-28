@@ -21,6 +21,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DbStudio.Core.Tests" />
     <InternalsVisibleTo Include="DbStudio.SchemaCompare.Tests" />
+    <InternalsVisibleTo Include="DbStudio.Stats.Tests" />
   </ItemGroup>
 
 </Project>

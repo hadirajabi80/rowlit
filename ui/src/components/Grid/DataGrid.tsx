@@ -8,6 +8,7 @@ import '@glideapps/glide-data-grid/dist/index.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import type { CellValue, ColumnInfo, Dialect } from '../../api/types';
+import type { ColumnStatsRequest } from '../../api/types.stats';
 import { copyText } from '../../app/actions';
 import { displayShortcut } from '../../commands/keys';
 import { compileFilter, computeView } from '../../filter/evaluate';
@@ -38,6 +39,7 @@ import { hiddenPredicate, overlayRows } from './overlay';
 import { cellEqualsCondition, quickFilterOptions } from './quickFilter';
 import './grid.css';
 import { rowValue, type GridSelectionInfo, type RowRef } from './gridTypes';
+import { LazyColumnStatsPopover } from './LazyColumnStatsPopover';
 
 export { rowValue, type GridSelectionInfo, type RowRef };
 
@@ -74,6 +76,8 @@ export interface DataGridProps {
   onShowDistinct?(col: number, pos: { clientX: number; clientY: number }): void;
   /** Extra items for the cell context menu (export, …). */
   extraCellMenu?: MenuItem[];
+  /** Offer column profiling. A request runs on the server; true profiles the loaded rows in the browser. */
+  columnStats?: true | { request: Omit<ColumnStatsRequest, 'columns'> };
   /** Extra controller methods (server filter, refresh, export). */
   controllerExtras?: Partial<GridController>;
   /**
@@ -159,6 +163,7 @@ const defaultFetch: CellFetcher = (l) => api.cell(l.executionId, l.resultSetId, 
 
 export function DataGrid(p: DataGridProps) {
   const { gridKey, columns, rows, view, dialect, theme, nullText, dateFormat, editability, fks = [] } = p;
+  const [statsColumn, setStatsColumn] = useState<number | null>(null);
   const ref = useRef<DataEditorRef>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   /** glide's click args carry no altKey: remember it from the pointer event (Alt+click = filter by cell). */
@@ -754,6 +759,7 @@ export function DataGrid(p: DataGridProps) {
         ],
       },
     ];
+    if (p.columnStats) items.push({ separator: true }, { label: 'Column statistics…', onClick: () => setStatsColumn(col) });
     if (fk && v !== null && r.src !== undefined && p.onNavigateFk) {
       items.push({ label: `Go to referenced row (${fk.refTable})`, shortcut: displayShortcut('Mod+Click'), onClick: () => p.onNavigateFk!(fk, fk.ordinals.map((o) => valueAt(r, o))) });
     }
@@ -786,6 +792,7 @@ export function DataGrid(p: DataGridProps) {
       { separator: true },
       { label: 'Filter column…', onClick: () => p.onOpenFilter?.(c.name) },
       { label: 'Show only distinct values…', disabled: !p.onShowDistinct, onClick: () => p.onShowDistinct?.(col, pos) },
+      ...(p.columnStats ? [{ label: 'Column statistics…', onClick: () => setStatsColumn(col) } satisfies MenuItem] : []),
       { separator: true },
       { label: 'Copy column name', onClick: () => void copyText(c.name) },
       { label: 'Reset column widths', onClick: () => setWidths({}) },
@@ -1061,6 +1068,14 @@ export function DataGrid(p: DataGridProps) {
         minColumnWidth={40}
         scaleToRem={false}
       />
+      {statsColumn !== null && columns[statsColumn] && (
+        <LazyColumnStatsPopover
+          column={columns[statsColumn]}
+          values={Array.from({ length: rowCount }, (_, i) => rowRef(i)).filter((r): r is RowRef => !!r).map((r) => valueAt(r, statsColumn))}
+          request={typeof p.columnStats === 'object' ? p.columnStats.request : undefined}
+          onClose={() => setStatsColumn(null)}
+        />
+      )}
     </div>
   );
 }

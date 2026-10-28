@@ -52,6 +52,8 @@ export interface ConsoleTab {
    * `savedText` is then the query's text as last loaded or saved.
    */
   savedQuery?: SavedQueryBinding | null;
+  /** One-based editor bookmark lines, persisted with the workspace. */
+  bookmarks?: number[];
 }
 
 /** A console bound to a saved query (components/SavedQueries). */
@@ -169,6 +171,7 @@ interface TabsState extends GroupsState {
   setSchema(id: string, schema: string | null): void;
   setTxMode(id: string, mode: TxMode): void;
   setMaxRows(id: string, maxRows: number | null): void;
+  setBookmarks(id: string, lines: number[]): void;
   rename(id: string, title: string): void;
   /** Mark a console as the "Edit:" script of an object (null: an ordinary console again). */
   setEdit(id: string, edit: ConsoleEdit | null): void;
@@ -492,6 +495,11 @@ export const useTabs = create<TabsState>((set, get) => {
 
     setMaxRows(id, maxRows) {
       patch(id, { maxRows });
+    },
+
+    setBookmarks(id, lines) {
+      const t = get().tabs.find((x) => x.id === id);
+      if (t?.kind === 'console') patch(id, { bookmarks: [...new Set(lines.filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => a - b) });
     },
 
     rename(id, title) {
