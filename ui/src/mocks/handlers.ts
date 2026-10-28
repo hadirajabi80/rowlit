@@ -13,6 +13,7 @@ import { createKafkaHandlers } from './m2/kafka';
 import { createLogsHandlers } from './m2/logs';
 import { createMongoHandlers } from './m2/mongo';
 import { createRedisHandlers } from './m2/redis';
+import { createSchemaCompareHandlers } from './m2/schemaCompare';
 import { createObjectsHandlers } from './objects';
 import { createSavedQueriesHandlers } from './savedQueries';
 import { createSearchHandlers } from './search';
@@ -289,6 +290,7 @@ function m2Handlers(engine: MockEngine, ok: Parameters<typeof createM2Context>[1
     ...MOCK_PACKS.flatMap((p) => p.handlers(ctx)),
     ...createLogsHandlers(ctx),
     ...createErHandlers(ctx),
+    ...createSchemaCompareHandlers(ctx), // Schema compare (support, compare job, item, script, apply)
     ...createSearchHandlers(ctx), // Find in database (db.search stream)
     ...createImportHandlers(ctx), // Import Wizard (preview, capabilities, table info, DDL, start)
   ];
