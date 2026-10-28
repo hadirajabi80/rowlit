@@ -167,7 +167,7 @@ expects it to return. Every cost depends on it, and errors **multiply** up the t
 Real numbers from Rowlit's SQLite sample show the effect. `sqlite_stat1` says an equality on `Orders.CustomerId`
 returns about 6 rows ([chapter 7](07-indexes.md#statistics-and-histograms)). For the skewed customer 1 the true answer is
 37. If that estimate feeds a join to `OrderLines` (about 4 lines per order), the optimizer expects 24 rows and gets 148;
-one more join level with a similar error and the estimate is off by 36 times. A plan chosen for 24 rows (nested loop with
+one more join level with a similar error and the estimate is off by about 38 times ((37 / 6)²). A plan chosen for 24 rows (nested loop with
 index seeks) is excellent; the same plan for 100,000 rows instead of 600 would be a disaster.
 
 Where estimates typically break:
@@ -286,7 +286,7 @@ flowchart LR
 | SQLite | yes (only algorithm) | no (automatic indexes instead) | no |
 | ClickHouse | — | default (right-hand table in memory) | `full_sorting_merge`, `partial_merge` |
 
-SQL Server 2017+ also has an **adaptive join** (batch mode; row mode from 2019): the plan contains both a hash join and
+SQL Server 2017+ also has an **adaptive join** (it needs batch mode, which SQL Server 2019 extended to row-store tables): the plan contains both a hash join and
 a nested loop, and picks one at run time after counting the build-side rows against a threshold.
 
 ### 2.6 Join order
@@ -661,7 +661,7 @@ Illustrative `ALLSTATS LAST` output on the seed (two customers in country 1, fou
 |   2 |   NESTED LOOPS                        |                    |      1 |      4 |      4 |       8 |
 |*  3 |    TABLE ACCESS FULL                  | CUSTOMERS          |      1 |      2 |      2 |       6 |
 |*  4 |    INDEX RANGE SCAN                   | IX_ORDERS_CUSTOMER |      2 |      2 |      4 |       2 |
-|   5 |   TABLE ACCESS BY INDEX ROWID         | ORDERS             |      4 |      2 |      4 |       1 |
+|   5 |   TABLE ACCESS BY INDEX ROWID         | ORDERS             |      4 |      1 |      4 |       1 |
 --------------------------------------------------------------------------------------------------------
 Predicate Information (identified by operation id):
    3 - filter("C"."COUNTRY_ID"=1)
@@ -859,10 +859,11 @@ stands alone.
    Break-even: 100,000 / 4 = **25,000** rows on distinct pages, which is 0.625% of the table. (In reality PostgreSQL's
    index cost model accounts for caching via `effective_cache_size` and for correlation, so the real break-even moves,
    and above a few thousand rows it would usually choose a bitmap heap scan, which reads each page once in page order.)
-2. The inner index scan was estimated at 3 rows per loop and returned 12,000 / 40 = 300 per loop: a factor of 100. The
-   nested loop's estimate (12) was built on 40 × 3 ≈ 120 times a join selectivity; its actual output is 40,000 times
-   larger. The error starts at the inner index scan's estimate for `customer_id = outer.id`: the planner thinks a
-   customer has 3 orders, these customers have 300. Check: (a) `pg_stats` for `orders.customer_id` (n_distinct, MCVs:
+2. Actual rows in PostgreSQL are per loop: the inner index scan was estimated at 3 rows per loop and returned 12,000
+   per loop (40 × 12,000 = 480,000, the nested loop's actual output), a factor of 4,000. The nested loop's estimate (12)
+   implies the planner also expected only about 4 outer rows (4 × 3), while 40 arrived: a second, smaller error. The
+   decisive error starts at the inner index scan's estimate for `customer_id = outer.id`: the planner thinks a customer
+   has 3 orders, these customers have 12,000. Check: (a) `pg_stats` for `orders.customer_id` (n_distinct, MCVs:
    is the skew visible? raise the statistics target); (b) whether the outer side is filtered by a predicate correlated
    with "big customers" (extended statistics, or a rewrite); (c) whether statistics are stale after a load (`ANALYZE`).
    With correct estimates a hash join of the outer side with `orders` would probably be chosen.
