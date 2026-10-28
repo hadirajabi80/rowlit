@@ -1,0 +1,149 @@
+/* Export / import connections dialogs. Tokens only. */
+.cp-hint {
+  margin: 0 0 var(--space-3);
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+.cp-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.cp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cp-group-head {
+  padding: 2px 0;
+}
+.cp-item {
+  padding: 2px 0 2px var(--space-4);
+  min-width: 0;
+}
+.cp-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-meta,
+.cp-count {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.cp-empty {
+  margin: 0;
+  color: var(--fg-muted);
+}
+.cp-bulk {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: var(--fs-sm);
+}
+.cp-note {
+  color: var(--fg-muted);
+}
+.cp-pw-toggle {
+  margin-bottom: var(--space-2);
+}
+.cp-pass {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cp-warn {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--warning-soft);
+  font-size: var(--fs-sm);
+}
+.cp-warn svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warning);
+}
+.cp-problem {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--fg-muted);
+}
+.cp-problem.on {
+  color: var(--danger-text);
+}
+.cp-error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger-text);
+  font-size: var(--fs-sm);
+}
+.cp-errors {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--danger-text);
+  font-size: var(--fs-sm);
+}
+.cp-result {
+  margin: 0 0 var(--space-2);
+  font-weight: var(--weight-strong);
+}
+.cp-drop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.cp-drop.on {
+  border-color: var(--accent);
+  background: var(--bg-sunken);
+}
+.cp-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+.cp-unlock {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.cp-unlock .input {
+  flex: 1;
+  min-width: 0;
+}
+.cp-table {
+  width: 100%;
+  margin-top: var(--space-3);
+}
+.cp-table th:last-child,
+.cp-table td:last-child {
+  width: 210px;
+}
+.cp-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.cp-bad .cp-name {
+  color: var(--fg-muted);
+}
