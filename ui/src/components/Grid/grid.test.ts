@@ -7,7 +7,7 @@ import { distinctCondition, distinctValues } from '../FilterBar/DistinctValues';
 import { describeModel } from '../FilterBar/describe';
 import { detectParams } from '../ParamsDialog/detect';
 import { convertValue } from '../ParamsDialog/ParamsDialog';
-import { findTable, foreignKeys, referencingTables, resultEditability, tableEditability } from './editability';
+import { findTable, foreignKeys, referencingTables, resultEditability, tableEditability, viewerCanWrite } from './editability';
 import { parseEdit } from './editValue';
 import { overlayRows } from './overlay';
 import { cellEqualsCondition, quickFilterOptions } from './quickFilter';
@@ -53,6 +53,18 @@ describe('editability', () => {
     expect(e.target?.keyColumns).toEqual(['id']);
     const withCat = resultEditability([col('id', 'int', { isKey: true }), col('alias', 'string')], { singleSelect: true, snapshot: SNAP, conn: CONN });
     expect(withCat.editableColumns.has(1)).toBe(false);
+  });
+  it('binary columns are not typed into the grid but the value viewer may write them', () => {
+    const snap: CatalogSnapshot = {
+      ...SNAP,
+      schemas: [{ name: 'main', version: 1, objects: [{ t: 'table', n: 'products', c: [['id', 'INTEGER', 0, 1, 1, null], ['name', 'TEXT', 1, 0, 0, null], ['thumb', 'BLOB', 1, 0, 0, null]], pk: ['id'] }] }],
+    };
+    const cols = [col('id', 'int', { table: 'products', isKey: true }), col('name', 'string', { table: 'products' }), col('thumb', 'binary', { table: 'products' })];
+    const e = resultEditability(cols, { singleSelect: true, snapshot: snap, conn: CONN });
+    expect([...e.editableColumns]).toEqual([0, 1]);
+    expect([...(e.binaryColumns ?? [])]).toEqual([2]);
+    expect(viewerCanWrite(e, 2, false)).toBe(true);
+    expect(viewerCanWrite(e, 1, false)).toBe(true);
   });
   it('tables without a key are read-only in a data tab', () => {
     expect(tableEditability([col('a', 'int')], 'main', 'nokey', null, CONN).reason).toMatch(/No primary key/);

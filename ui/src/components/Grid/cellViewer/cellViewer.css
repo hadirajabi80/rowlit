@@ -1,0 +1,102 @@
+/* value viewer (CellViewer): mode pills, editor, image preview */
+.cell-viewer-modes {
+  margin: 0 12px 6px;
+  align-self: flex-start;
+  height: 24px;
+}
+.cell-viewer-modes button {
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+}
+.cell-viewer-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.cell-viewer-warn {
+  padding: 4px 12px;
+  color: var(--warning);
+  font-size: var(--fs-xs);
+}
+.cell-viewer-note {
+  padding: 4px 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  border-top: 1px solid var(--border);
+}
+.cell-viewer-edit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.cell-viewer-monaco,
+.cell-viewer-textarea {
+  flex: 1;
+  min-height: 120px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.cell-viewer-textarea {
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  background: var(--bg-editor);
+}
+.cell-viewer-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+.cell-viewer-edit-actions .spacer {
+  flex: 1;
+}
+.cell-viewer-image {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.cell-viewer-image-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 12px;
+  font-size: var(--fs-xs);
+}
+.cell-viewer-image-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  padding: 8px;
+  /* checkerboard so transparent images are visible on both themes */
+  background-color: var(--bg-editor);
+  background-image:
+    linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%, transparent 75%, var(--bg-hover) 75%),
+    linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%, transparent 75%, var(--bg-hover) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.cell-viewer-image-stage img {
+  margin: auto;
+}
+.cell-viewer-image-stage.fit img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}

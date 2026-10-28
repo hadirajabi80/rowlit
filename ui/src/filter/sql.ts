@@ -455,6 +455,13 @@ export function literal(v: FilterValue, kind: ParamKind, dialect: Dialect): stri
   if (typeof v === 'number') return String(v);
   if (kind === 'int' || kind === 'float' || kind === 'decimal') return v;
   if (dialect === 'pgsql' && kind === 'binary') return `'\\x${base64ToHex(v)}'::bytea`;
+  // Binary values of the value viewer (a file's bytes) in the SQL preview: a hex literal, not the base64 text.
+  if (kind === 'binary') {
+    if (dialect === 'tsql') return `0x${base64ToHex(v)}`;
+    if (dialect === 'plsql') return `HEXTORAW('${base64ToHex(v)}')`;
+    if (dialect === 'sqlite' || dialect === 'mysql') return `X'${base64ToHex(v)}'`;
+    if (dialect === 'clickhouse') return `unhex('${base64ToHex(v)}')`;
+  }
   const s = `'${v.replace(/'/g, "''")}'`;
   if (dialect === 'tsql' && kind === 'string') return `N${s}`;
   if (dialect === 'plsql' && (kind === 'datetime' || kind === 'date')) return `TIMESTAMP '${v.replace('T', ' ')}'`;

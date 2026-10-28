@@ -144,6 +144,15 @@ describe('server predicate per dialect', () => {
   });
 });
 
+describe('binary literals in the SQL preview (value viewer edits)', () => {
+  const p = [{ name: 'p1', kind: 'binary' as const, value: 'AQID', direction: 'in' as const }];
+  it.each([
+    ['tsql', '0x010203'], ['plsql', "HEXTORAW('010203')"], ['sqlite', "X'010203'"], ['mysql', "X'010203'"], ['clickhouse', "unhex('010203')"], ['pgsql', "'\\x010203'::bytea"],
+  ] as const)('%s', (d, lit) => {
+    expect(inlineParams(d === 'plsql' ? 'x = :p1' : d === 'tsql' ? 'x = @p1' : 'x = @p1', p, d)).toBe(`x = ${lit}`);
+  });
+});
+
 describe('server rewrite', () => {
   const W = 'q.Total > @fp1';
   it('wraps a plain SELECT; Oracle uses no AS', () => {

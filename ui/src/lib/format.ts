@@ -32,6 +32,48 @@ export function base64ToHex(b64: string, maxBytes = Infinity): string {
   return out;
 }
 
+export function base64ToBytes(b64: string): Uint8Array {
+  let bin: string;
+  try {
+    bin = atob(b64);
+  } catch {
+    return new Uint8Array(0);
+  }
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  // chunked: String.fromCharCode(...bytes) overflows the call stack on large arrays
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+export type ImageMime = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'image/bmp';
+
+/** BMP DIB header sizes (BITMAPCOREHEADER to BITMAPV5HEADER); "BM" alone is too common a prefix to trust. */
+const BMP_DIB_SIZES = new Set([12, 40, 52, 56, 64, 108, 124]);
+
+/** The image type of a byte prefix by its magic number (PNG, JPEG, GIF, WebP, BMP), or null. SVG is text: see looksLikeSvg. */
+export function sniffImageMime(b: Uint8Array): ImageMime | null {
+  const at = (i: number, ...v: number[]) => v.every((x, k) => b[i + k] === x);
+  if (b.length >= 8 && at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (b.length >= 3 && at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (b.length >= 6 && at(0, 0x47, 0x49, 0x46, 0x38) && (b[4] === 0x37 || b[4] === 0x39) && b[5] === 0x61) return 'image/gif';
+  if (b.length >= 12 && at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp';
+  if (b.length >= 18 && at(0, 0x42, 0x4d) && at(6, 0, 0, 0, 0) && BMP_DIB_SIZES.has(b[14] | (b[15] << 8) | (b[16] << 16) | (b[17] << 24))) return 'image/bmp';
+  return null;
+}
+
+/** True for SVG markup (an <svg> root, optionally after an XML declaration, comments or a doctype). */
+export function looksLikeSvg(text: string): boolean {
+  const head = text.slice(0, 2048).trimStart();
+  if (!head.startsWith('<')) return false;
+  return /^(?:<\?xml[^>]*\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<svg[\s>/]/i.test(head);
+}
+
 export function isNumericKind(k: ColumnKind): boolean {
   return k === 'int' || k === 'float' || k === 'decimal';
 }

@@ -291,6 +291,9 @@ const EVENT_KINDS_FA = ['بازدید', 'کلیک', 'افزودن به سبد خ
 
 const LONG_NOTE = `Customer asked for a detailed delivery log.\n${'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(700)}`;
 
+/** A real 48x32 PNG (127 bytes), so the value viewer has an image to draw in the mock. */
+const THUMB_PNG = 'iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAARklEQVR4nO3OMREAIAwAMYRVBHKQgwhEIKJKmNDQAabc/f5p2aNUzCx1dpRqQEBAQEBAQECfQa8HfY1SQEBAQEBAQECfQRe6AVCXJmVKwAAAAABJRU5ErkJggg==';
+
 function b64(bytes: number[]): string {
   return btoa(String.fromCharCode(...bytes));
 }
@@ -351,7 +354,7 @@ export const SHOP_TABLES: FixtureTable[] = [
       (5 + rnd() * 1500).toFixed(2),
       Math.floor(rnd() * 400),
       rnd() < 0.5 ? null : `<spec><weight unit="g">${Math.floor(rnd() * 3000)}</weight><color>${['black', 'white', 'silver'][i % 3]}</color></spec>`,
-      rnd() < 0.4 ? null : { $bin: b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, i & 255, 1, 2, 3, 4, 5, 6, 7]), len: 2048 + i * 13 },
+      rnd() < 0.4 ? null : i % 2 === 0 ? { $bin: THUMB_PNG, len: 127 } : { $bin: b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, i & 255, 1, 2, 3, 4, 5, 6, 7]), len: 2048 + i * 13 },
     ],
     ddl: 'CREATE TABLE products (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  name TEXT NOT NULL,\n  category TEXT NOT NULL,\n  price DECIMAL(10,2) NOT NULL,\n  stock INTEGER NOT NULL DEFAULT 0,\n  spec XML,\n  thumbnail BLOB\n);',
   },
