@@ -1,6 +1,6 @@
 import {
   ChevronDown, ChevronRight, ChevronsDownUp, Circle, Columns3, Database, FileCode2, Folder, LoaderCircle, Lock, PanelsTopLeft, Plus, RefreshCw,
-  Search, SquareTerminal, Unplug, X,
+  Search, SquareTerminal, Unplug, UserRoundCog, UsersRound, X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { CatalogObjectType, ConnectionProfile } from '../../api/types';
@@ -30,6 +30,7 @@ import { EmptyState } from '../EmptyState/EmptyState';
 import { contextMenu } from '../layout/commandMenu';
 import { savedQueryTooltip } from '../SavedQueries/model';
 import { importDropHandlers } from '../ImportWizard/fileDrop';
+import { openSecurity } from '../Security/open';
 import { activeChips, ALL_CONNECTIONS, chipsFor, TYPE_CHIPS, useExplorer } from './explorerStore';
 import { buildTree, databasesOf, isSourceConnection, nodeId, parseSystemTypesId, queriesShown, refOf, singleSchema, typesOfChips, type TreeRow } from './tree';
 
@@ -109,6 +110,7 @@ function Highlight({ text, positions }: { text: string; positions?: number[] }) 
 export function targetOfRow(r: TreeRow): CommandTarget | null {
   if (!r.connectionId) return null;
   if (r.kind === 'connection') return { kind: 'connection', connectionId: r.connectionId };
+  if (r.kind === 'security') return { kind: 'connection', connectionId: r.connectionId };
   if (r.kind === 'source' && r.source) {
     return {
       kind: 'source', connectionId: r.connectionId, providerId: r.source.providerId, nodeType: r.source.nodeType, path: r.source.path,
@@ -151,6 +153,7 @@ export function contextMenuIdOf(r: TreeRow): string | null {
   if (linked) return linked;
   if (r.kind === 'cfolder') return 'explorer.folder';
   if (r.kind === 'connection') return r.connectionId && kindOf(r.connectionId) !== 'relational' ? 'explorer.sourceConnection' : 'explorer.connection';
+  if (r.kind === 'security') return null;
   if (r.kind === 'source') return r.source ? getSourceModule(r.source.providerId)?.contextMenuId(r) ?? null : null;
   if (r.kind === 'database' || r.kind === 'schema' || r.kind === 'folder') return 'explorer.container';
   if (r.kind === 'qfolder') return 'explorer.queries';
@@ -180,6 +183,11 @@ function activateRow(r: TreeRow, toggle: (r: TreeRow, open?: boolean) => void) {
     const mod = r.source ? getSourceModule(r.source.providerId) : undefined;
     if (mod && !r.expandable) mod.activate(r);
     else toggle(r);
+    return;
+  }
+  if (r.kind === 'security') {
+    if (r.expandable) toggle(r);
+    else if (r.connectionId) openSecurity({ connectionId: r.connectionId, database: r.database ?? null, filter: r.security?.section === 'roles' ? 'roles' : 'users' });
     return;
   }
   if (r.kind === 'query') {
@@ -550,7 +558,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   const draggable = r.kind === 'object' || r.kind === 'column' || r.kind === 'query';
   // Schema / database colour tags: a dot on the node itself, a stripe and a faint tint on everything inside it.
   const scopeHex = useSettings((s) => {
-    if (!r.connectionId || r.kind === 'connection' || r.kind === 'cfolder' || r.kind === 'status' || r.kind === 'source') return null;
+    if (!r.connectionId || r.kind === 'connection' || r.kind === 'cfolder' || r.kind === 'status' || r.kind === 'source' || r.kind === 'security') return null;
     return resolveScopeColor(readScopeColors(s.settings.ui), r.connectionId, r.database ?? null, r.kind === 'database' ? null : r.schema ?? null);
   });
   const scopeCss = connColorCss(scopeHex ?? undefined);
@@ -567,6 +575,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   else if (r.kind === 'database') icon = <DatabaseIcon />;
   else if (r.kind === 'schema') icon = <span className="schema-glyph" aria-hidden="true">S</span>;
   else if (r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'sfolder') icon = <Folder size={16} strokeWidth={1.5} className="obj-icon obj-folder" />;
+  else if (r.kind === 'security') icon = r.expandable ? <Lock size={15} strokeWidth={1.5}/> : r.security?.section === 'roles' ? <UsersRound size={15} strokeWidth={1.5}/> : <UserRoundCog size={15} strokeWidth={1.5}/>;
   else if (r.kind === 'query') icon = <FileCode2 size={16} strokeWidth={1.5} className="obj-icon obj-query" aria-hidden="true" />;
   else if (r.kind === 'object' && r.objectType) icon = <ObjectIcon type={r.objectType} kind={r.typeKind} />;
   else if (r.kind === 'sysType') icon = <ObjectIcon type="type" kind="alias" />;
@@ -630,12 +639,12 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       onMouseDown={() => onSelect()}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('.tree-twisty, .tree-row-actions')) return;
-        if (r.kind === 'cfolder' || r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'sfolder' || r.kind === 'database' || r.kind === 'schema' || (r.kind === 'source' && r.expandable)) onToggle();
+        if (r.kind === 'cfolder' || r.kind === 'folder' || r.kind === 'qfolder' || r.kind === 'sfolder' || r.kind === 'database' || r.kind === 'schema' || (r.kind === 'source' && r.expandable) || (r.kind === 'security' && r.expandable)) onToggle();
         if (r.kind === 'status' && r.status === 'load') onActivate();
       }}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest('.tree-row-actions')) return;
-        if (r.kind === 'connection' || r.kind === 'object' || r.kind === 'column' || r.kind === 'query' || (r.kind === 'source' && !r.expandable)) onActivate();
+        if (r.kind === 'connection' || r.kind === 'object' || r.kind === 'column' || r.kind === 'query' || r.kind === 'security' || (r.kind === 'source' && !r.expandable)) onActivate();
         else if (r.kind === 'database' || r.kind === 'schema' || r.kind === 'folder' || r.kind === 'qfolder') onActivate(); // WP3: the Objects tab
       }}
       onContextMenu={onMenu}

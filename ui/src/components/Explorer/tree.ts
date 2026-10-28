@@ -14,7 +14,9 @@ export type NodeKind = 'cfolder' | 'connection' | 'database' | 'schema' | 'folde
   /** A schema's "Queries" folder and the queries saved into it (components/SavedQueries). */
   | 'qfolder' | 'query'
   /** SQL Server's read-only "System Data Types" group, its category sub-folders (sfolder) and the built-in types (sysType). */
-  | 'sfolder' | 'sysType';
+  | 'sfolder' | 'sysType'
+  /** WP-11: the static Security group and its Users / Roles launchers. */
+  | 'security';
 
 export interface TreeRow {
   id: string;
@@ -55,6 +57,7 @@ export interface TreeRow {
   typeKind?: string;
   /** kind 'sysType': the built-in type. */
   sysType?: SystemTypeInfo;
+  security?: { section: 'root' | 'users' | 'roles' };
 }
 
 export const nodeId = {
@@ -76,7 +79,19 @@ export const nodeId = {
   /** A database's "System Data Types" group and its category sub-folders. */
   systemTypes: (cid: string, db: string | null) => `sty:${cid}:${db ?? ''}`,
   systemCategory: (groupId: string, category: string) => `${groupId}#${category}`,
+  security: (cid: string, section: 'root' | 'users' | 'roles' = 'root') => `sec:${cid}:${section}`,
 };
+
+const SECURITY_PROVIDERS = new Set(['postgresql', 'mysql', 'mariadb', 'sqlserver', 'oracle', 'clickhouse', 'snowflake']);
+
+function addSecurity(rows: TreeRow[], input: TreeInput, c: ConnectionProfile, depth: number) {
+  if (!SECURITY_PROVIDERS.has(c.providerId)) return;
+  const id = nodeId.security(c.id); const open = input.expanded.has(id);
+  rows.push({ id, kind: 'security', depth, label: 'Security', expandable: true, expanded: open, connectionId: c.id, security: { section: 'root' } });
+  if (!open) return;
+  rows.push({ id: nodeId.security(c.id, 'users'), kind: 'security', depth: depth + 1, label: c.providerId === 'sqlserver' ? 'Users and logins' : 'Users', expandable: false, expanded: false, connectionId: c.id, security: { section: 'users' } });
+  rows.push({ id: nodeId.security(c.id, 'roles'), kind: 'security', depth: depth + 1, label: 'Roles', expandable: false, expanded: false, connectionId: c.id, security: { section: 'roles' } });
+}
 
 /** `sty:<connection>:<database>` → its parts (the Explorer loads the built-in types of expanded groups). */
 export function parseSystemTypesId(id: string): { connectionId: string; database: string | null } | null {
@@ -243,6 +258,7 @@ function addConnection(rows: TreeRow[], input: TreeInput, c: ConnectionProfile, 
   });
   if (!open) return;
   if (isSourceConnection(c)) return addSourceChildren(rows, input, c, depth + 1, id);
+  addSecurity(rows, input, c, depth + 1);
   // A list that is already shown stays while it reloads (refresh, save): never collapse it into a status row.
   const shown = !!cat?.databases && cat.status !== 'error';
   const target: LoadTarget = { level: 'conn', connectionId: c.id, database: null };
