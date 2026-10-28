@@ -87,6 +87,8 @@ export interface DataGridProps {
   onAggregates?(agg: SelectionAggregates | null): void;
   /** Hide the trailing "+ New" row (e.g. while a filter matches nothing and an empty-state message is shown). */
   hideTrailingRow?: boolean;
+  /** Background tint of a cell by source row and column (result comparison: added / removed / changed). */
+  cellTint?(sourceRow: number, col: number): 'added' | 'removed' | 'changed' | null;
 }
 
 function headerIcon(c: ColumnInfo, fk: boolean): GridColumnIcon {
@@ -311,7 +313,7 @@ export function DataGrid(p: DataGridProps) {
     [editable, editability, columns, pending.deletes],
   );
 
-  const getCellContent = useCallback(
+  const plainCellContent = useCallback(
     ([col, row]: Item): GridCell => {
       const r = rowRef(row);
       const c = columns[col];
@@ -357,6 +359,21 @@ export function DataGrid(p: DataGridProps) {
       };
     },
     [rowRef, columns, valueAt, canEditCell, pending, colors, editability, nullColor, nullText, fmt, mutedColor, fkByCol],
+  );
+
+  // WP-7 result comparison: tinted cells wrap the plain content (themeOverride.bgCell on top of what the cell had).
+  const cellTint = p.cellTint;
+  const getCellContent = useCallback(
+    (item: Item): GridCell => {
+      const cell = plainCellContent(item);
+      if (!cellTint) return cell;
+      const r = rowRef(item[1]);
+      const tint = r && r.src !== undefined ? cellTint(r.src, item[0]) : null;
+      if (!tint) return cell;
+      const bgCell = tint === 'added' ? colors.diffAdded : tint === 'removed' ? colors.diffRemoved : colors.diffChanged;
+      return { ...cell, themeOverride: { ...cell.themeOverride, bgCell } };
+    },
+    [plainCellContent, cellTint, rowRef, colors],
   );
 
   const getRowThemeOverride = useCallback(

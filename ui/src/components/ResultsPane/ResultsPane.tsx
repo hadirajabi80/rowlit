@@ -1,6 +1,6 @@
 import {
-  ChevronDown, CloudUpload, Code2, Copy, Download, Funnel, LoaderCircle, Lock, Maximize2, Minimize2, PanelRight, PencilLine, Plus, Redo2, RotateCcw,
-  Rows3, Search, Table2, TriangleAlert, Undo2, X,
+  ChevronDown, CloudUpload, Code2, Copy, Download, Funnel, GitCompare, LoaderCircle, Lock, Maximize2, Minimize2, PanelRight, PencilLine, Pin, PinOff, Plus,
+  Redo2, RotateCcw, Rows3, Search, Table2, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CellValue, Dialect, ExportFormat } from '../../api/types';
@@ -16,8 +16,8 @@ import { dbKey, useCatalog, useSnapshot } from '../../store/catalog';
 import { useConnection } from '../../store/connections';
 import { pendingCount, useEditBuffer, useEdits } from '../../store/edits';
 import { useFilters } from '../../store/filters';
-import { useResults, useTabExecution, viewKey } from '../../store/results';
-import { isRunning, type ExecutionState, type ResultSetState } from '../../store/resultsReducer';
+import { pinView, useResults, useTabExecution, viewKey } from '../../store/results';
+import { isPinnedExec, isRunning, type ExecutionState, type PinnedResult, type ResultSetState } from '../../store/resultsReducer';
 import { useSessions } from '../../store/sessions';
 import { useSettings } from '../../store/settings';
 import { useTabs } from '../../store/tabs';
@@ -43,6 +43,7 @@ import '../Grid/grid.css';
 import { chartBodyClass, chartToggleMenu, useResultView } from '../Charts/chartMode';
 import { ChartPanel, ChartToggle } from '../Charts/ChartToggle';
 import { MessagesPane } from '../MessagesPane/MessagesPane';
+import { showCompareMenu, togglePin } from '../ResultsCompare/pin';
 import { PendingBar } from '../PendingChanges/PendingBar';
 import { usePendingChanges } from '../PendingChanges/usePendingChanges';
 import type { EditContext } from '../PendingChanges/submit';
@@ -91,8 +92,9 @@ export function ResultsPane({ tabId, dialect, theme, onClose, inTab = false }: P
   const exec = useTabExecution(tabId);
   const active = useResults((s) => s.activeView[tabId]) ?? 'messages';
   const setActive = useResults((s) => s.setActiveView);
+  const pins = useResults((s) => s.pinned[tabId]) ?? NO_PINS;
 
-  if (!exec) {
+  if (!exec && pins.length === 0) {
     const controls = onClose || inTab;
     return (
       <div className={`results empty${controls ? ' with-head' : ''}`}>
@@ -112,44 +114,91 @@ export function ResultsPane({ tabId, dialect, theme, onClose, inTab = false }: P
       </div>
     );
   }
-  const rs = typeof active === 'number' ? exec.resultSets.find((r) => r.id === active) : undefined;
+  // A pinned result stands in for the result set it was pinned from while that run is still shown.
+  const covered = new Set(pins.filter((p) => p.origin.localId === exec?.localId).map((p) => p.origin.rsId));
+  const rs = exec && typeof active === 'number' && !covered.has(active) ? exec.resultSets.find((r) => r.id === active) : undefined;
   const view = rs ?? null;
-  const errors = exec.errorCount;
+  const pin = typeof active === 'string' && active.startsWith('pin:') ? pins.find((p) => pinView(p.id) === active) : !exec ? pins[0] : undefined;
+  const errors = exec?.errorCount ?? 0;
+  const messagesOn = !!exec && !view && !pin;
 
   return (
     <div className="results">
       <div className="results-tabs" role="tablist" aria-label="Results">
-        {exec.resultSets.map((r, i) => (
-          <button
-            key={r.id}
-            role="tab"
-            aria-selected={active === r.id}
-            className={`results-tab${active === r.id ? ' active' : ''}`}
-            onClick={() => setActive(tabId, r.id)}
-            title={`Batch ${r.batchIndex + 1}`}
-          >
-            <Table2 size={13} />
-            Result {i + 1}
-            <span className="results-tab-count">{formatCount(r.rowCount)}</span>
-            {!r.done && <LoaderCircle size={11} className="spin" />}
-          </button>
+        {pins.map((p) => (
+          <PinnedTab key={p.id} pin={p} active={pin?.id === p.id} onSelect={() => setActive(tabId, pinView(p.id))} onUnpin={() => togglePin(tabId, { pinId: p.id })} />
         ))}
-        <button
-          role="tab"
-          aria-selected={active === 'messages' || !view}
-          className={`results-tab${active === 'messages' || !view ? ' active' : ''}`}
-          onClick={() => setActive(tabId, 'messages')}
-        >
-          Messages
-          {errors > 0 ? <span className="badge badge-error">{errors}</span> : exec.messages.length > 0 && <span className="results-tab-count">{exec.messages.length}</span>}
-        </button>
+        {exec?.resultSets.map((r, i) =>
+          covered.has(r.id) ? null : (
+            <span key={r.id} className={`results-tab-group${active === r.id ? ' active' : ''}`}>
+              <button
+                role="tab"
+                aria-selected={active === r.id}
+                className={`results-tab${active === r.id ? ' active' : ''}`}
+                onClick={() => setActive(tabId, r.id)}
+                title={`Batch ${r.batchIndex + 1}`}
+              >
+                <Table2 size={13} />
+                Result {i + 1}
+                <span className="results-tab-count">{formatCount(r.rowCount)}</span>
+                {!r.done && <LoaderCircle size={11} className="spin" />}
+              </button>
+              <button
+                className="icon-btn xs results-pin-btn"
+                aria-label={`Pin Result ${i + 1}`}
+                title={`${commandView('results.pin', undefined, 'Pin result').tooltip}: keep this result when the query runs again`}
+                disabled={!r.done}
+                onClick={() => togglePin(tabId, { rsId: r.id })}
+              >
+                <Pin size={11} />
+              </button>
+            </span>
+          ),
+        )}
+        {exec && (
+          <button
+            role="tab"
+            aria-selected={messagesOn}
+            className={`results-tab${messagesOn ? ' active' : ''}`}
+            onClick={() => setActive(tabId, 'messages')}
+          >
+            Messages
+            {errors > 0 ? <span className="badge badge-error">{errors}</span> : exec.messages.length > 0 && <span className="results-tab-count">{exec.messages.length}</span>}
+          </button>
+        )}
         <span className="results-head-end">
-          <ExecStatus exec={exec} />
+          {exec && <ExecStatus exec={exec} />}
           <HeaderControls tabId={tabId} onClose={onClose} inTab={inTab} />
         </span>
       </div>
-      {view ? <ResultSetView key={viewKey(exec.localId, view.id)} exec={exec} rs={view} dialect={dialect} theme={theme} /> : <MessagesPane exec={exec} />}
+      {pin ? (
+        <ResultSetView key={viewKey(pin.exec.localId, pin.exec.resultSets[0].id)} exec={pin.exec} rs={pin.exec.resultSets[0]} dialect={dialect} theme={theme} />
+      ) : exec && view ? (
+        <ResultSetView key={viewKey(exec.localId, view.id)} exec={exec} rs={view} dialect={dialect} theme={theme} />
+      ) : exec ? (
+        <MessagesPane exec={exec} />
+      ) : null}
     </div>
+  );
+}
+
+const NO_PINS: PinnedResult[] = [];
+
+/** Tab of a pinned result: pin glyph, title, row count, and "Unpin" (the original returns while its run is shown). */
+function PinnedTab({ pin, active, onSelect, onUnpin }: { pin: PinnedResult; active: boolean; onSelect: () => void; onUnpin: () => void }) {
+  const rs = pin.exec.resultSets[0];
+  const at = new Date(pin.pinnedAt).toLocaleTimeString();
+  return (
+    <span className={`results-tab-group pinned${active ? ' active' : ''}`}>
+      <button role="tab" aria-selected={active} className={`results-tab${active ? ' active' : ''}`} onClick={onSelect} title={`Pinned at ${at}`}>
+        <Pin size={12} aria-hidden="true" />
+        {pin.title}
+        <span className="results-tab-count">{formatCount(rs.rowCount)}</span>
+      </button>
+      <button className="icon-btn xs results-pin-btn" aria-label={`Unpin ${pin.title}`} title="Unpin: the next run is no longer kept next to it, and this copy goes away" onClick={onUnpin}>
+        <PinOff size={11} />
+      </button>
+    </span>
   );
 }
 
@@ -249,9 +298,11 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   const session = useSessions((s) => s.sessions[s.byTab[exec.tabId]]);
   /** Oracle: the console's CURRENT_SCHEMA, where the unqualified table of the query lives. */
   const currentSchema = dialect === 'plsql' ? (session?.database ?? tabDb ?? null) : null;
+  // A pinned result is a copy of earlier rows: never editable.
+  const pinnedCopy = isPinnedExec(exec);
   const editability = useMemo(
-    () => (rs.done ? resultEditability(columns, { singleSelect, snapshot, conn, dialect, currentSchema }) : null),
-    [rs.done, columns, singleSelect, snapshot, conn, dialect, currentSchema],
+    () => (rs.done && !pinnedCopy ? resultEditability(columns, { singleSelect, snapshot, conn, dialect, currentSchema }) : null),
+    [rs.done, pinnedCopy, columns, singleSelect, snapshot, conn, dialect, currentSchema],
   );
   const table = editability?.target ?? null;
   const tableCol = columns.find((c) => c.table);
@@ -277,7 +328,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   const filtered = hasFilter && shown !== overlay.length;
   const pending = pendingCount(buffer.pending);
   const signature = useMemo(() => columnSignature(columns), [columns]);
-  const sfActive = !!serverFilter && exec.batches[0]?.sql === serverFilter.sql;
+  const sfActive = !pinnedCopy && !!serverFilter && exec.batches[0]?.sql === serverFilter.sql;
   const avail = useMemo(() => serverFilterAvailability(exec, columns, dialect), [exec, columns, dialect]);
 
   const editCtx: EditContext | null = editability?.editable && editability.target ? {
@@ -340,7 +391,8 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
       kind: 'query', connectionId: exec.connectionId, dialect, gridKey: key, columns,
       baseName: rs.columns.find((x) => x.table)?.table ?? `result_${rs.id + 1}`,
       sql, params: exec.params ?? [],
-      rerunDisabled: !sql ? 'Only a single SELECT statement can be run again; export the loaded rows instead.'
+      rerunDisabled: pinnedCopy ? 'This is a pinned copy of earlier rows; export the loaded rows instead.'
+        : !sql ? 'Only a single SELECT statement can be run again; export the loaded rows instead.'
         : !live ? 'The console\'s session is closed; run the query again first.' : null,
       rowCount: rs.rowCount, truncated: rs.truncated, gridFiltered: hasView,
       stored: xid && !hasView && !edited ? { executionId: xid, resultSetId: rs.id } : null,
@@ -439,6 +491,30 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
     id: 'chart', priority: 6, menu: () => chartToggleMenu(key, rs.columns.length === 0),
     node: <ChartToggle viewKey={key} disabled={rs.columns.length === 0} />,
   });
+  // WP-7: compare this result set with another one of the run, or with a pinned result.
+  const shownResult = pinnedCopy ? { pinId: exec.localId.slice('pin-'.length) } : { rsId: rs.id };
+  toolbarItems.push({
+    id: 'compare', priority: 3, menu: () => [{ label: 'Compare with…', onClick: () => runCommand('results.compare', { tabId: exec.tabId }) }],
+    node: (
+      <button
+        className="icon-btn sm" aria-haspopup="menu" aria-label="Compare with…" disabled={!rs.done || rs.columns.length === 0}
+        title={`${commandView('results.compare', undefined, 'Compare result with…').tooltip}: against another result set or a pinned result`}
+        onClick={(e) => void showCompareMenu(e.currentTarget, exec.tabId, shownResult)}
+      >
+        <GitCompare size={14} />
+      </button>
+    ),
+  });
+  if (pinnedCopy) {
+    toolbarItems.push({
+      id: 'pinned', priority: 1,
+      node: (
+        <span className="rs-badge" title="A pinned copy of earlier rows: read-only, not replaced when the query runs again">
+          <Pin size={11} /> Pinned
+        </span>
+      ),
+    });
+  }
   if (view.sort.length > 0) {
     toolbarItems.push({
       id: 'sort', priority: 3, menu: () => commandMenuItems([{ command: 'grid.clearSort' }], gridArgs),
@@ -723,9 +799,11 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
         {rs.truncated && (
           <span className="truncated">
             <TriangleAlert size={12} /> Limited to {formatCount(exec.maxRows)} rows
-            <button className="link-btn" onClick={() => void rerun(exec.tabId, { maxRows: 0 })} disabled={isRunning(exec)}>
-              <RotateCcw size={11} /> Re-run without limit
-            </button>
+            {!pinnedCopy && (
+              <button className="link-btn" onClick={() => void rerun(exec.tabId, { maxRows: 0 })} disabled={isRunning(exec)}>
+                <RotateCcw size={11} /> Re-run without limit
+              </button>
+            )}
           </span>
         )}
         <div className="flex-1" />

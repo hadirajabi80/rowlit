@@ -2,9 +2,11 @@ import { create } from 'zustand';
 import type { CellValue, WsEvent } from '../api/types';
 import { ChunkedList } from '../lib/chunked';
 import { EMPTY_VIEW, type GridViewModel } from '../lib/filter';
-import { applyEvents, failExecution, isRunning, type ExecutionState, type ReleasedRows } from './resultsReducer';
+import { applyEvents, failExecution, isRunning, pinBlocker, pinResultSet, type ExecutionState, type PinnedResult, type ReleasedRows } from './resultsReducer';
 
-export type ResultView = number | 'messages';
+/** A result set id of the shown run, 'messages', or `pin:<id>` (a pinned result). */
+export type ResultView = number | 'messages' | `pin:${string}`;
+export const pinView = (id: string): ResultView => `pin:${id}`;
 
 /**
  * Results of executions, keyed by a local id (assigned before the engine returns an executionId) and
@@ -16,6 +18,15 @@ interface ResultsState {
   byTab: Record<string, string>;
   activeView: Record<string, ResultView>;
   views: Record<string, GridViewModel>;
+  /**
+   * Pinned results by console tab (WP-7): copies of finished result sets that stay when the console runs again.
+   * Not cleared by clearTab (a pinned result is data, not a live session); dropPins when the tab goes.
+   */
+  pinned: Record<string, PinnedResult[]>;
+  /** Pins a finished result set of the tab's latest run. Returns the pin, or why it cannot be pinned. */
+  pin(tabId: string, rsId: number): { pin: PinnedResult } | { error: string };
+  unpin(tabId: string, pinId: string): void;
+  dropPins(tabId: string): void;
   begin(exec: ExecutionState): void;
   attach(localId: string, executionId: string): void;
   fail(localId: string, text: string, code?: string | null): void;
@@ -39,6 +50,7 @@ const xidToLocal = new Map<string, string>();
 const orphans = new Map<string, { at: number; events: WsEvent[] }>();
 const queue = new Map<string, WsEvent[]>();
 let scheduled = false;
+let pinSeq = 0;
 
 const raf: (cb: () => void) => void =
   typeof requestAnimationFrame === 'function' ? (cb) => requestAnimationFrame(() => cb()) : (cb) => setTimeout(cb, 16);
@@ -67,6 +79,45 @@ export const useResults = create<ResultsState>((set, get) => {
     byTab: {},
     activeView: {},
     views: {},
+    pinned: {},
+
+    pin(tabId, rsId) {
+      const s = get();
+      const exec = s.executions[s.byTab[tabId]];
+      const existing = (s.pinned[tabId] ?? []).find((p) => p.origin.localId === exec?.localId && p.origin.rsId === rsId);
+      if (existing) return { pin: existing };
+      const why = pinBlocker(exec, rsId);
+      if (why) return { error: why };
+      const list = s.pinned[tabId] ?? [];
+      const pin = pinResultSet(exec, rsId, `${++pinSeq}`, list.map((p) => p.title));
+      set({ pinned: { ...s.pinned, [tabId]: [...list, pin] }, activeView: { ...s.activeView, [tabId]: pinView(pin.id) } });
+      return { pin };
+    },
+
+    unpin(tabId, pinId) {
+      const s = get();
+      const list = s.pinned[tabId];
+      if (!list?.some((p) => p.id === pinId)) return;
+      const pinned = { ...s.pinned };
+      const rest = list.filter((p) => p.id !== pinId);
+      if (rest.length) pinned[tabId] = rest;
+      else delete pinned[tabId];
+      const views = { ...s.views };
+      for (const k of Object.keys(views)) if (k.startsWith(`pin-${pinId}:`)) delete views[k];
+      const activeView = s.activeView[tabId] === pinView(pinId) ? { ...s.activeView, [tabId]: 'messages' as const } : s.activeView;
+      set({ pinned, views, activeView });
+    },
+
+    dropPins(tabId) {
+      const s = get();
+      const list = s.pinned[tabId];
+      if (!list) return;
+      const pinned = { ...s.pinned };
+      delete pinned[tabId];
+      const views = { ...s.views };
+      for (const p of list) for (const k of Object.keys(views)) if (k.startsWith(`pin-${p.id}:`)) delete views[k];
+      set({ pinned, views });
+    },
 
     begin(exec) {
       const s = get();

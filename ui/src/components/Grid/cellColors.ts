@@ -17,6 +17,10 @@ export interface CellColors {
   /** Zebra stripe and hovered row backgrounds (styles-20). */
   alt: string;
   hover: string;
+  /** Result comparison (ResultsCompare): added / removed / changed rows and cells. */
+  diffAdded: string;
+  diffRemoved: string;
+  diffChanged: string;
 }
 
 /** Resolve a token chain like `var(--cell-edited, var(--warning-soft))` to a canvas-usable colour string. */
@@ -49,6 +53,9 @@ export function cellColors(theme: EffectiveTheme): CellColors {
     fg: resolve('var(--fg)'),
     alt: resolve('var(--bg-grid-alt, var(--bg-panel))'),
     hover: resolve('var(--bg-hover)'),
+    diffAdded: resolve('var(--cell-diff-added, var(--success-soft))'),
+    diffRemoved: resolve('var(--cell-diff-removed, var(--danger-soft))'),
+    diffChanged: resolve('var(--cell-diff-changed, var(--warning-soft))'),
   };
   cache.set(theme, c);
   return c;
