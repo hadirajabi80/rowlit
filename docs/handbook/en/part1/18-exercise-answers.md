@@ -151,6 +151,7 @@ Each answer gives the result you should see. Where an exercise has several corre
 were computed from the seed data; the SQLite results were produced by running the statements.
 
 <a id="i-01"></a>
+<a id="chapter-1"></a>
 ### I-01: What a database is
 
 **1. Embedded or server?**
@@ -183,6 +184,7 @@ All four names are qualified, so none of them needs `sales` to be selected befor
 exist is the network: there is no server process and no wire protocol, because the application and the DBMS are the same process.
 
 <a id="i-02"></a>
+<a id="chapter-2"></a>
 ### I-02: The relational model
 
 **1. Keys.** `order_id` alone is not a key: order 1 has two lines. `product_id` alone is not a key: product 2 appears in orders 1 and 2. `(order_id, product_id)` is unique for every row and
@@ -234,6 +236,7 @@ In crow's foot terms: `CUSTOMERS ||--o{ REVIEWS` and `PRODUCTS ||--o{ REVIEWS`.
 right side). `UNION ALL` returns 5 + 3 = 8 rows. NULL appears once because it occurs once in the input; duplicate removal treats two NULLs as equal, even though `NULL = NULL` is not TRUE.
 
 <a id="i-03"></a>
+<a id="chapter-3"></a>
 ### I-03: SQL I, reading data
 
 **1. Filter and sort.**
@@ -331,6 +334,7 @@ The `WHERE` version returns only Alice, Bob and Dora (1 each): Chie and Emil hav
 counts disappeared.
 
 <a id="i-04"></a>
+<a id="chapter-4"></a>
 ### I-04: SQL II, advanced queries
 
 **1. Subqueries.**
@@ -432,6 +436,7 @@ step. Stop it with a depth guard (`WHERE s.depth < 20`), by carrying the visited
 result uses `ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty)`; in SQL Server, Oracle, Snowflake and PostgreSQL 15+ use the `MERGE` form of section 2.7.
 
 <a id="i-05"></a>
+<a id="chapter-5"></a>
 ### I-05: Data modelling and normalisation
 
 **1. Anomalies.** *Update:* change Alice's email on one of her three rows and the table now holds two emails for her; the responsible dependency is `customer → customer_email` (also `order_id →
@@ -504,61 +509,73 @@ Product deleted: `RESTRICT`, because reviews are history; mark the product disco
 | Discontinued | `boolean NOT NULL DEFAULT false` | `bit NOT NULL DEFAULT 0` | two states; `NOT NULL` avoids a third |
 
 <a id="i-06"></a>
+<a id="chapter-6"></a>
 ### I-06: Storage internals
 
 Answers are added by the package that owns chapter I-06.
 
 <a id="i-07"></a>
+<a id="chapter-7"></a>
 ### I-07: Indexes in depth
 
 Answers are added by the package that owns chapter I-07.
 
 <a id="i-08"></a>
+<a id="chapter-8"></a>
 ### I-08: The query pipeline and the optimizer
 
 Answers are added by the package that owns chapter I-08.
 
 <a id="i-09"></a>
+<a id="chapter-9"></a>
 ### I-09: Transactions, ACID and isolation
 
 Answers are added by the package that owns chapter I-09.
 
 <a id="i-10"></a>
+<a id="chapter-10"></a>
 ### I-10: Concurrency: locks, latches, MVCC
 
 Answers are added by the package that owns chapter I-10.
 
 <a id="i-11"></a>
+<a id="chapter-11"></a>
 ### I-11: WAL, redo/undo, checkpoints, recovery
 
 Answers are added by the package that owns chapter I-11.
 
 <a id="i-12"></a>
+<a id="chapter-12"></a>
 ### I-12: Backup, replication, HA, partitioning
 
 Answers are added by the package that owns chapter I-12.
 
 <a id="i-13"></a>
+<a id="chapter-13"></a>
 ### I-13: Performance tuning methodology
 
 Answers are added by the package that owns chapter I-13.
 
 <a id="i-14"></a>
+<a id="chapter-14"></a>
 ### I-14: Database security
 
 Answers are added by the package that owns chapter I-14.
 
 <a id="i-15"></a>
+<a id="chapter-15"></a>
 ### I-15: OLTP vs OLAP and columnar engines
 
 Answers are added by the package that owns chapter I-15.
 
 <a id="i-16"></a>
+<a id="chapter-16"></a>
 ### I-16: NoSQL families and their internals
 
 Answers are added by the package that owns chapter I-16.
 
 <a id="i-17"></a>
+<a id="chapter-17"></a>
 ### I-17: The eight relational dialects compared
 
 Answers are added by the package that owns chapter I-17.
