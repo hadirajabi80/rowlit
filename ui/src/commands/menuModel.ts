@@ -55,6 +55,9 @@ export const MENUS: MenuDef[] = [
       cmd('file.openSqlite', 'Open a SQLite database file…'),
       cmd('file.sampleDb', 'Open the sample database'),
       sep,
+      cmd('connections.export', 'Export connections…', undefined, { optional: true }), // WP-5
+      cmd('connections.import', 'Import connections…', undefined, { optional: true }),
+      sep,
       cmd('file.save', 'Save', 'Mod+S'),
       cmd('file.saveAs', 'Save as…', 'Mod+Shift+S'),
       cmd('queries.saveToSchema', 'Save query to schema…', 'Mod+Alt+S', { optional: true }),
@@ -262,7 +265,7 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
     n('designer.newType'), n('designer.newTableType'), c('connections.refreshCatalog'), 'separator',
     h('explorer.drop'),
   ],
-  'explorer.folder': [c('connections.connectFolder'), c('connections.newInFolder')],
+  'explorer.folder': [c('connections.connectFolder'), c('connections.newInFolder'), 'separator', c('connections.export', true)], // WP-5
 
   // ---- M2 (docs/PLAN-M2.md 2.5): source connections and source module nodes. Command ids are reserved here; each
   // feature package registers them in its commands.ts (optional until then). Args: a SourceTarget (commands/types.ts),

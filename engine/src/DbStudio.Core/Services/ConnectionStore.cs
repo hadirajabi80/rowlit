@@ -96,6 +96,27 @@ public sealed class ConnectionStore
         return copy;
     }
 
+    // ---- WP-5 (connections file): the stored secrets of a profile, and which props are secrets -------------------------
+
+    /// <summary>
+    /// Every stored secret of a saved profile: <c>password</c> plus each extra password-typed field (SSH password and key
+    /// passphrase, Kafka SASL…) that has a value. For the encrypted export only; never log or return it from an endpoint.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> SecretsOf(ConnectionProfile profile)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(profile.Id)) return result;
+        if (_secrets.Get(profile.Id) is { Length: > 0 } main) result["password"] = main;
+        foreach (var key in ExtraSecretFields(profile.ProviderId))
+        {
+            if (_secrets.Get(SecretKey(profile.Id, key)) is { Length: > 0 } secret) result[key] = secret;
+        }
+        return result;
+    }
+
+    /// <summary>True when <paramref name="key"/> is a password-typed prop of the provider ("password" included).</summary>
+    public bool IsSecretProp(string providerId, string key) => PasswordFields(providerId).Contains(key);
+
     // ---- WP-SSH: the one place a profile becomes what a driver opens --------------------------------------------------
 
     /// <summary>The tunnel resolver (SSH); null = profiles with <c>ssh.enabled</c> are refused (engines/tests without it).</summary>
