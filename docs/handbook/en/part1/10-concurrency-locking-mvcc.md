@@ -59,7 +59,7 @@ flowchart TD
     T2["Table dbo.Customers: IS"] --> K3["Key Id=1: S (row being read)"]
 ```
 
-The compatibility matrix tells you who waits. This is SQL Server's matrix ("yes" means both can be granted at once):
+The **[compatibility matrix](../glossary.md#lock-compatibility)** tells you who waits. This is SQL Server's matrix ("yes" means both can be granted at once):
 
 | Requested ↓ / Held → | IS | IX | S | SIX | U | X |
 |---|---|---|---|---|---|---|
@@ -104,7 +104,7 @@ them in a compact bitmap per page in its lock system.
 ### 2.3 Lock waits and timeouts
 
 When a request is incompatible with a granted lock, the requester **waits**. By default most engines wait forever (or a
-long time), which turns a forgotten transaction into an outage. Set a limit where it matters:
+long time), which turns a forgotten transaction into an outage. Set a **[lock timeout](../glossary.md#lock-timeout)** where it matters:
 
 | Engine | Setting | Default | Error on timeout |
 |---|---|---|---|
@@ -165,7 +165,7 @@ PostgreSQL waits for a row lock (the row's `xmax` names the holder's transaction
 **SQL Server** has a deadlock monitor thread that runs every 5 seconds (more often while it keeps finding deadlocks). It
 picks the victim by `SET DEADLOCK_PRIORITY` first and then by the cheapest transaction to roll back, and the victim
 receives error 1205: *Transaction (Process ID 53) was deadlocked on lock resources with another process and has been
-chosen as the deadlock victim. Rerun the transaction.* The full **deadlock graph** is captured by the built-in
+chosen as the deadlock victim. Rerun the transaction.* The full **[deadlock graph](../glossary.md#deadlock-graph)** is captured by the built-in
 `system_health` Extended Events session:
 
 ```sql
@@ -223,7 +223,7 @@ Prevention matters more than detection:
 ### 2.5 Blocking chains and kill
 
 A **[blocking chain](../glossary.md#blocking-chain)** is a queue of waits: C waits for B, B waits for A, and A is not waiting
-for anything; it is just slow or idle in an open transaction. A is the **head blocker**. Killing B or C does nothing;
+for anything; it is just slow or idle in an open transaction. A is the **[head blocker](../glossary.md#head-blocker)**. Killing B or C does nothing;
 you must find A. Every engine exposes "who blocks whom":
 
 ```sql
@@ -272,7 +272,7 @@ until the rollback finishes.
 ### 2.6 MVCC: readers do not wait for writers
 
 **[MVCC](../glossary.md#mvcc)** (multi-version concurrency control) keeps several versions of a row. A writer creates a new
-version; a reader picks the version that was committed as of its **snapshot** (the moment its statement or transaction
+version; a reader picks the version that was committed as of its **[snapshot](../glossary.md#snapshot-mvcc)** (the moment its statement or transaction
 began, depending on the isolation level). Readers therefore never wait for writers, and writers never wait for readers.
 Writers still wait for other writers of the same row.
 
@@ -320,12 +320,12 @@ SELECT xmin, xmax, ctid, total FROM lab.orders WHERE id = 1;
 --   812 |  813 | (0,1) | 120.50      -- B sees the old version; xmax shows who is replacing it
 ```
 
-`xmin` is the id of the transaction that created the version, `xmax` the id of the one that deleted or replaced (or
+[`xmin`](../glossary.md#xmin-xmax) is the id of the transaction that created the version, `xmax` the id of the one that deleted or replaced (or
 locked) it, and `ctid` the physical address ([6](06-storage-internals.md)). After A commits, B's next statement (READ
-COMMITTED) sees `(0,7)`. Version `(0,1)` is now **dead**: no future snapshot can see it, but it still occupies space until
+COMMITTED) sees `(0,7)`. Version `(0,1)` is now **[dead](../glossary.md#dead-tuple)**: no future snapshot can see it, but it still occupies space until
 VACUUM removes it.
 
-**SQL Server** offers two row-versioning options, both off by default in SQL Server 2022:
+**SQL Server** offers two [row-versioning](../glossary.md#row-versioning) options, both off by default in SQL Server 2022:
 
 ```sql
 -- Use a scratch database: the option needs exclusive access and changes behaviour for every session
@@ -379,7 +379,7 @@ SELECT Total FROM dbo.Orders WITH (UPDLOCK, ROWLOCK) WHERE Id = 1;
 SELECT TOP (1) Id FROM dbo.Orders WITH (UPDLOCK, READPAST, ROWLOCK) ORDER BY Id;   -- READPAST ≈ SKIP LOCKED
 ```
 
-`SKIP LOCKED` (PostgreSQL 9.5+, MySQL 8.0+, Oracle) turns a table into a safe work queue for many workers: each worker
+[`SKIP LOCKED`](../glossary.md#skip-locked) (PostgreSQL 9.5+, MySQL 8.0+, Oracle) turns a table into a safe work queue for many workers: each worker
 locks a different row and none waits.
 
 **[Optimistic concurrency](../glossary.md#optimistic-concurrency)**: read without locking, and at write time check that the
@@ -428,7 +428,7 @@ and its `xmax` is empty, aborted, or not yet in the past. Whether a transaction 
 commit log (`pg_xact`); the first reader that looks it up sets **hint bits** on the tuple, which is why the first `SELECT`
 after a big load can *write* pages.
 
-**HOT updates.** If an update changes no indexed column and the new version fits on the same page, PostgreSQL makes a
+**[HOT updates](../glossary.md#hot-update).** If an update changes no indexed column and the new version fits on the same page, PostgreSQL makes a
 *heap-only tuple*: no new index entries, and the index keeps pointing to the start of the chain on the page (Figure 10.3).
 HOT is the main reason to leave free space with a lower `fillfactor` on update-heavy tables ([6](06-storage-internals.md)).
 `pg_stat_user_tables.n_tup_hot_upd` versus `n_tup_upd` tells you how often it works.
@@ -439,7 +439,7 @@ records the free space in the free space map; it removes the index entries that 
 [7](07-indexes.md)); and it **freezes** old tuples. Plain `VACUUM` does not shrink the file; space is reused in place.
 `VACUUM FULL` rewrites the table into a new file and needs `ACCESS EXCLUSIVE` for the whole time.
 
-**Autovacuum** vacuums a table when its dead tuples exceed `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor ×
+**[Autovacuum](../glossary.md#autovacuum)** vacuums a table when its dead tuples exceed `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor ×
 reltuples` (defaults 50 rows + 20 %). On a 100-million-row table that is 20 million dead rows: large hot tables usually
 need a per-table lower scale factor (`ALTER TABLE … SET (autovacuum_vacuum_scale_factor = 0.01)`).
 
@@ -455,8 +455,8 @@ SELECT pid, state, now() - xact_start AS age, backend_xmin FROM pg_stat_activity
 WHERE backend_xmin IS NOT NULL ORDER BY age(backend_xmin) DESC LIMIT 5;
 ```
 
-**Transaction id wraparound.** Transaction ids are 32-bit and compared modulo 2^32, so any id is "in the past" for about
-2 billion ids and then would appear to be "in the future". VACUUM prevents the disaster by **freezing** old tuples (marking
+**[Transaction id wraparound](../glossary.md#transaction-id-wraparound).** Transaction ids are 32-bit and compared modulo 2^32, so any id is "in the past" for about
+2 billion ids and then would appear to be "in the future". VACUUM prevents the disaster by **[freezing](../glossary.md#freezing)** old tuples (marking
 them visible to everyone regardless of id). Autovacuum forces an anti-wraparound vacuum when a table's oldest unfrozen id
 is older than `autovacuum_freeze_max_age` (default 200 million). If freezing still cannot keep up, PostgreSQL first warns
 and finally refuses to assign new transaction ids until the database is vacuumed. Monitor it:
@@ -471,7 +471,7 @@ When RCSI or SNAPSHOT is enabled, every modified row gets a 14-byte versioning t
 pointer), and the previous version is copied to the version store before the change. A reader that finds a row newer
 than its snapshot follows the pointer chain to the right version.
 
-- **RCSI** gives statement-level snapshots at READ COMMITTED. Existing code runs unchanged, but semantics change: code
+- **[RCSI](../glossary.md#rcsi)** (read committed snapshot isolation) gives statement-level snapshots at READ COMMITTED. Existing code runs unchanged, but semantics change: code
   that relied on a read *waiting* for a writer (for example "check, then insert" logic) may now read the old value. The
   table hint `WITH (READCOMMITTEDLOCK)` restores the locking read where needed.
 - **SNAPSHOT** gives transaction-level snapshots. If the transaction updates a row that another transaction changed
@@ -493,7 +493,7 @@ copy. Readers never take row locks; row locks are just a byte in the row pointin
 escalates.
 
 The weak point is undo space. If the undo a long query needs has been overwritten, the query fails with
-**`ORA-01555: snapshot too old`**. `UNDO_RETENTION` (seconds, default 900) is a target, not a guarantee, unless the undo
+**[`ORA-01555: snapshot too old`](../glossary.md#ora-01555)**. `UNDO_RETENTION` (seconds, default 900) is a target, not a guarantee, unless the undo
 tablespace has `RETENTION GUARANTEE` (then writers may fail instead). The same undo makes **flashback query** possible:
 
 ```sql
@@ -504,14 +504,14 @@ SELECT id, total FROM shop.orders AS OF TIMESTAMP (SYSTIMESTAMP - INTERVAL '5' M
 
 Each clustered-index record has hidden columns: `DB_TRX_ID` (last transaction that changed it), `DB_ROLL_PTR` (pointer to
 the undo record holding the previous version) and, for tables without a primary key, `DB_ROW_ID`. A consistent read builds a
-**read view** (the list of transactions active at that moment); a record whose `DB_TRX_ID` is not visible to the view is
+**[read view](../glossary.md#read-view)** (the list of transactions active at that moment); a record whose `DB_TRX_ID` is not visible to the view is
 rebuilt by following `DB_ROLL_PTR` into the undo log. At REPEATABLE READ the read view is created at the first consistent
 read of the transaction (or at `START TRANSACTION WITH CONSISTENT SNAPSHOT`); at READ COMMITTED, at each statement.
 Secondary-index records have no `DB_TRX_ID`; when the page might contain recent changes, InnoDB has to check the clustered
 record, which can make a "covering" secondary index less covering than it looks.
 
 Purge threads remove undo records and delete-marked rows once no read view needs them. The backlog is the
-**history list length** in `SHOW ENGINE INNODB STATUS` (section `TRANSACTIONS`); a value that keeps climbing means a long
+**[history list length](../glossary.md#history-list-length)** in `SHOW ENGINE INNODB STATUS` (section `TRANSACTIONS`); a value that keeps climbing means a long
 transaction is holding purge back.
 
 InnoDB locking reads (`FOR UPDATE`, `FOR SHARE`, and the search phase of `UPDATE` / `DELETE`) lock **index records**, and at

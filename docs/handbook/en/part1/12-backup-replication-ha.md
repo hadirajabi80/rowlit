@@ -52,9 +52,9 @@ The backup kinds:
 
 And the two forms:
 
-- **Physical** backups copy data files or pages (`pg_basebackup`, SQL Server `BACKUP DATABASE`, Oracle RMAN, Percona
+- **[Physical](../glossary.md#physical-backup)** backups copy data files or pages (`pg_basebackup`, SQL Server `BACKUP DATABASE`, Oracle RMAN, Percona
   XtraBackup). Fast to restore, same engine version and platform only, always the whole cluster or database.
-- **Logical** backups export SQL or rows (`pg_dump`, `mysqldump`, Oracle Data Pump, `.dump` in SQLite). Portable across
+- **[Logical](../glossary.md#logical-backup)** backups export SQL or rows (`pg_dump`, `mysqldump`, Oracle Data Pump, `.dump` in SQLite). Portable across
   versions, selectable per table, but slow to restore for large databases (indexes are rebuilt) and they capture one
   moment only (no PITR).
 
@@ -147,7 +147,7 @@ flashback logging is on, `FLASHBACK DATABASE TO TIMESTAMP …`, which is much fa
 
 A backup that has never been restored is a hope, not a backup. Common ways backups turn out to be useless: the log chain
 has a gap, the archive command silently failed for weeks, the encryption key or certificate was not backed up, the
-backup is on the same storage that failed, or the restore takes 14 hours against an RTO of 2. Practice:
+backup is on the same storage that failed, or the restore takes 14 hours against an RTO of 2. Practice with regular **[restore drills](../glossary.md#restore-drill)**:
 
 - **Restore regularly** to a separate server and run checks (row counts, `DBCC CHECKDB` on SQL Server, `pg_amcheck` on
   PostgreSQL, application smoke tests). Measure the time: that is your real RTO.
@@ -226,9 +226,9 @@ sequenceDiagram
     end
 ```
 
-- **Asynchronous** replication adds no latency to commits, but when the primary dies, the transactions that had not yet
+- **[Asynchronous](../glossary.md#asynchronous-replication)** replication adds no latency to commits, but when the primary dies, the transactions that had not yet
   reached the replica are lost if you fail over. The data-loss window is the replication lag.
-- **Synchronous** replication makes COMMIT wait for at least one standby to confirm, so a failover to that standby loses
+- **[Synchronous](../glossary.md#synchronous-replication)** replication makes COMMIT wait for at least one standby to confirm, so a failover to that standby loses
   nothing. The cost is one network round trip per commit, and if no synchronous standby is reachable, commits **wait**
   (PostgreSQL) or the system must be configured to fall back.
 
@@ -242,7 +242,7 @@ waits until one replica has *received* (not applied) the events.
 
 ### 2.6 Failover, split brain and fencing
 
-**[Failover](../glossary.md#failover)** promotes a replica to primary when the primary fails. *Switchover* is the planned
+**[Failover](../glossary.md#failover)** promotes a [replica to primary](../glossary.md#primary-replica) when the primary fails. *[Switchover](../glossary.md#switchover)* is the planned
 version (for patching), with no data loss. A failover has three hard parts:
 
 1. **Detecting failure.** A primary that is slow, or unreachable from the monitor only, looks dead. Timeouts that are too
@@ -287,7 +287,7 @@ read 0 while the replica has not even received the latest events.
 ### 2.8 Table partitioning
 
 **[Table partitioning](../glossary.md#table-partitioning)** splits one logical table into physical pieces by the value of
-a **partition key**:
+a **[partition key](../glossary.md#partition-key-table)**:
 
 - **range**: by intervals, typically time (`order_date` per month);
 - **list**: by discrete values (`country_id IN (1, 2)` in one partition, `3` in another);
@@ -380,7 +380,7 @@ one customer form one partition on the same replicas (`engine/tests/docker/seed-
 
 The costs:
 
-- **Cross-shard queries** ("revenue per country") must ask every shard and merge the results (scatter-gather); joins
+- **Cross-shard queries** ("revenue per country") must ask every shard and merge the results ([scatter-gather](../glossary.md#scatter-gather)); joins
   between rows on different shards are expensive or unsupported.
 - **Cross-shard transactions** need a distributed protocol such as two-phase commit ([3.4](#34-distributed-transactions-and-two-phase-commit)).
 - **[Rebalancing](../glossary.md#rebalancing)**: adding a shard means moving data while the system runs. Consistent hashing
@@ -496,7 +496,7 @@ Engine support: PostgreSQL `PREPARE TRANSACTION 'tx1'` / `COMMIT PREPARED 'tx1'`
 through the Microsoft Distributed Transaction Coordinator (MSDTC), Oracle distributed transactions over database links
 (in-doubt ones appear in `DBA_2PC_PENDING`).
 
-Many modern systems avoid 2PC across services and use a **saga** instead: a sequence of local transactions, each with a
+Many modern systems avoid 2PC across services and use a **[saga](../glossary.md#saga)** instead: a sequence of local transactions, each with a
 compensating action ("refund payment") that undoes it if a later step fails, often driven by events from an *outbox* table
 that is written in the same local transaction as the business change. Sagas trade isolation (others can see intermediate
 states) for availability.

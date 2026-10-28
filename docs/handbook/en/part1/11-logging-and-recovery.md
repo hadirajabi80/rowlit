@@ -25,9 +25,9 @@ new and some old.
 
 The solution is the same one an accountant uses: first write the intended change as one line in a journal, in order,
 then update the ledgers at leisure. The database's journal is the **[write-ahead log](../glossary.md#wal)** (WAL; SQL
-Server calls it the *transaction log*, Oracle and MySQL the *redo log*). Appending to the end of one file is fast, and
+Server calls it the *[transaction log](../glossary.md#transaction-log)*, Oracle and MySQL the *redo log*). Appending to the end of one file is fast, and
 once the commit line is safely on disk the change can always be rebuilt from the log, even if the data pages were never
-written. After a crash the engine reads the log, **redoes** what was committed but not yet in the pages, and **undoes**
+written. After a crash the engine runs **[crash recovery](../glossary.md#crash-recovery)**: it reads the log, **redoes** what was committed but not yet in the pages, and **undoes**
 what was in the pages but never committed. That is how the "A" and the "D" of ACID ([9](09-transactions-and-isolation.md#21-acid-letter-by-letter)) are kept.
 
 ## 2. How it works (practitioner)
@@ -41,7 +41,7 @@ The whole technique rests on two rules:
 2. **Log before commit.** A transaction counts as committed only when its commit record (and so every record before it)
    is on stable storage.
 
-These rules let the buffer manager be relaxed in two ways, which textbooks call *steal* and *no-force*:
+These rules let the [buffer pool](../glossary.md#buffer-pool) manager be relaxed in two ways, which textbooks call *[steal and no-force](../glossary.md#steal-no-force)*:
 
 - **Steal**: a page changed by an *uncommitted* transaction may be written to disk (for example to free buffer space).
   After a crash such changes must be **[undone](../glossary.md#undo-log)**, so the log (or an undo store) must hold the
@@ -55,16 +55,16 @@ recovery.
 
 ### 2.2 Log records and the LSN
 
-A log record describes one change: which transaction, which page, what changed (physically "bytes 120–128 of page 7 of
+A **[log record](../glossary.md#log-record)** describes one change: which transaction, which page, what changed (physically "bytes 120–128 of page 7 of
 file 16410", or logically "insert key 7 into index X"), and a pointer to the previous record of the same transaction.
 Every record has a **[log sequence number](../glossary.md#lsn)** (LSN), a monotonically increasing position in the log.
-Each data page stores the LSN of the last record applied to it (the *pageLSN*), which is how recovery knows whether a
+Each data page stores the LSN of the last record applied to it (the *[pageLSN](../glossary.md#pagelsn)*), which is how recovery knows whether a
 record has already reached the page.
 
 | Engine | Name of the log | What an LSN looks like | Where to see it |
 |---|---|---|---|
 | PostgreSQL 17 | WAL, 16 MB segment files in `pg_wal/` | `0/1A2B3C4D` (64-bit byte position) | `SELECT pg_current_wal_lsn();` |
-| SQL Server 2022 | transaction log (`.ldf`), divided into virtual log files (VLFs) | `00000025:00000100:0001` (VLF : block : slot) | `sys.dm_db_log_info`, `fn_dblog` (undocumented) |
+| SQL Server 2022 | transaction log (`.ldf`), divided into [virtual log files](../glossary.md#vlf) (VLFs) | `00000025:00000100:0001` (VLF : block : slot) | `sys.dm_db_log_info`, `fn_dblog` (undocumented) |
 | Oracle 23ai | online redo log groups, archived redo logs | SCN (`CURRENT_SCN`) and redo byte address | `SELECT current_scn FROM v$database;` |
 | MySQL 8 InnoDB | redo log (`#innodb_redo/` since 8.0.30) | byte count, `Log sequence number 21673456` | `SHOW ENGINE INNODB STATUS` (section `LOG`) |
 | SQLite 3.4x | rollback journal or `-wal` file | frame number in the WAL | `PRAGMA wal_checkpoint;` |
@@ -121,9 +121,9 @@ concurrent transactions automatically.
 
 ### 2.4 Checkpoints
 
-If the engine never wrote dirty pages, recovery would have to replay the log from the beginning of time. A
+If the engine never wrote [dirty pages](../glossary.md#dirty-page), recovery would have to replay the log from the beginning of time. A
 **[checkpoint](../glossary.md#checkpoint)** bounds the work: it makes sure that all changes before a certain LSN (the
-*redo point*) are in the data files, so recovery can start there and older log can be recycled.
+*[redo point](../glossary.md#redo-point)*) are in the data files, so recovery can start there and older log can be recycled.
 
 **Figure 11.2 — A (fuzzy) checkpoint.**
 
@@ -137,7 +137,7 @@ flowchart TD
     T["Transactions keep running<br/>during the whole checkpoint"] -.-> W
 ```
 
-Modern checkpoints are *fuzzy*: transactions keep running and pages keep changing while the checkpoint writes. Recovery
+Modern checkpoints are *[fuzzy](../glossary.md#fuzzy-checkpoint)*: transactions keep running and pages keep changing while the checkpoint writes. Recovery
 therefore starts at the redo point remembered at the *start* of the checkpoint, not at the checkpoint record.
 
 The trade-off is between run time and recovery time. Frequent checkpoints mean short recovery but more page writes (and,
@@ -196,7 +196,7 @@ corrupts the database by itself (except where marked); they decide how many of t
 |---|---|---|---|
 | PostgreSQL | `synchronous_commit` | `on` | `off`: COMMIT returns before the WAL flush; a crash can lose the last ≈ 3 × `wal_writer_delay` (default 200 ms) of commits, never corrupts. Can be set per transaction. |
 | PostgreSQL | `fsync` | `on` | `off`: **can corrupt the cluster** on an OS crash or power loss. Only for throw-away test data. |
-| SQL Server | delayed durability | `DISABLED` | `ALTER DATABASE … SET DELAYED_DURABILITY = ALLOWED` then `COMMIT WITH (DELAYED_DURABILITY = ON)`: the log buffer is flushed later (when full, or by `sp_flush_log`). |
+| SQL Server | [delayed durability](../glossary.md#delayed-durability) | `DISABLED` | `ALTER DATABASE … SET DELAYED_DURABILITY = ALLOWED` then `COMMIT WITH (DELAYED_DURABILITY = ON)`: the log buffer is flushed later (when full, or by `sp_flush_log`). |
 | Oracle | `COMMIT_WAIT`, `COMMIT_LOGGING` | `WAIT`, `IMMEDIATE` | `COMMIT WRITE BATCH NOWAIT`: commit does not wait for LGWR. |
 | MySQL InnoDB | `innodb_flush_log_at_trx_commit` | `1` (write and flush at each commit) | `2`: write to the OS at commit, flush once per second (survives a MySQL crash, not an OS crash); `0`: write and flush once per second. |
 | MySQL | `sync_binlog` | `1` | `0` or `N`: the binary log may miss transactions that InnoDB committed, which breaks replicas and point-in-time recovery. |
@@ -265,10 +265,10 @@ Useful tools and facts:
 
 The `.ldf` file is a circular sequence of **VLFs**. SQL Server logs both redo and undo information in the same records.
 At startup the error log shows the three ARIES phases literally, for example *Recovery of database 'shop' (5) is 50%
-complete … Phase 2 of 3*. The **recovery model** decides when the log can be truncated: `SIMPLE` (at checkpoint),
+complete … Phase 2 of 3*. The **[recovery model](../glossary.md#recovery-model)** decides when the log can be truncated: `SIMPLE` (at checkpoint),
 `FULL` (only after a log backup), `BULK_LOGGED` (like FULL, but bulk operations log only page allocations).
 
-**Accelerated Database Recovery** (ADR, SQL Server 2019+) changes the picture: row versions are kept in a persistent
+**[Accelerated Database Recovery](../glossary.md#accelerated-database-recovery)** (ADR, SQL Server 2019+) changes the picture: row versions are kept in a persistent
 version store inside the database, so undo becomes a *logical revert* (point readers to the old version) that is
 practically instant, and the log can be truncated even while a long transaction is open. Long rollbacks and long crash
 recoveries are the problems ADR exists to remove.
@@ -277,7 +277,7 @@ recoveries are the problems ADR exists to remove.
 
 Oracle writes redo into a **log buffer**; the log writer process (LGWR) flushes it at commit, when the buffer is a third
 full, and every few seconds. Online redo logs are a ring of at least two **groups** (usually with mirrored members); at a
-*log switch*, in `ARCHIVELOG` mode, the archiver copies the full group to an **archived redo log** before it can be reused.
+*log switch*, in [`ARCHIVELOG` mode](../glossary.md#archivelog-mode), the archiver copies the full group to an **archived redo log** before it can be reused.
 In `NOARCHIVELOG` mode only crash recovery is possible, not media recovery or PITR.
 
 Undo lives in an undo tablespace, and every change to an undo block is itself protected by redo. So *instance recovery*
@@ -325,11 +325,11 @@ protections can be turned off safely.
 
 SQLite shows the two basic log designs side by side in one small engine:
 
-- **Rollback journal** (`journal_mode = DELETE`, the default; also `TRUNCATE`, `PERSIST`): before changing a page, SQLite
+- **Rollback [journal](../glossary.md#journal)** (`journal_mode = DELETE`, the default; also `TRUNCATE`, `PERSIST`): before changing a page, SQLite
   copies the **original** page into the `-journal` file and syncs it. Commit = sync the database file, then delete
   (or truncate) the journal. After a crash a "hot" journal is played back to restore the old pages. This is an **undo
   log**.
-- **WAL** (`journal_mode = WAL`): changed pages are appended to the `-wal` file; the database file is not touched until a
+- **[WAL mode](../glossary.md#wal-mode)** (`journal_mode = WAL`): changed pages are appended to the `-wal` file; the database file is not touched until a
   checkpoint. Commit = append a commit frame and sync the WAL. Readers find the newest version of a page through the
   `-shm` index. After a crash, frames after the last commit frame are ignored. This is a **redo log**, and it is why WAL
   mode allows readers during a write ([10](10-concurrency-locking-mvcc.md#36-sqlite-one-writer-per-file)).

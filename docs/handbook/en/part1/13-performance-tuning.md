@@ -65,7 +65,7 @@ Four rules make the loop work:
 - **[Throughput](../glossary.md#throughput)** is how many operations finish per unit of time (queries or transactions per
   second).
 
-They are linked by **Little's law**: *concurrency = throughput × latency*. If each query takes 10 ms and 50 sessions are
+They are linked by **[Little's law](../glossary.md#littles-law)**: *concurrency = throughput × latency*. If each query takes 10 ms and 50 sessions are
 busy at once, the system completes at most 5,000 queries per second; to go higher you must cut latency or add parallel
 capacity. And they fight each other near saturation: as a resource approaches 100 % utilisation, queues form and latency
 grows very fast, long before throughput stops growing. A server at 95 % CPU is not "using its hardware well"; it is
@@ -91,7 +91,7 @@ SELECT calls, round(total_exec_time) AS total_ms, round(mean_exec_time, 2) AS me
 FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;
 ```
 
-Sort by **total** time first: a 2 ms query called 3 million times a day costs more than a 20 s report run once.
+In [`pg_stat_statements`](../glossary.md#pg-stat-statements), sort by **total** time first: a 2 ms query called 3 million times a day costs more than a 20 s report run once.
 `shared_blks_read` (blocks read from outside shared buffers) against `shared_blks_hit` tells you whether a statement is
 I/O-bound. Other sources: `pg_stat_activity` (what runs *now*, and its `wait_event`), `log_min_duration_statement = 500`
 (log every statement slower than 500 ms), the `auto_explain` module (log the plans of slow statements), `track_io_timing`
@@ -187,7 +187,7 @@ Each entry: the symptom, an example on `shop`, the fix.
 
 #### N+1 queries
 
-The application runs one query for a list and then one more query **per item**: 1 + N
+In the **[N+1](../glossary.md#n-plus-1)** pattern the application runs one query for a list and then one more query **per item**: 1 + N
 **[round trips](../glossary.md#round-trip)** (a request sent to the server and its answer coming back).
 
 ```sql
@@ -237,7 +237,7 @@ function or an expression forces the engine to compute it for every row:
 
 #### Implicit conversion
 
-When the two sides of a comparison have different types, the engine converts one of them. If it converts the **column**,
+When the two sides of a comparison have different types, the engine converts one of them (an **[implicit conversion](../glossary.md#implicit-conversion)**). If it converts the **column**,
 the predicate stops being SARGable, although the SQL looks innocent:
 
 - **SQL Server**: a `VARCHAR` column compared with an `NVARCHAR` parameter (what .NET sends for a `string` unless the
@@ -258,7 +258,7 @@ index. `OR` on the *same* column (`status = 'new' OR status = 'paid'`) is an `IN
 
 #### Over-indexing
 
-Every index speeds up some reads and slows down **every** write: each `INSERT` updates every index, each `UPDATE` of an
+**[Over-indexing](../glossary.md#over-indexing)** means more indexes than the workload needs. Every index speeds up some reads and slows down **every** write: each `INSERT` updates every index, each `UPDATE` of an
 indexed column too, and in PostgreSQL an index on an updated column prevents HOT updates ([10](10-concurrency-locking-mvcc.md#32-postgresql-mvcc-in-detail)).
 Indexes also compete for memory. Find unused ones (and check the replicas too before dropping, since usage statistics are per
 server):
@@ -302,7 +302,7 @@ DELETE FROM orders o USING batch b WHERE o.id = b.id;
 
 A loop that fetches a row, computes, and writes it back (a cursor in a stored procedure, or a loop in the application) does
 in N statements what one set-based `UPDATE … FROM` or `MERGE` does in one, with N times the round trips, log flushes and
-plan executions. SQL people call it RBAR, "row by agonizing row".
+plan executions. SQL people call it [RBAR](../glossary.md#rbar), "row by agonizing row".
 
 #### Smaller items worth a check
 
@@ -339,7 +339,7 @@ recreate them afterwards; measure, because the rebuild also costs time and the t
 
 ### 2.7 Pagination: offset or keyset
 
-The usual way to show page 500 of the orders list:
+The usual way to show page 500 of the orders list is **[offset pagination](../glossary.md#offset-pagination)**:
 
 ```sql
 SELECT id, order_date, total FROM orders ORDER BY order_date, id LIMIT 20 OFFSET 9980;
@@ -399,7 +399,7 @@ A **[connection pool](../glossary.md#connection-pool)** keeps open connections a
 - **Client-side pools** live in the driver or the application: ADO.NET (including Npgsql and Microsoft.Data.SqlClient) pools
   by connection string automatically, Java uses HikariCP. `Open()` takes a connection from the pool, `Close()` returns it;
   the driver resets session state on reuse (SQL Server `sp_reset_connection`).
-- **Server-side poolers** sit between many clients and the server: PgBouncer and Pgpool-II for PostgreSQL, ProxySQL for
+- **Server-side poolers** sit between many clients and the server: [PgBouncer](../glossary.md#pgbouncer) and Pgpool-II for PostgreSQL, ProxySQL for
   MySQL, Oracle DRCP, cloud proxies. PgBouncer has three modes: *session* (a server connection per client session), *transaction*
   (a server connection per transaction, the most useful one) and *statement*. Transaction mode breaks everything that lives in
   the session across transactions: `SET` without `LOCAL`, temporary tables, session advisory locks, `LISTEN`, and (before
@@ -439,7 +439,7 @@ The fastest query is the one you do not run. Layers, from the database outwards:
 
 ### 3.1 ORMs and N+1
 
-Object-relational mappers make N+1 easy because **lazy loading** turns an innocent property access (`customer.Orders`) into a
+Object-relational mappers make N+1 easy because **[lazy loading](../glossary.md#lazy-loading)** turns an innocent property access (`customer.Orders`) into a
 query. Loading 100 customers and touching each one's orders runs 101 queries. The fixes are the ORM's eager-loading features
 (`Include` in Entity Framework, `JOIN FETCH` in JPA, `select_related` / `prefetch_related` in Django), which issue either one
 join or one extra query with an `IN` list. Two cautions: joining several collections at once multiplies rows (a cartesian

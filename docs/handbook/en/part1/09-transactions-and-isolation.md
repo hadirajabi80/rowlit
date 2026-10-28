@@ -54,7 +54,7 @@ Two warnings that save many arguments:
 
 ### 2.2 Starting and ending a transaction
 
-Every relational engine has three verbs: *begin*, *commit* (make the changes permanent and visible) and *rollback*
+Every relational engine has three verbs: *begin*, *[commit](../glossary.md#commit)* (make the changes permanent and visible) and *[rollback](../glossary.md#rollback)*
 (undo them). The words differ.
 
 #### PostgreSQL 17
@@ -80,7 +80,7 @@ COMMIT TRANSACTION;             -- or ROLLBACK TRANSACTION
 SELECT @@TRANCOUNT;             -- nesting depth of BEGIN TRAN; 0 = no transaction
 ```
 
-SQL Server is in autocommit mode by default. `SET IMPLICIT_TRANSACTIONS ON` switches to the Oracle-like style where
+SQL Server is in autocommit mode by default. `SET IMPLICIT_TRANSACTIONS ON` switches to a **[manual transaction](../glossary.md#manual-transaction)** style (as in Oracle) where
 the first data statement opens a transaction that stays open until you commit. Nested `BEGIN TRAN` only increments
 `@@TRANCOUNT`; the inner `COMMIT` decrements it and only the outermost commit really commits, while any `ROLLBACK`
 (without a savepoint name) rolls back everything. Most DDL is transactional.
@@ -102,7 +102,7 @@ COMMIT;
 SET autocommit = 0;             -- session-wide manual mode, like Oracle
 ```
 
-`autocommit = 1` is the default. DDL (and some other statements such as `LOCK TABLES`) causes an **implicit commit**.
+`autocommit = 1` is the default. DDL (and some other statements such as `LOCK TABLES`) causes an **[implicit commit](../glossary.md#implicit-commit)**.
 Transactions exist only for transactional storage engines; a `MyISAM` table ignores `ROLLBACK`.
 
 #### SQLite 3.4x
@@ -123,7 +123,7 @@ time for the whole database file, which makes it serializable by construction ([
   MergeTree table is atomic (it creates one part, see [15](15-oltp-vs-olap-columnar.md)); experimental transactions
   (`allow_experimental_transactions`) exist but are not something to rely on.
 - **Cassandra 4/5** has no multi-row transactions. A `BATCH` (logged batch) guarantees that all its writes are
-  *eventually* applied, but other clients can observe them one by one. **Lightweight transactions** (`INSERT … IF NOT
+  *eventually* applied, but other clients can observe them one by one. **[Lightweight transactions](../glossary.md#lightweight-transaction)** (`INSERT … IF NOT
   EXISTS`, `UPDATE … IF col = x`) give compare-and-set on one partition using Paxos. General transactions (Accord,
   CEP-15) were not part of the 5.0 release.
 - **Snowflake** autocommits by default; `BEGIN` … `COMMIT` opens an explicit transaction. Its only isolation level is
@@ -409,7 +409,7 @@ A practical rule set:
 2. Need a consistent multi-query report (totals that add up across several queries)? Use REPEATABLE READ / SNAPSHOT
    for that transaction, or a read-only transaction.
 3. Have rules that span rows (limits, uniqueness across tables, "at least one")? Use SERIALIZABLE for those transactions
-   and **retry on serialization failure**, or lock a parent row.
+   and **retry on [serialization failure](../glossary.md#serialization-failure)**, or lock a parent row.
 4. Never use READ UNCOMMITTED / `NOLOCK` for anything a person will act on. Besides dirty reads, `NOLOCK` scans in SQL
    Server can return a row twice or skip it when a page splits during the scan.
 
@@ -450,7 +450,7 @@ relation). Indexes on the filtered columns make SSI more precise.
 
 ### 3.2 Read skew and the snapshot
 
-**Read skew** is the multi-row cousin of the non-repeatable read: a report reads `orders` and then `sales.invoices`,
+**[Read skew](../glossary.md#read-skew)** is the multi-row cousin of the non-repeatable read: a report reads `orders` and then `sales.invoices`,
 and a transfer commits between the two reads, so the report sees the "before" of one table and the "after" of the other.
 READ COMMITTED allows it because each statement gets a new snapshot. A single statement is always consistent with
 itself in MVCC engines (statement-level snapshot), so one query joining both tables is safe even at READ COMMITTED,
