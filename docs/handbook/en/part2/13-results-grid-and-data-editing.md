@@ -115,7 +115,7 @@ sequenceDiagram
     participant T as DataTabView
     participant Q as runner.runSql
     participant E as Engine session
-    T->>Q: describe probe (label data, 1 row)
+    T->>Q: describe probe, only if an initial filter needs column kinds
     Q->>E: execute SELECT * ... WHERE 1 = 0
     E-->>T: columns
     opt keyless table

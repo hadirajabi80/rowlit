@@ -185,6 +185,10 @@ A short tag that identifies a version of a response. Rowlit's is a hash of conne
 ### explorer node
 One row of the explorer tree with a stable string id (`c:`, `d:`, `s:`, `f:`, `o:`, `sq:` prefixes). *Owner: II-10.*
 
+<a id="execute-routine-dialog"></a>
+### execute routine dialog
+The dialog that calls a procedure or function with typed parameters, all passed as bind values, and shows OUT values and result sets. *Owner: II-14.*
+
 <a id="export-scope"></a>
 ### export scope
 What an export writes: `loaded`, `selection`, `filtered`, `all` or `rerun`. The last three run a fresh query in the engine with no row cap. *Owner: II-15.*
