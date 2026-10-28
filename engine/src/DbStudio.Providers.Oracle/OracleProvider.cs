@@ -56,7 +56,7 @@ public sealed class OracleProvider : IDbProvider, IObjectBrowserProvider, IDatab
     public string Id => "oracle";
     public string DisplayName => "Oracle Database";
     public Dialect Dialect => Dialect.PlSql;
-    public ConnectionFormSpec FormSpec => OracleConnectionStrings.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(OracleConnectionStrings.FormSpec, "Connect through an SSH server (bastion / jump host). Needs the Basic connection type (host, port, service name or SID)."); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new OracleDdlGenerator();
 
     /// <summary>No server-side syntax diagnostics for Oracle in M1 (D-5).</summary>

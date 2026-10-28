@@ -27,7 +27,7 @@ public sealed class MongoProvider : IDataSourceProvider
     public string Id => "mongodb";
     public string DisplayName => "MongoDB";
     public SourceKind Kind => SourceKind.Document;
-    public ConnectionFormSpec FormSpec => Spec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(Spec, "Connect through an SSH server (bastion / jump host). A mongodb:// string with one host (direct connection); mongodb+srv:// is not supported."); // WP-SSH
 
     public static ConnectionFormSpec Spec { get; } = new(
     [

@@ -80,7 +80,7 @@ public sealed partial class ChAdminService(ConnectionStore connections, ClickHou
 
     private async Task<ChConnection> OpenAsync(string cid, CancellationToken ct)
     {
-        var profile = Profile(cid);
+        var profile = await connections.ResolveForOpenAsync(Profile(cid), ct).ConfigureAwait(false); // WP-SSH
         return await ChConnections.OpenAsync(profile, connections.GetPassword(cid), null, null, ct, provider.Handler).ConfigureAwait(false);
     }
 

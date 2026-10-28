@@ -122,7 +122,8 @@ public sealed class ConnectionStringTests
     {
         var spec = new SqlServerProvider().FormSpec;
         Assert.Equal(new[] { "server", "auth", "user", "password", "database", "encrypt", "trustServerCertificate", "connectTimeout" },
-            spec.Fields.Select(f => f.Key));
+            spec.Fields.Where(f => f.Section is null).Select(f => f.Key)); // WP-SSH: the SSH block follows
+        Assert.Contains(spec.Fields, f => f.Key == "ssh.enabled" && f.Section == "ssh");
         var auth = spec.Fields.Single(f => f.Key == "auth");
         Assert.Equal(new[] { "sql", "windows" }, auth.Options!.Select(o => o.Value));
         Assert.Equal("sql", auth.Default!.GetValue<string>());

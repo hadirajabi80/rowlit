@@ -20,6 +20,7 @@ import { useSystemTypes } from '../../store/systemTypes';
 import { useSourceClients } from '../../store/sourceClients';
 import { connectionActivity, useSessions, type ConnectionActivity } from '../../store/sessions';
 import { connColorCss, connColorName } from '../../theme/connColors';
+import { sshVia } from '../../lib/sshTunnel'; // WP-SSH
 import { ownScopeColor, readScopeColors, resolveScopeColor, scopeColorLabel } from '../../lib/scopeColors';
 import { showContextMenu } from '../common/Menu';
 import { ColumnIcon, DatabaseIcon, ObjectIcon } from '../common/icons';
@@ -582,7 +583,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   const color = conn ? connColorCss(conn.color) : undefined;
   const title =
     r.kind === 'column' ? `${r.label} ${r.detail ?? ''}${r.column?.pk ? ' · primary key' : ''}${r.column?.fk ? ' · foreign key' : ''}`
-      : r.kind === 'connection' && conn ? `${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}${conn.readOnly ? ' · read-only' : ''}`
+      : r.kind === 'connection' && conn ? `${conn.name}${conn.color ? ` (${connColorName(conn.color)})` : ''}${conn.readOnly ? ' · read-only' : ''}${sshVia(conn.props) ? ` · via SSH ${sshVia(conn.props)}` : ''}`
         : r.kind === 'status' && r.status === 'error' ? r.label
         : r.kind === 'query' && r.savedQuery ? savedQueryTooltip(r.savedQuery.name, r.savedQuery.description, r.savedQuery.sql)
           : scopeNode && scopeText ? `${r.label} · ${scopeText}`

@@ -112,10 +112,15 @@ export class MockEngine {
   test(profile: { providerId: string; props: Record<string, unknown> }) {
     const p = profile.props;
     const host = String(p.server ?? p.host ?? p.path ?? '');
-    if (!host || /fail|nowhere/i.test(host)) {
-      return { ok: false, serverInfo: null, elapsedMs: 31, error: { code: 'PROVIDER_ERROR', message: `Cannot open ${host || 'connection'}: host not found`, providerCode: 53 } };
+    // WP-SSH: the engine tests the whole chain and names the failing hop
+    const ssh = p['ssh.enabled'] === true ? `${String(p['ssh.user'] ?? '')}@${String(p['ssh.host'] ?? '')}` : null;
+    if (ssh && /fail|nowhere/i.test(String(p['ssh.host'] ?? ''))) {
+      return { ok: false, serverInfo: null, elapsedMs: 12, error: { code: 'SSH_TUNNEL', message: `The SSH server ${String(p['ssh.host'])}:22 is not reachable: No such host is known.` }, hop: 'ssh' as const, via: ssh };
     }
-    return { ok: true, serverInfo: this.serverInfo(profile.providerId, p), elapsedMs: 42, error: null };
+    if (!host || /fail|nowhere/i.test(host)) {
+      return { ok: false, serverInfo: null, elapsedMs: 31, error: { code: 'PROVIDER_ERROR', message: `Cannot open ${host || 'connection'}: host not found`, providerCode: 53 }, ...(ssh ? { hop: 'db' as const, via: ssh } : {}) };
+    }
+    return { ok: true, serverInfo: this.serverInfo(profile.providerId, p), elapsedMs: 42, error: null, ...(ssh ? { via: ssh } : {}) };
   }
   serverInfo(providerId: string, props: Record<string, unknown>) {
     if (providerId === 'sqlserver') return { version: 'Microsoft SQL Server 2022 (RTM-CU15) - 16.0.4145.4 (X64)', productVersion: '16.0.4145.4', serverName: String(props.server ?? 'HOST'), user: String(props.user ?? 'sa'), database: String(props.database || 'master') };

@@ -13,7 +13,7 @@ public sealed partial class SqlServerProvider : IDbProvider, IObjectBrowserProvi
     public string Id => "sqlserver";
     public string DisplayName => "Microsoft SQL Server";
     public Dialect Dialect => Dialect.TSql;
-    public ConnectionFormSpec FormSpec => SqlServerConnectionStrings.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(SqlServerConnectionStrings.FormSpec, "Connect through an SSH server (bastion / jump host). A named instance needs its port: host\\SQLEXPRESS,1433."); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new TSqlDdlGenerator();
     public ISqlDiagnostics? Diagnostics { get; } = new ScriptDomDiagnostics();
     public IdentifierRules Identifiers { get; } = new('[', ']', "preserve", SqlServerReservedWords.All);

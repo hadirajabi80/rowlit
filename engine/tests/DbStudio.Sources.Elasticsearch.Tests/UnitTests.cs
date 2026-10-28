@@ -654,7 +654,7 @@ public sealed class ModuleTests
         Assert.Contains(services, d => d.ServiceType == typeof(IStreamFactory) && Equals(d.ServiceKey, "es.tasks"));
         var p = new EsProvider();
         Assert.Equal(("elasticsearch", SourceKind.Search), (p.Id, p.Kind));
-        Assert.Equal(["url", "auth", "user", "password", "apiKey", "token", "tlsSkipVerify", "caFile", "connectTimeout", "flavor"], p.FormSpec.Fields.Select(f => f.Key));
+        Assert.Equal(["url", "auth", "user", "password", "apiKey", "token", "tlsSkipVerify", "caFile", "connectTimeout", "flavor"], p.FormSpec.Fields.Where(f => f.Section is null).Select(f => f.Key)); // WP-SSH: the SSH block follows
         Assert.Equal(["password", "password", "password"], p.FormSpec.Fields.Where(f => f.Key is "password" or "apiKey" or "token").Select(f => f.Type));
     }
 }

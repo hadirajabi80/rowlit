@@ -12,6 +12,7 @@ import { isForeignSession, useSessions } from '../../store/sessions';
 import { useSourceClients } from '../../store/sourceClients';
 import { useTabs } from '../../store/tabs';
 import { connColorCss, connColorName } from '../../theme/connColors';
+import { sshVia } from '../../lib/sshTunnel'; // WP-SSH
 import { showContextMenu } from '../common/Menu';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { pluralize } from '../common/text';
@@ -152,6 +153,7 @@ export function ConnectionsPanel() {
             <div key={info.connectionId} className="session-row client-row" style={{ ['--conn-color' as string]: connColorCss(conn?.color ?? null) }}>
               {conn ? <ProviderLogo providerId={conn.providerId} color={conn.color} size={14} /> : <Cable size={14} className="muted" />}
               <span className="session-tab">{conn?.name ?? info.connectionId}</span>
+              {sshVia(conn?.props) && <span className="muted" title="Connected through an SSH tunnel">via {sshVia(conn?.props)}</span>}
               <span className="muted session-db" title={info.server?.version ?? undefined}>{info.server?.version ?? ''}</span>
               <div className="flex-1" />
               <span className={`state-badge state-${info.state}`}>{info.state}</span>
@@ -184,6 +186,7 @@ export function ConnectionsPanel() {
                 <ProviderLogo providerId={conn!.providerId} color={conn!.color} size={16} />
                 <span className="session-conn-name">{conn!.name}</span>
                 {conn!.readOnly && <Lock size={12} aria-label="Read-only" />}
+                {sshVia(conn!.props) && <span className="muted" title="Connected through an SSH tunnel">via {sshVia(conn!.props)}</span>}
                 <span className="muted">{list.length ? pluralize(list.length, 'session') : 'catalog loaded'}</span>
                 <div className="flex-1" />
                 <ActivityButton connectionId={cid} name={conn!.name} providerId={conn!.providerId} />

@@ -138,7 +138,8 @@ public static class CassandraEndpoints
         var profile = connections.Get(cid);
         if (!string.Equals(profile.ProviderId, CassandraProvider.ProviderId, StringComparison.OrdinalIgnoreCase))
             throw EngineException.Validation($"Connection '{profile.Name}' is not a Cassandra connection.", new { field = "connectionId" });
-        return await provider.OpenCqlCatalogAsync(profile, connections.GetPassword(cid), ct).ConfigureAwait(false);
+        return await provider.OpenCqlCatalogAsync(await connections.ResolveForOpenAsync(profile, ct).ConfigureAwait(false) /* WP-SSH */,
+            connections.GetPassword(cid), ct).ConfigureAwait(false);
     }
 
     /// <summary>Nodes from system.local + system.peers_v2 (peers before 4.0), with the driver's up/down view.</summary>

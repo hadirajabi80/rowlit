@@ -342,7 +342,9 @@ public sealed class ResourceManager : IAsyncDisposable
         {
             if (_connections.Find(connectionId) is not { } profile || _providers.Find(profile.ProviderId) is not { } provider) return;
             var databases = onlyDatabase is not null ? [onlyDatabase] : _catalog.CachedDatabases(connectionId);
-            provider.ClearPooledConnections(_connections.WithSecrets(profile), _connections.GetPassword(connectionId), databases);
+            // WP-SSH: the pools are keyed by the tunnelled address; no open tunnel = nothing pooled through it
+            if (_connections.CurrentForOpen(profile) is not { } current) return;
+            provider.ClearPooledConnections(current, _connections.GetPassword(connectionId), databases);
         }
         catch (Exception ex)
         {

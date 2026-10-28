@@ -17,7 +17,7 @@ public abstract class MySqlProviderBase : IDbProvider, IObjectBrowserProvider, I
     public abstract string Id { get; }
     public abstract string DisplayName { get; }
     public Dialect Dialect => Dialect.MySql;
-    public ConnectionFormSpec FormSpec => MySqlConnectionStrings.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(MySqlConnectionStrings.FormSpec); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new MySqlDdlGenerator();
     public ISqlDiagnostics? Diagnostics => null;
     public IdentifierRules Identifiers { get; } = new('`', '`', "preserve", MySqlReservedWords.All);

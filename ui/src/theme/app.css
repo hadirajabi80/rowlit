@@ -1895,6 +1895,31 @@ body.resizing-row .splitter-horizontal {
   border-top: 1px solid var(--border);
   margin-top: 4px;
 }
+/* WP-SSH: a collapsible block of provider fields (the SSH tunnel) */
+.form-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.form-section-toggle .form-section-state {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: normal;
+  font-size: var(--fs-xs);
+}
+.form-note {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
 .file-input {
   display: flex;
   gap: 4px;

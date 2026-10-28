@@ -266,3 +266,18 @@ port) and seeds it through a provider session.
 MariaDB 13307, Oracle 15211, ClickHouse 18123 with the credentials above; MySQL/MariaDB as `root`/`shop`): create table, append,
 truncate, upsert, update-only, bad rows with skip and with rollback. A server that does not answer on its port is skipped;
 `DBSTUDIO_IT=0` skips all of them. The parser, type inference, SQL generation and SQLite end-to-end tests always run.
+
+## SSH tunnel (WP-SSH, Rowlit 1.7)
+
+The `ssh` service (profile `ssh`, `linuxserver/openssh-server` with TCP forwarding on) is a bastion on `localhost:12222`,
+user `rowlit` / password `rowlit`. Inside the compose network it reaches the other samples by service name, so a Rowlit
+connection uses host `postgres`, port `5432` with the SSH tunnel switched on (SSH host `localhost`, port `12222`).
+
+```powershell
+docker compose -f engine/tests/docker/compose.yml --profile ssh up -d postgres ssh
+$env:DBSTUDIO_SSH_HOST = "localhost"   # optional: DBSTUDIO_SSH_PORT, DBSTUDIO_SSH_USER, DBSTUDIO_SSH_PASSWORD, DBSTUDIO_SSH_PG_HOST, DBSTUDIO_SSH_PG_PORT
+dotnet test engine/tests/DbStudio.Providers.PostgreSql.Tests --filter PgSshTunnel
+```
+
+Without Docker, `engine/tests/DbStudio.Core.Tests/Tunnels` runs the tunnel against an in-process SSH server
+(Microsoft.DevTunnels.Ssh): password and key logins, host key checks, reconnects, idle close, the failing hop of Test.

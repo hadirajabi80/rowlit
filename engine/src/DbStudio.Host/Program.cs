@@ -96,7 +96,12 @@ try
     services.AddSingleton<ProviderRegistry>();
     // ---- M2 (docs/PLAN-M2.md 1.1): relational + non-relational providers, source clients, streams, jobs.
     services.AddSingleton<SourceRegistry>();
-    services.AddSingleton(sp => new ConnectionStore(paths, sp.GetRequiredService<ISecretStore>(), sp.GetRequiredService<SourceRegistry>()));
+    // WP-SSH: SSH tunnels; every driver open goes through ConnectionStore.ResolveForOpenAsync, which uses them.
+    services.AddSingleton(sp => new DbStudio.Core.Services.Tunnels.SshTunnelService(DbStudio.Core.Services.Tunnels.SshKnownHosts.For(paths),
+        sp.GetRequiredService<ILogger<DbStudio.Core.Services.Tunnels.SshTunnelService>>()));
+    services.AddSingleton<DbStudio.Core.Services.Tunnels.ITunnelResolver>(sp => sp.GetRequiredService<DbStudio.Core.Services.Tunnels.SshTunnelService>());
+    services.AddSingleton(sp => new ConnectionStore(paths, sp.GetRequiredService<ISecretStore>(), sp.GetRequiredService<SourceRegistry>())
+        .UseTunnels(sp.GetRequiredService<DbStudio.Core.Services.Tunnels.ITunnelResolver>()));
     services.AddSingleton<SettingsService>();
     services.AddSingleton<HistoryService>();
     services.AddSingleton(new ResultStore());
