@@ -11,7 +11,8 @@ import type {
 import { copyText, newConsole } from '../../app/actions';
 import { getConnection, isRelational, useConnections } from '../../store/connections';
 import { useTabs } from '../../store/tabs';
-import { ConnectionScopePicker, scopeEndpoint } from '../common/ConnectionScopePicker';
+import { ConnectionScopePicker } from '../common/ConnectionScopePicker';
+import { scopeEndpoint } from '../common/connectionScope';
 import type { TabViewProps } from '../layout/tabViews';
 import { schemaCompareApi } from './api';
 import { ApplyDialog } from './ApplyDialog';
@@ -53,8 +54,8 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
   const [filter, setFilter] = useState<ItemFilter>(DEFAULT_FILTER);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CompareItemDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  /** Item details by compareId \u0001 itemId (loaded once per comparison). */
+  const [details, setDetails] = useState<Record<string, { detail?: CompareItemDetail; error?: string }>>({});
   const [detailTab, setDetailTab] = useState<DetailTab>('diff');
   const [script, setScript] = useState<CompareScript | null>(null);
   const [scriptBusy, setScriptBusy] = useState(false);
@@ -64,7 +65,6 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
 
   const alive = useRef(true);
   const compareIdRef = useRef<string | null>(null);
-  const detailCache = useRef(new Map<string, CompareItemDetail>());
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -81,22 +81,18 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
 
   // ---------------------------------------------------------------- engine support per connection
   const connections = useConnections((s) => s.connections);
+  const asked = useRef(new Set<string>());
   useEffect(() => {
-    const missing = connections.filter((c) => isRelational(c.id) && !support[c.id]).map((c) => c.id);
-    if (!missing.length) return;
-    for (const id of missing) {
+    for (const c of connections) {
+      const id = c.id;
+      if (!isRelational(id) || asked.current.has(id)) continue;
+      asked.current.add(id);
       schemaCompareApi.support(id).then(
         (r) => alive.current && setSupport((p) => ({ ...p, [id]: r })),
         (e) => alive.current && setSupport((p) => ({ ...p, [id]: { error: errorMessage(e) } })),
       );
     }
-    // mark as asked so a re-render does not ask again
-    setSupport((p) => {
-      const next = { ...p };
-      for (const id of missing) if (!next[id]) next[id] = { error: '' };
-      return next;
-    });
-  }, [connections]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [connections]);
 
   const supportOf = useCallback((cid: string): CompareSupport | null => {
     const s = support[cid];
@@ -125,10 +121,9 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
   const reset = () => {
     if (compareIdRef.current) void schemaCompareApi.discard(compareIdRef.current).catch(() => {});
     compareIdRef.current = null;
-    detailCache.current.clear();
+    setDetails({});
     setResult(null);
     setScript(null);
-    setDetail(null);
     setFocusedId(null);
   };
 
@@ -189,29 +184,19 @@ export function SchemaCompareView({ tab, theme }: TabViewProps) {
   };
 
   // ---------------------------------------------------------------- item detail
+  const detailKey = result && focusedId ? `${result.compareId}\u0001${focusedId}` : null;
+  const detailEntry = detailKey ? details[detailKey] : undefined;
+  const detail = detailEntry?.detail ?? null;
+  const detailError = detailEntry?.error ?? null;
   useEffect(() => {
-    setDetailError(null);
-    if (!result || !focusedId) {
-      setDetail(null);
-      return;
-    }
-    const key = `${result.compareId}\u0001${focusedId}`;
-    const cached = detailCache.current.get(key);
-    if (cached) {
-      setDetail(cached);
-      return;
-    }
-    setDetail(null);
+    if (!result || !focusedId || !detailKey || details[detailKey]) return;
     const ac = new AbortController();
     schemaCompareApi.item(result.compareId, focusedId, ac.signal).then(
-      (d) => {
-        detailCache.current.set(key, d);
-        if (alive.current && !ac.signal.aborted) setDetail(d);
-      },
-      (e) => alive.current && !ac.signal.aborted && setDetailError(errorMessage(e)),
+      (d) => alive.current && setDetails((p) => ({ ...p, [detailKey]: { detail: d } })),
+      (e) => alive.current && !ac.signal.aborted && setDetails((p) => ({ ...p, [detailKey]: { error: errorMessage(e) } })),
     );
     return () => ac.abort();
-  }, [result, focusedId]);
+  }, [result, focusedId, detailKey, details]);
 
   // ---------------------------------------------------------------- script and apply
   const ids = result ? selectedIds(result.items, selection) : [];

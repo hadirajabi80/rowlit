@@ -6,14 +6,7 @@ import { useEffect, useMemo } from 'react';
 import { schemaIsDatabase, schemaLevelLabel } from '../../lib/providerLevels';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { getConnection, hasDatabaseLevel, isRelational, useConnections } from '../../store/connections';
-
-export interface ConnectionScope {
-  connectionId: string | null;
-  /** Catalog database key (null: the connection's current database, or no database level). */
-  database: string | null;
-  /** Null: the default schema. */
-  schema: string | null;
-}
+import type { ConnectionScope } from './connectionScope';
 
 export interface ConnectionScopePickerProps {
   /** "Source" / "Target": prefixes the accessible names ("Source connection"). */
@@ -23,26 +16,6 @@ export interface ConnectionScopePickerProps {
   /** Why a connection cannot be picked (shown in its option title, the option is disabled); null/undefined = it can. */
   disabledReason?: (connectionId: string) => string | null | undefined;
   disabled?: boolean;
-}
-
-/** The catalog database key the picker reads schemas from (the connection's current database when none is chosen). */
-export function scopeCatalogDatabase(connectionId: string | null, database: string | null): string | null {
-  if (!connectionId) return null;
-  const c = getConnection(connectionId);
-  if (!c || !hasDatabaseLevel(c.providerId)) return null;
-  return database ?? useCatalog.getState().conns[connectionId]?.databases?.current ?? null;
-}
-
-/**
- * The engine endpoint of a scope: the database only for providers with a database level, and the schema the picker shows
- * as "(default: x)" when none is chosen (single-level providers need one: there the schema is the database).
- */
-export function scopeEndpoint(v: ConnectionScope): { connectionId: string; database: string | null; schema: string | null } | null {
-  if (!v.connectionId) return null;
-  const database = scopeCatalogDatabase(v.connectionId, v.database);
-  const cat = useCatalog.getState().dbs[dbKey(v.connectionId, database)];
-  const schema = v.schema ?? cat?.schemasResp?.defaultSchema ?? cat?.defaultSchema ?? null;
-  return { connectionId: v.connectionId, database, schema };
 }
 
 export function ConnectionScopePicker({ label, value, onChange, disabledReason, disabled }: ConnectionScopePickerProps) {

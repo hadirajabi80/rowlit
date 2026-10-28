@@ -101,6 +101,6 @@ export function createSchemaCompareHandlers(ctx: M2MockContext): RequestHandler[
       const n = statements(body.itemIds).length;
       return ctx.ok({ ok: true, executed: n, total: n, rolledBack: false, transactionalDdl: true, elapsedMs: 120, failures: [] } as never);
     }),
-    http.delete(`${P}/:id`, () => ctx.ok(null as never, { status: 204 })),
+    http.delete(`${P}/:id`, () => new HttpResponse(null, { status: 204 })),
   ];
 }
