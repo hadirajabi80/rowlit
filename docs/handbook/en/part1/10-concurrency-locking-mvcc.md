@@ -599,7 +599,7 @@ write *tombstones* ([16](16-nosql-families.md)).
 5. In the InnoDB example of 3.5, would an insert of an order with customer id 2 and id 7 wait if session A had used
    READ COMMITTED? Why?
 6. A job queue table is processed by ten workers using `SELECT … LIMIT 1 FOR UPDATE`. Throughput does not grow beyond one
-   worker. Why, and what is the one-word fix?
+   worker. Why, and what is the two-word fix?
 
 ## Answers
 
