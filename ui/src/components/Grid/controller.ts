@@ -50,6 +50,12 @@ export interface GridController {
     fetch: import('../../lib/serialize').CellFetcher | null;
   };
   toggleValueViewer?(): void;
+  /** Open the value viewer on the focused cell, in edit mode (Shift+Enter). Absent while the cell cannot be shown. */
+  editInViewer?(): void;
+  /** Save the focused cell's value to a file (text, or the bytes of a binary value). */
+  saveCellToFile?(): void;
+  /** Replace the focused cell's value with a file's content (offered when the cell can be written). */
+  loadCellFromFile?(): void;
   clearSort?(): void;
   hasSort?(): boolean;
   copyColumnNames?(): void;

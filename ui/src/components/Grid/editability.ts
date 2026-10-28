@@ -16,6 +16,11 @@ export interface Editability {
    * sorting key: "Cannot UPDATE key column"). Use `editableColumnsFor`.
    */
   updateLocked?: Set<number>;
+  /**
+   * Binary columns that could be written but not typed into the grid: the value viewer sets them (from a file, or
+   * text encoded as UTF-8). Not part of `editableColumns`, so the in-cell editor and the record view leave them alone.
+   */
+  binaryColumns?: Set<number>;
 }
 
 const DICTIONARY_READ_ONLY = 'Dictionary: read-only';
@@ -25,6 +30,13 @@ const NOT = (reason: string): Editability => ({ editable: false, reason, target:
 export function editableColumnsFor(e: Pick<Editability, 'editableColumns' | 'updateLocked'>, isInsert: boolean): Set<number> {
   if (isInsert || !e.updateLocked?.size) return e.editableColumns;
   return new Set([...e.editableColumns].filter((i) => !e.updateLocked!.has(i)));
+}
+
+/** Can the value viewer write this cell: a column of `editableColumns` or a binary column (see `binaryColumns`)? */
+export function viewerCanWrite(e: Pick<Editability, 'editable' | 'editableColumns' | 'updateLocked' | 'binaryColumns'>, col: number, isInsert: boolean): boolean {
+  if (!e.editable) return false;
+  if (e.binaryColumns?.has(col)) return isInsert || !e.updateLocked?.has(col);
+  return editableColumnsFor(e, isInsert).has(col);
 }
 
 /**
@@ -119,13 +131,15 @@ function finish(
   const readOnly = new Set(tuples ? tuples.filter((c) => (c[4] & 2) === 2 || (c[4] & 8) === 8).map((c) => c[0].toLowerCase()) : []);
   const known = tuples ? new Set(tuples.map((c) => c[0].toLowerCase())) : null;
   const editableColumns = new Set<number>();
+  const binaryColumns = new Set<number>();
   columns.forEach((c, i) => {
     const n = c.name.toLowerCase();
     if (isRowidColumn(c, dialect)) return;
     if (known && !known.has(n)) return; // alias or expression
     if (!known && !c.table) return;
-    if (readOnly.has(n) || c.kind === 'cursor' || c.kind === 'binary') return;
-    editableColumns.add(i);
+    if (readOnly.has(n) || c.kind === 'cursor') return;
+    if (c.kind === 'binary') binaryColumns.add(i);
+    else editableColumns.add(i);
   });
   const keyOrdinals = t.keyColumns.map((k) => columns.findIndex((c) => c.name.toLowerCase() === k.toLowerCase()));
   if (keyOrdinals.some((i) => i < 0)) return NOT(`Add the key columns ${t.keyColumns.join(', ')} to edit`);
@@ -133,6 +147,7 @@ function finish(
   const defaultSchema = (dialect === 'plsql' ? currentSchema : null) ?? snapshot?.defaultSchema ?? null;
   return {
     editable: true, reason: null, editableColumns, keyOrdinals,
+    ...(binaryColumns.size ? { binaryColumns } : {}),
     ...(dialect === 'clickhouse' ? { updateLocked: new Set(keyOrdinals) } : {}),
     target: { ...t, keyColumns: keyOrdinals.map((i) => columns[i].name), identityColumns: identity, defaultSchema },
   };

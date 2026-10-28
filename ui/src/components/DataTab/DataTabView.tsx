@@ -5,7 +5,7 @@
 // through `exclusive`. The session is released after a few idle minutes (auto mode, nothing pending) and
 // re-created on the next load.
 import {
-  ChevronDown, CircleX, Code2, Download, Funnel, FileInput, LoaderCircle, Lock, PencilLine, PencilRuler, Plus, Redo2, RefreshCw, Rows3,
+  ChevronDown, CircleX, Code2, Download, Funnel, FileInput, LoaderCircle, Lock, PencilLine, PencilRuler, Plus, PanelRight, Redo2, RefreshCw, Rows3,
   Search, Table2, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,9 +40,12 @@ import { FilterBar, type FilterBarCloseReason } from '../FilterBar/FilterBar';
 import type { SelectionAggregates } from '../Grid/aggregate';
 import { AggregateStrip } from '../Grid/AggregateStrip';
 import type { FileFormat } from '../Grid/clientExport';
+import type { ViewerRequest } from '../Grid/CellViewer';
+import { CellViewer } from '../Grid/LazyCellViewer';
+import { setCellFromViewer } from '../Grid/viewerWrite';
 import { DataGrid } from '../Grid/LazyDataGrid';
 import { rowValue, type GridSelectionInfo, type RowRef } from '../Grid/gridTypes';
-import { editableColumnsFor, findTable, foreignKeys, referencingTables, tableEditability, type FkLink } from '../Grid/editability';
+import { editableColumnsFor, findTable, foreignKeys, referencingTables, tableEditability, viewerCanWrite, type FkLink } from '../Grid/editability';
 import { overlayRows } from '../Grid/overlay';
 import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
@@ -141,7 +144,15 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const [count, setCount] = useState<{ value: number | null; loading: boolean; error: string | null }>({ value: null, loading: false, error: null });
   const [sel, setSel] = useState<GridSelectionInfo | null>(null);
   const [agg, setAgg] = useState<SelectionAggregates | null>(null);
-  const [recordOpen, setRecordOpen] = useState(false);
+  // The record view and the value viewer share the side panel.
+  const [side, setSide] = useState<'record' | 'value' | null>(null);
+  const [viewerReq, setViewerReq] = useState<ViewerRequest | null>(null);
+  const recordOpen = side === 'record';
+  const valueOpen = side === 'value';
+  const sideSetter = (kind: 'record' | 'value') => (on: boolean | ((open: boolean) => boolean)) =>
+    setSide((s) => ((typeof on === 'function' ? on(s === kind) : on) ? kind : s === kind ? null : s));
+  const setRecordOpen = sideSetter('record');
+  const setValueOpen = sideSetter('value');
   const [dragStart, setDragStart] = useState(viewerWidth);
   const [distinct, setDistinct] = useState<{ col: number; x: number; y: number } | null>(null);
   const loadSeq = useRef(0);
@@ -738,6 +749,15 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     return ins ? { ins } : null;
   })()) : null;
   const recordValues = selRef ? columns.map((_, c) => rowValue(overlay, buffer.pending.updates, selRef, c)) : null;
+  // Value viewer: Apply writes into the pending edits like typing in the cell; the cell must be one the grid can write.
+  const viewerValue = valueOpen && sel && selRef ? rowValue(overlay, buffer.pending.updates, selRef, sel.col) : undefined;
+  const viewerWritable = !!editability && !!sel && !!selRef && viewerCanWrite(editability, sel.col, !!selRef.ins);
+  const viewerEdited = !!sel && !!selRef && (selRef.ins ? !!selRef.ins.touched[sel.col] : sel.col in (buffer.pending.updates[selRef.src] ?? {}));
+  const viewerRequest = (kind: ViewerRequest['kind']) => {
+    setValueOpen(true);
+    setViewerReq({ kind, nonce: Date.now() });
+  };
+  const viewerLoc = sel && sel.sourceRow !== null ? cellSource(sel.sourceRow, sel.col) : null;
   const delta = buffer.committed.appended.length - Object.keys(buffer.committed.hidden).length;
   const total = count.value !== null ? count.value + delta : null;
   const loaded = overlay.length - Object.keys(buffer.committed.hidden).length;
@@ -854,6 +874,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         <button className="btn btn-xs" aria-label="Design table" title={designCmd.tooltip} disabled={!designCmd.enabled} onClick={() => runCommand('dataTab.design', tabArgs)}>
           <PencilRuler size={12} /> <span className="dt-btn-label">Design</span>
         </button>
+        <button className={`icon-btn sm${valueOpen ? ' on' : ''}`} title={cv('grid.toggleValueViewer').tooltip} aria-label="Value viewer" aria-pressed={valueOpen} onClick={() => setValueOpen(!valueOpen)}>
+          <PanelRight size={14} />
+        </button>
         <button className={`icon-btn sm${recordOpen ? ' on' : ''}`} title={cv('grid.toggleRecordView').tooltip} aria-label="Record view" aria-pressed={recordOpen} onClick={() => setRecordOpen(!recordOpen)}>
           <Rows3 size={14} />
         </button>
@@ -944,7 +967,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                 onSelectCell={setSel}
                 onOpenViewer={(s) => {
                   setSel(s);
-                  setRecordOpen(true);
+                  setValueOpen(true);
                 }}
                 onOpenFilter={(column) => {
                   setBarOpen(true);
@@ -957,7 +980,11 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}
-                controllerExtras={{ refresh: () => void refresh(), loadMore, exportAs: (f) => void exportAs(f), openExport, ...(editCtx ? pendingActions.controller : {}) }}
+                controllerExtras={{
+                  refresh: () => void refresh(), loadMore, exportAs: (f) => void exportAs(f), openExport, toggleValueViewer: () => setValueOpen((o) => !o),
+                  ...(sel ? { editInViewer: () => viewerRequest('edit'), saveCellToFile: () => viewerRequest('save'), ...(viewerWritable ? { loadCellFromFile: () => viewerRequest('load') } : {}) } : {}),
+                  ...(editCtx ? pendingActions.controller : {}),
+                }}
               />
               {noMatch && (
                 <div className="rs-empty-filter" role="status">
@@ -995,6 +1022,39 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
             viewKey={gridKey} columns={columns} rows={data.rows} rev={data.rev} done={!data.loading} truncated={data.hasMore}
             queryText={`data ${connectionId} ${database ?? ''} ${state.schema ?? ''}.${state.name}`} name={state.name}
           />
+        )}
+        {valueOpen && (
+          <>
+            <Splitter direction="vertical" onDragStart={() => setDragStart(viewerWidth)} onDrag={(d) => setLayout({ cellViewerWidth: Math.max(220, Math.min(900, dragStart - d)) })} />
+            <div className="resultset-viewer" style={{ width: viewerWidth }}>
+              {sel && selRef && viewerValue !== undefined ? (
+                <CellViewer
+                  executionId={viewerLoc?.executionId ?? null}
+                  resultSetId={viewerLoc?.resultSetId ?? 0}
+                  sourceRow={viewerLoc?.row ?? 0}
+                  cellKey={sel.sourceRow !== null ? `row:${sel.sourceRow}` : `ins:${sel.insertId}`}
+                  col={sel.col}
+                  column={columns[sel.col]}
+                  value={viewerValue}
+                  onClose={() => setValueOpen(false)}
+                  dialect={dialect}
+                  theme={theme}
+                  gridKey={gridKey}
+                  edited={viewerEdited}
+                  request={viewerReq}
+                  onRequestDone={() => setViewerReq(null)}
+                  onApply={viewerWritable ? (v) => setCellFromViewer(gridKey, selRef, sel.col, v, selRef.src !== undefined ? (overlay.get(selRef.src)?.[sel.col] ?? null) : null) : undefined}
+                />
+              ) : (
+                <div className="cell-viewer-empty">
+                  Select a cell to see its value.
+                  <button className="icon-btn sm" onClick={() => setValueOpen(false)} aria-label="Close viewer">
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
         {recordOpen && (
           <>

@@ -703,6 +703,7 @@ export class MockEngine {
       return { kind: 'string' as const, value: full, len: full.length };
     }
     if (v && typeof v === 'object' && '$bin' in v) {
+      if (atob(v.$bin).length === v.len) return { kind: 'binary' as const, value: v.$bin, len: v.len }; // already whole
       const bytes = new Uint8Array(v.len);
       for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + 7) & 255;
       let bin = '';

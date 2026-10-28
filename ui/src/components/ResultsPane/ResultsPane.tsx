@@ -33,10 +33,12 @@ import { DistinctValuesPopover, distinctValues } from '../FilterBar/DistinctValu
 import { FilterBar, type FilterBarCloseReason } from '../FilterBar/FilterBar';
 import type { SelectionAggregates } from '../Grid/aggregate';
 import { AggregateStrip } from '../Grid/AggregateStrip';
-import { CellViewer } from '../Grid/CellViewer';
+import type { ViewerRequest } from '../Grid/CellViewer';
+import { CellViewer } from '../Grid/LazyCellViewer';
+import { setCellFromViewer } from '../Grid/viewerWrite';
 import { DataGrid } from '../Grid/LazyDataGrid';
 import { rowValue, type GridSelectionInfo, type RowRef } from '../Grid/gridTypes';
-import { editableColumnsFor, foreignKeys, referencingTables, resultEditability, type FkLink } from '../Grid/editability';
+import { editableColumnsFor, foreignKeys, referencingTables, resultEditability, viewerCanWrite, type FkLink } from '../Grid/editability';
 import { overlayRows } from '../Grid/overlay';
 import { focusGrid, gridController } from '../Grid/controller';
 import '../Grid/grid.css';
@@ -274,6 +276,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   const [focusReq, setFocusReq] = useState<{ column: string | null; nonce: number } | null>(null);
   const [sel, setSel] = useState<GridSelectionInfo | null>(null);
   const [side, setSide] = useState<SidePanel>(null);
+  const [viewerReq, setViewerReq] = useState<ViewerRequest | null>(null);
   const [dragStart, setDragStart] = useState(viewerWidth);
   const [viewCount, setViewCount] = useState<number | null>(null);
   const [distinct, setDistinct] = useState<{ col: number; x: number; y: number } | null>(null);
@@ -357,6 +360,9 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   const selRef: RowRef | null = sel ? (sel.sourceRow !== null ? { src: sel.sourceRow } : buffer.pending.inserts.find((i) => i.id === sel.insertId) ? { ins: buffer.pending.inserts.find((i) => i.id === sel.insertId)! } : null) : null;
   const recordValues = selRef ? columns.map((_, c) => rowValue(overlay, buffer.pending.updates, selRef, c)) : null;
   const viewerValue = side === 'viewer' && sel && selRef ? rowValue(overlay, buffer.pending.updates, selRef, sel.col) : undefined;
+  // Value viewer: Apply writes into the pending edits like typing in the cell; the cell must be one the grid can write.
+  const viewerWritable = !!editability && !!sel && !!selRef && viewerCanWrite(editability, sel.col, !!selRef.ins);
+  const viewerEdited = !!sel && !!selRef && (selRef.ins ? !!selRef.ins.touched[sel.col] : sel.col in (buffer.pending.updates[selRef.src] ?? {}));
 
   /** Engine cell of a source row (full values of truncated cells for copy / client-side export). */
   const xid = exec.executionId;
@@ -412,6 +418,11 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   // Ctrl+S / Save write the pending edits directly; the SQL preview is opt-in (user-02).
   const pendingActions = usePendingChanges(editCtx);
   const toggleViewer = () => setSide((s) => (s === 'viewer' ? null : 'viewer'));
+  /** Shift+Enter, Save / Load cell …: the viewer opens on the focused cell and carries out the request. */
+  const viewerRequest = (kind: ViewerRequest['kind']) => {
+    setSide('viewer');
+    setViewerReq({ kind, nonce: Date.now() });
+  };
   const toggleRecord = () => setSide((s) => (s === 'record' ? null : 'record'));
   const clearAll = () => {
     if (sfActive) serverClear();
@@ -699,7 +710,7 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
                 cellSource={cellSource}
                 onAggregates={setAgg}
                 hideTrailingRow={noMatch}
-                controllerExtras={{ applyServerFilter: avail.available ? serverApply : undefined, exportAs, openExport, toggleValueViewer: toggleViewer, ...(editCtx ? pendingActions.controller : {}) }}
+                controllerExtras={{ applyServerFilter: avail.available ? serverApply : undefined, exportAs, openExport, toggleValueViewer: toggleViewer, ...(sel ? { editInViewer: () => viewerRequest('edit'), saveCellToFile: () => viewerRequest('save'), ...(viewerWritable ? { loadCellFromFile: () => viewerRequest('load') } : {}) } : {}), ...(editCtx ? pendingActions.controller : {}) }}
               />
               {noMatch && (
                 <div className="rs-empty-filter">
@@ -745,15 +756,23 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
                   })}
                   onClose={() => setSide(null)}
                 />
-              ) : sel && sel.sourceRow !== null && viewerValue !== undefined ? (
+              ) : sel && selRef && viewerValue !== undefined ? (
                 <CellViewer
-                  executionId={exec.executionId}
+                  executionId={sel.sourceRow !== null ? exec.executionId : null}
                   resultSetId={rs.id}
-                  sourceRow={sel.sourceRow}
+                  sourceRow={sel.sourceRow ?? 0}
+                  cellKey={sel.sourceRow === null ? `ins:${sel.insertId}` : undefined}
                   col={sel.col}
                   column={rs.columns[sel.col]}
                   value={viewerValue}
                   onClose={() => setSide(null)}
+                  dialect={dialect}
+                  theme={theme}
+                  gridKey={key}
+                  edited={viewerEdited}
+                  request={viewerReq}
+                  onRequestDone={() => setViewerReq(null)}
+                  onApply={viewerWritable ? (v) => setCellFromViewer(key, selRef, sel.col, v, selRef.src !== undefined ? (overlay.get(selRef.src)?.[sel.col] ?? null) : null) : undefined}
                 />
               ) : (
                 <div className="cell-viewer-empty">
