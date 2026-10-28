@@ -21,6 +21,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Codegen.Smoke/Codegen.Smoke.csproj" />
     <Project Path="tests/DbStudio.Core.Tests/DbStudio.Core.Tests.csproj" />
+    <Project Path="tests/DbStudio.DataCompare.Tests/DbStudio.DataCompare.Tests.csproj" />
     <Project Path="tests/DbStudio.Federation.Tests/DbStudio.Federation.Tests.csproj" />
     <Project Path="tests/DbStudio.Import.Tests/DbStudio.Import.Tests.csproj" />
     <Project Path="tests/DbStudio.Logs.Tests/DbStudio.Logs.Tests.csproj" />

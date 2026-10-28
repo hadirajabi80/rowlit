@@ -1,0 +1,448 @@
+/* Data compare tab. Colours only through theme tokens (theme/tokens.css); both themes. The tab is a size container
+   (`dc`): the two sides stack on narrow tabs. */
+.dc {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  color: var(--text);
+  container: dc / inline-size;
+}
+.dc-pad {
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+}
+.dc-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  background: var(--bg-panel);
+}
+.dc-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1 1 420px;
+}
+.dc-side-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.dc-mode {
+  margin-bottom: 3px;
+}
+.dc-query-flag {
+  justify-content: flex-end;
+  padding-bottom: 6px;
+}
+.dc-query,
+.dc-where {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.dc-query {
+  resize: vertical;
+  min-height: 56px;
+}
+.dc-swap {
+  align-self: center;
+}
+@container dc (max-width: 900px) {
+  .dc-swap {
+    align-self: flex-start;
+  }
+}
+.dc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.dc-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+}
+.dc-notes {
+  margin: 0;
+  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + 14px);
+  font-size: var(--text-sm);
+}
+.dc-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.dc-progress progress {
+  flex: 1;
+  max-width: 320px;
+  accent-color: var(--accent);
+}
+.dc-error {
+  color: var(--danger-text);
+}
+.dc-ok {
+  color: var(--success);
+}
+.dc-warn {
+  color: var(--warning);
+}
+.dc-danger {
+  color: var(--danger-text);
+}
+.dc-error,
+.dc-ok {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dc-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--space-6);
+}
+.dc-empty-state p {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------- popovers */
+.dc-pop-root {
+  position: relative;
+}
+.dc-pop-root .btn.on {
+  border-color: var(--accent);
+}
+.dc-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  min-width: 320px;
+  max-width: min(640px, 90vw);
+  max-height: 60vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popup);
+}
+.dc-pop-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.dc-cols {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.dc-cols th,
+.dc-cols td {
+  padding: 2px var(--space-2);
+  text-align: left;
+  white-space: nowrap;
+}
+.dc-cols th {
+  color: var(--text-muted);
+  font-weight: normal;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.dc-opt-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.dc-opt-group legend {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.dc-check,
+.dc-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dc-field .input {
+  width: 110px;
+}
+.dc-field select.input {
+  width: auto;
+}
+
+/* ------------------------------------------------------------- summary cards */
+.dc-cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+.dc-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 112px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.dc-card {
+  cursor: pointer;
+}
+button.dc-card:hover {
+  background: var(--bg-hover);
+}
+.dc-card.on {
+  background: var(--bg-selected);
+  border-color: var(--border-focus);
+}
+.dc-card-n {
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+.dc-card-equal {
+  border-left-color: var(--border-strong);
+}
+.dc-card-changed {
+  border-left-color: var(--warning);
+}
+.dc-card-onlyInSource {
+  border-left-color: var(--success);
+}
+.dc-card-onlyInTarget {
+  border-left-color: var(--danger);
+}
+.dc-card-duplicate {
+  border-left-color: var(--text-muted);
+}
+.dc-card-meta {
+  align-self: center;
+  font-size: var(--text-sm);
+  flex: 1 1 280px;
+}
+
+/* ------------------------------------------------------------- differences grid */
+.dc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.dc-grid-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.dc-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-grid);
+  font-size: var(--grid-font-size);
+}
+.dc-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-weight: normal;
+  text-align: left;
+  white-space: nowrap;
+  padding: 4px var(--space-2);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border-subtle);
+}
+.dc-grid th.dc-col-key {
+  color: var(--text);
+}
+.dc-grid th.dc-col-ignored {
+  font-style: italic;
+}
+.dc-key-icon {
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: var(--obj-key);
+}
+.dc-grid td {
+  padding: 2px var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+.dc-col-class {
+  position: sticky;
+  left: 0;
+  background: var(--bg-app);
+}
+.dc-grid th.dc-col-class {
+  z-index: 2;
+  background: var(--bg-panel);
+}
+.dc-null {
+  color: var(--null);
+  font-style: italic;
+}
+.dc-cell-key {
+  font-weight: 600;
+}
+.dc-row-onlyInSource td.dc-cell {
+  background: var(--cell-inserted);
+}
+.dc-row-onlyInTarget td.dc-cell {
+  background: var(--cell-deleted);
+}
+.dc-row-duplicate td.dc-cell {
+  color: var(--text-muted);
+}
+.dc-cell-changed {
+  background: var(--cell-edited);
+}
+.dc-old,
+.dc-new {
+  display: block;
+}
+.dc-old {
+  color: var(--diff-removed-text);
+  text-decoration: line-through;
+}
+.dc-new {
+  color: var(--diff-inserted-text);
+}
+.dc-badge {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  border: 1px solid currentColor;
+}
+.dc-badge-changed {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.dc-badge-onlyInSource {
+  color: var(--success);
+  background: var(--success-soft);
+}
+.dc-badge-onlyInTarget {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+.dc-badge-duplicate {
+  color: var(--text-muted);
+}
+.dc-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--border-subtle);
+}
+.dc-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+/* ------------------------------------------------------------- sync dialog */
+.dc-sync {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.dc-sync fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.dc-sync legend {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.dc-sync label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dc-sync p {
+  margin: 0;
+}
+.dc-sync-summary {
+  font-size: var(--text-sm);
+}
+.dc-warnings {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--warning);
+  font-size: var(--text-sm);
+}
+.dc-script {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre;
+}
+.dc-confirm ul {
+  margin: var(--space-1) 0;
+}
+.dc-failures {
+  margin: 0;
+  padding-left: 18px;
+}
+.dc-failures pre {
+  margin: 2px 0 var(--space-2);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}

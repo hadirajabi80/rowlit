@@ -7,6 +7,7 @@ import { schemaIsDatabase, schemaLevelLabel } from '../../lib/providerLevels';
 import { dbKey, useCatalog } from '../../store/catalog';
 import { getConnection, hasDatabaseLevel, isRelational, useConnections } from '../../store/connections';
 import type { ConnectionScope } from './connectionScope';
+import './connectionScopePicker.css';
 
 export interface ConnectionScopePickerProps {
   /** "Source" / "Target": prefixes the accessible names ("Source connection"). */
