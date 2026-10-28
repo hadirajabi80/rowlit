@@ -550,7 +550,7 @@ for naming a join; a view on a view on a view becomes a performance puzzle.
 4. **Running total and gaps.** Write a query that returns, for each order in date order, the number of days since the previous
    order (`lag` and a date subtraction in your engine). What is the value for the first order, and how do you replace it with 0?
 5. **Recursion.** Using the `employees` table from section 2.3, list every employee below Ben (his direct and indirect
-   reports) with their depth relative to Ben. Then add a row `(7, 'Gus', 7)` that makes a cycle and explain why your query
+   reports) with their depth relative to Ben. Then run `UPDATE employees SET manager_id = 6 WHERE id = 1` (Ada now reports to Fay, which makes a cycle) and explain why your query
    (or any recursive query without protection) would never finish. How would you stop it?
 6. **Upsert.** Create the `stock` table and run the upsert for product 5 twice. What are the quantities after each run? Then
    translate the statement to the other engine syntax in section 2.7 that you can test.
