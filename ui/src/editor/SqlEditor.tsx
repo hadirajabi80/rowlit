@@ -23,7 +23,7 @@ import { paramHintText, statementParams } from './param-hint';
 import { snippetSource } from '../snippets';
 import { postfixSource } from '../intel/complete/postfix';
 import { FORMAT_ALT_SHORTCUT, isAltGraphCharacter, isMac } from '../commands/keys';
-import { shortcutLabelOf } from '../commands/registry';
+import { runCommand, shortcutLabelOf } from '../commands/registry';
 import { bindCommandActions, commandHasKey, type ActionHost, type KeyActionDef, type MonacoKeys } from './keyActions';
 import { resolveRunTarget } from './run-target';
 import { LatestRequest, MARKER_OWNERS, serverMarkers, softMarkers, type MarkerSeverities } from './markers-core';
@@ -343,6 +343,11 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       {
         commandId: 'editor.triggerSuggest', fallback: ['MacCtrl+Space', 'Mod+I'],
         action: { id: 'dbstudio.triggerSuggest', label: 'Trigger Suggest', contextMenuGroupId: '1_modification', contextMenuOrder: 1, precondition: '!editorReadonly', run: (x) => { triggerSuggest(x); } },
+      },
+      // Local history (components/LocalHistory): the timeline of this console's text, from the context menu or Ctrl+Alt+H.
+      {
+        commandId: 'editor.localHistory', fallback: ['Mod+Alt+H'],
+        action: { id: 'dbstudio.localHistory', label: 'Local History…', contextMenuGroupId: '9_cutcopypaste', contextMenuOrder: 9, run: () => { runCommand('editor.localHistory', { tabId: propsRef.current.tabId }); } },
       },
       // F12 / Ctrl+click open a table's DATA; this is the explicit way to its DDL (any object). Alt+F12 replaces Monaco's
       // Peek Definition, which would only preview the object's one-line summary. The JetBrains keymap adds Ctrl+B.

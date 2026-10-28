@@ -78,6 +78,7 @@ export const MENUS: MenuDef[] = [
       cmd('snippets.manage', 'Manage snippets…', undefined, { optional: true }),
       sep,
       cmd('search.findInDatabase', 'Find in database…', 'Mod+Shift+F', { optional: true }),
+      cmd('editor.localHistory', 'Local history…', 'Mod+Alt+H', { optional: true }),
     ],
   },
   {
@@ -292,7 +293,8 @@ export const CONTEXT_MENUS: Record<string, ContextEntry[]> = {
   tab: [
     c('tab.close'), c('tab.closeOthers'), 'separator', c('tab.rename'), c('tab.duplicate'),
     { command: 'queries.saveToSchema', optional: true, hideDisabled: true },
-    { command: 'designer.compareWithServer', optional: true, hideDisabled: true }, 'separator', c('tab.reopenClosed'),
+    { command: 'designer.compareWithServer', optional: true, hideDisabled: true },
+    { command: 'editor.localHistory', optional: true, hideDisabled: true }, 'separator', c('tab.reopenClosed'),
     // Editor groups and windows (components/EditorGroups/commands.ts)
     'separator', c('view.splitRight', true), c('view.splitDown', true),
     { command: 'view.moveTabToNextGroup', optional: true, hideDisabled: true },

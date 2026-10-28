@@ -1,4 +1,5 @@
 import { shortcutLabelOf } from '../../../../commands/registry';
+import { LOCAL_HISTORY_DAYS_KEY, LOCAL_HISTORY_KEY, localHistoryEnabled, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, retentionDays } from '../../../LocalHistory/settings';
 import { openRoutinesInEditMode, OPEN_ROUTINES_IN_EDIT_KEY, useSettings, type FullSettings } from '../../../../store/settings';
 import { Card, Num, Row, Select, ToggleRow } from '../controls';
 
@@ -29,6 +30,19 @@ export function EditorSection() {
           checked={s.editor.blankLineSplitsStatements}
           onChange={(v) => up({ editor: { blankLineSplitsStatements: v } })}
         />
+      </Card>
+      <Card title="Local history" description="A private timeline of each editor's text, so a lost or overwritten query can be brought back.">
+        <ToggleRow
+          id="set-local-history"
+          label="Keep local history"
+          hint={`Snapshots on run, save, close and every 2 minutes while typing; open them with ${shortcutLabelOf('editor.localHistory') ?? 'Local history'}`}
+          keywords="local history versions snapshots restore revisions"
+          checked={localHistoryEnabled(s)}
+          onChange={(v) => up({ ui: { [LOCAL_HISTORY_KEY]: v } })}
+        />
+        <Row label="Keep snapshots for (days)" htmlFor="set-local-history-days" hint="Older snapshots are deleted; a labelled snapshot is kept" keywords="local history retention days expire">
+          <Num id="set-local-history-days" value={retentionDays(s)} min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} onChange={(v) => up({ ui: { [LOCAL_HISTORY_DAYS_KEY]: v } })} />
+        </Row>
       </Card>
       <Card title="Routines">
         <ToggleRow

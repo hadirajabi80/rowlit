@@ -15,6 +15,7 @@ import { createMongoHandlers } from './m2/mongo';
 import { createRedisHandlers } from './m2/redis';
 import { createObjectsHandlers } from './objects';
 import { createSavedQueriesHandlers } from './savedQueries';
+import { createLocalHistoryHandlers } from './localHistory';
 import { createSearchHandlers } from './search';
 import { createResourcesHandlers } from './resources';
 import { MOCK_PACKS } from './packs';
@@ -270,6 +271,7 @@ export function createHandlers(engine: MockEngine) {
     // M1.5: explain, describe, designer, query export
     ...createObjectsHandlers(engine, ok), // WP3 object browser
     ...createSavedQueriesHandlers(engine, ok), // queries saved into schemas
+    ...createLocalHistoryHandlers(engine, ok), // local history of editors
     ...createResourcesHandlers(engine, ok), // resources (docs/resources.md)
     ...createM15Handlers(engine),
 

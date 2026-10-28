@@ -1,0 +1,211 @@
+/* Local history view (WP-6). Colours only through theme tokens. */
+.lh {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+.lh-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 4px var(--space-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.lh-tb-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.lh-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lh-spacer {
+  flex: 1;
+}
+.lh-banner {
+  padding: 6px var(--space-3);
+  font-size: var(--text-sm);
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.lh-error {
+  color: var(--danger);
+}
+.lh-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.lh-left {
+  width: clamp(220px, 28%, 340px);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.lh-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+.lh-list {
+  display: flex;
+  flex-direction: column;
+}
+.lh-day {
+  position: sticky;
+  top: 0;
+  padding: 4px var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+}
+.lh-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 3px var(--space-3);
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lh-row:hover {
+  background: var(--bg-hover);
+}
+.lh-row.selected {
+  background: var(--bg-selected);
+  border-left-color: var(--accent);
+}
+.lh-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.lh-reason {
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+.lh-reason-run {
+  color: var(--success);
+}
+.lh-reason-save {
+  color: var(--accent);
+}
+.lh-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.lh-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lh-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: var(--weight-strong);
+}
+.lh-delta {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+.lh-delta.up {
+  color: var(--success);
+}
+.lh-delta.down {
+  color: var(--danger);
+}
+.lh-more {
+  margin: var(--space-2) var(--space-3);
+}
+.lh-empty {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.lh-empty p {
+  margin: 0;
+}
+.lh-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.lh-head-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.lh-actions .btn,
+.lh-toolbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lh-label-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.lh-label-form .input {
+  flex: 1;
+  min-width: 0;
+}
+.lh-sides {
+  font-size: var(--text-xs);
+}
+.lh-diff {
+  flex: 1;
+  min-height: 200px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+@media (max-width: 720px) {
+  .lh-body {
+    flex-direction: column;
+  }
+  .lh-left {
+    width: auto;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
