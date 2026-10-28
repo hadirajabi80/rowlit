@@ -1,0 +1,214 @@
+/* Result comparison tab (WP-7). Colours only through theme tokens. */
+.rc {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.rc-gone {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: 24px;
+}
+.rc-head,
+.rc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-width: 0;
+}
+.rc-head {
+  min-height: 34px;
+}
+.rc-set {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.rc-set-title {
+  font-weight: var(--weight-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28ch;
+}
+.rc-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-strong);
+}
+.rc-summary {
+  display: inline-flex;
+  gap: 4px;
+}
+.rc-chip {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.rc-chip.added {
+  background: var(--cell-diff-added, var(--success-soft));
+}
+.rc-chip.removed {
+  background: var(--cell-diff-removed, var(--danger-soft));
+}
+.rc-chip.changed {
+  background: var(--cell-diff-changed, var(--warning-soft));
+}
+.rc-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rc-search {
+  min-width: 160px;
+}
+.rc-keys {
+  position: relative;
+}
+.rc-keys-label {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+  font-weight: var(--weight-strong);
+}
+.rc-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  width: 300px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-popup);
+}
+.rc-pop-note {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.rc-pop-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow: auto;
+}
+.rc-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.rc-pop-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.rc-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+.rc-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.rc-notice > svg {
+  flex: none;
+  align-self: center;
+}
+.rc-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.rc-grid {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.rc-record {
+  width: 320px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  min-height: 0;
+  overflow: auto;
+}
+.rc-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  padding: 24px;
+  text-align: center;
+}
+.rc-grid > .rc-state {
+  position: absolute;
+  inset: 28px 0 0 0;
+  pointer-events: none;
+}
+.rc-state.error {
+  color: var(--danger-text, var(--danger));
+}
+.rc-state.ok {
+  color: var(--success);
+}
+.rc-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 24px;
+  padding: 0 8px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}

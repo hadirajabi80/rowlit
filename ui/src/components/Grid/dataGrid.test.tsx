@@ -120,6 +120,19 @@ describe('DataGrid', () => {
     expect(ctx.direction).toBe('inherit');
   });
 
+  it('cellTint (result comparison) puts a status background on the tinted cells only', () => {
+    const tint = (r: number, c: number) => (r === 0 && c === 1 ? 'added' : r === 1 ? 'removed' : null) as 'added' | 'removed' | null;
+    render(<DataGrid {...props({ cellTint: tint })} />);
+    const get = probe.props!.getCellContent as (i: [number, number]) => { themeOverride?: { bgCell?: string } };
+    const added = get([1, 0]).themeOverride?.bgCell;
+    const removed = get([0, 1]).themeOverride?.bgCell;
+    expect(added).toBeTruthy();
+    expect(removed).toBeTruthy();
+    expect(added).not.toBe(removed);
+    expect(get([0, 0]).themeOverride?.bgCell).toBeUndefined();
+    expect(get([2, 2]).themeOverride?.bgCell).toBeUndefined();
+  });
+
   it('Shift+F10 opens the cell context menu at the focused cell (design-04)', () => {
     render(<><DataGrid {...props({ editability: EDITABLE })} /><MenuHost /></>);
     selectCell(1, 2);

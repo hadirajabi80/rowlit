@@ -9,7 +9,7 @@ import type { ExecParam } from '../../filter/wire';
 import { getConnection } from '../../store/connections';
 import { useFilters, type ServerFilterState } from '../../store/filters';
 import { useResults, viewKey } from '../../store/results';
-import { createExecution, isRunning, type ExecutionState, type ResultSetState } from '../../store/resultsReducer';
+import { createExecution, isPinnedExec, isRunning, type ExecutionState, type ResultSetState } from '../../store/resultsReducer';
 import { useSessions } from '../../store/sessions';
 import { useTabs } from '../../store/tabs';
 import { toast } from '../../store/ui';
@@ -70,6 +70,7 @@ export interface ServerAvailability {
 }
 
 export function serverFilterAvailability(exec: ExecutionState, columns: readonly ColumnInfo[], dialect: Dialect): ServerAvailability {
+  if (isPinnedExec(exec)) return { available: false, reason: 'A pinned result is a copy of earlier rows: filter it in the grid' };
   // the filter is applied by wrapping the statement as a subquery: CQL has none
   if (dialect === 'cql') return { available: false, reason: 'Cassandra has no subqueries: add the condition to the statement’s WHERE (ALLOW FILTERING), or filter the loaded rows in the grid' };
   const orig = originalBatch(exec);

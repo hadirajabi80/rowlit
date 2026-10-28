@@ -301,3 +301,51 @@ function outKind(v: CellValue): ColumnInfo['kind'] {
   if (typeof v === 'boolean') return 'bool';
   return 'string';
 }
+
+// ---------------------------------------------------------------- pinned results (WP-7)
+
+/**
+ * A result set kept apart from its execution (Navicat's "pin"): the next run of the console replaces the execution, the
+ * pinned copy stays. It carries a one-result-set execution of its own, so the grid, filter and export of the results
+ * pane work on it unchanged; the engine's stored copy is not referenced (`executionId` is null), so everything is
+ * client-side over the rows that were loaded when the result was pinned.
+ */
+export interface PinnedResult {
+  id: string;
+  /** Tab label: the source table, else "Result n" of the run it came from. */
+  title: string;
+  pinnedAt: number;
+  /** The run and result set this was pinned from; while that run is still shown, the pinned tab replaces the original. */
+  origin: { localId: string; rsId: number };
+  exec: ExecutionState;
+}
+
+/** The one-result-set execution of a pinned result (see pinResultSet). */
+export const isPinnedExec = (exec: ExecutionState): boolean => exec.localId.startsWith('pin-');
+
+/** Why a result set cannot be pinned (null: it can). */
+export function pinBlocker(exec: ExecutionState | undefined, rsId: number): string | null {
+  const rs = exec?.resultSets.find((r) => r.id === rsId);
+  if (!exec || !rs) return 'There is no result to pin.';
+  if (!rs.done) return 'Wait for the result to finish loading before pinning it.';
+  if (rs.released) return 'Reload the rows of this result before pinning it.';
+  if (rs.columns.length === 0) return 'This statement returned no columns.';
+  return null;
+}
+
+/** Pinned copy of one finished result set of `exec` (see pinBlocker). `titles`: the labels already taken. */
+export function pinResultSet(exec: ExecutionState, rsId: number, id: string, titles: readonly string[], now: number = Date.now()): PinnedResult {
+  const index = exec.resultSets.findIndex((r) => r.id === rsId);
+  const rs = exec.resultSets[index];
+  const base = rs.columns.find((c) => c.table)?.table ?? `Result ${index + 1}`;
+  let title = base;
+  for (let n = 2; titles.includes(title); n++) title = `${base} (${n})`;
+  const copy: ResultSetState = { ...rs, released: null };
+  return {
+    id, title, pinnedAt: now, origin: { localId: exec.localId, rsId },
+    exec: {
+      ...exec, localId: `pin-${id}`, executionId: null, status: 'ok', endedAt: exec.endedAt ?? now, resultSets: [copy],
+      messages: [], batchStates: [], diagnostics: [], errorCount: 0, txOpen: null,
+    },
+  };
+}

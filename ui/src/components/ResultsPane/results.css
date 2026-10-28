@@ -54,3 +54,35 @@
 .rs-rolledback .icon-btn {
   flex-shrink: 0;
 }
+
+/* result tab + its pin button (WP-7): one pill, the pin is a sibling button (a button cannot sit inside a button) */
+.results-tab-group {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  border-radius: var(--radius-sm);
+}
+.results-tab-group:hover {
+  background: var(--bg-hover);
+}
+.results-tab-group.active {
+  background: var(--bg-active);
+}
+.results-tab-group > .results-tab,
+.results-tab-group > .results-tab:hover,
+.results-tab-group > .results-tab.active {
+  background: transparent;
+  padding-right: 4px;
+}
+.results-pin-btn {
+  opacity: 0;
+  margin-right: 2px;
+}
+.results-tab-group:hover .results-pin-btn,
+.results-tab-group:focus-within .results-pin-btn,
+.results-tab-group.pinned .results-pin-btn {
+  opacity: 1;
+}
+.results-tab-group.pinned > .results-tab > svg {
+  color: var(--accent);
+}
