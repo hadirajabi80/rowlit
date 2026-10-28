@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DbStudio.Core.Models;
+using DbStudio.Core.Services.Tunnels;
 
 namespace DbStudio.Core.Services;
 
@@ -95,6 +96,59 @@ public sealed class ConnectionStore
         return copy;
     }
 
+    // ---- WP-SSH: the one place a profile becomes what a driver opens --------------------------------------------------
+
+    /// <summary>The tunnel resolver (SSH); null = profiles with <c>ssh.enabled</c> are refused (engines/tests without it).</summary>
+    public ITunnelResolver? Tunnels { get; private set; }
+
+    public ConnectionStore UseTunnels(ITunnelResolver tunnels)
+    {
+        Tunnels = tunnels;
+        return this;
+    }
+
+    /// <summary>
+    /// <see cref="WithSecrets"/>, then pointed at the local end of the profile's SSH tunnel (opened or reconnected here) when
+    /// the profile uses one. Every code path that opens a driver connection goes through this (or <see cref="ResolveForOpen"/>);
+    /// a test (ConnectionOpenCallSitesTests) keeps it that way. Never persist or display the result.
+    /// </summary>
+    public async Task<ConnectionProfile> ResolveForOpenAsync(ConnectionProfile profile, CancellationToken ct = default)
+    {
+        var copy = WithSecrets(profile);
+        if (!SshSettings.IsEnabled(copy)) return copy;
+        var tunnels = Tunnels ?? throw TunnelTargets.Unsupported("SSH tunnels are not available in this engine.");
+        return await tunnels.ResolveAsync(copy, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Saved connection by id, resolved for opening (see <see cref="ResolveForOpenAsync(ConnectionProfile, CancellationToken)"/>).</summary>
+    public Task<ConnectionProfile> ResolveForOpenAsync(string id, CancellationToken ct = default) => ResolveForOpenAsync(Get(id), ct);
+
+    /// <summary>Synchronous <see cref="ResolveForOpenAsync(ConnectionProfile, CancellationToken)"/> for synchronous call sites (blocks on the SSH handshake).</summary>
+    public ConnectionProfile ResolveForOpen(ConnectionProfile profile)
+    {
+        var copy = WithSecrets(profile);
+        return SshSettings.IsEnabled(copy) ? ResolveForOpenAsync(profile).GetAwaiter().GetResult() : copy;
+    }
+
+    /// <summary>
+    /// The profile drivers currently use, without opening anything (to clear the pools of a tunnelled connection): the
+    /// rewritten profile while its tunnel is open, null when it uses a tunnel that is closed (nothing can be pooled then).
+    /// </summary>
+    public ConnectionProfile? CurrentForOpen(ConnectionProfile profile)
+    {
+        var copy = WithSecrets(profile);
+        if (!SshSettings.IsEnabled(copy)) return copy;
+        return Tunnels?.Current(copy);
+    }
+
+    /// <summary>Rejects saving a tunnel the provider cannot use (Redis Cluster, mongodb+srv, several hosts…), with the reason.</summary>
+    private static void ValidateTunnel(ConnectionProfile p)
+    {
+        if (!SshSettings.IsEnabled(p)) return;
+        SshSettings.From(p);
+        TunnelTargets.Target(p);
+    }
+
     /// <param name="password">Null or "" = no password.</param>
     public ConnectionProfile Create(ConnectionProfile input, string? password)
     {
@@ -186,6 +240,7 @@ public sealed class ConnectionStore
             if (string.IsNullOrWhiteSpace(p.GetString(field.Key)) && VisibleFor(field, p))
                 throw EngineException.Validation($"'{field.Label}' is required.", new { field = field.Key });
         }
+        ValidateTunnel(p); // WP-SSH
     }
 
     private static bool VisibleFor(FormField field, ConnectionProfile p) =>

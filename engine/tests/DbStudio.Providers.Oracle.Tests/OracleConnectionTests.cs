@@ -125,7 +125,8 @@ public sealed class OracleConnectionStringTests
     {
         var spec = new OracleProvider().FormSpec;
         Assert.Equal(new[] { "connectionType", "host", "port", "serviceName", "sid", "tnsAlias", "descriptor", "user", "password", "role", "extraSchemas" },
-            spec.Fields.Select(f => f.Key));
+            spec.Fields.Where(f => f.Section is null).Select(f => f.Key)); // WP-SSH: the SSH block follows
+        Assert.Contains(spec.Fields, f => f.Key == "ssh.enabled" && f.Section == "ssh");
         Assert.Equal(new[] { "basic", "tns", "descriptor" }, spec.Fields.Single(f => f.Key == "connectionType").Options!.Select(o => o.Value));
         Assert.Equal(new[] { "normal", "sysdba", "sysoper" }, spec.Fields.Single(f => f.Key == "role").Options!.Select(o => o.Value));
         Assert.Equal("list", spec.Fields.Single(f => f.Key == "extraSchemas").Type);

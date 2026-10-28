@@ -27,7 +27,11 @@ public sealed class LogsModule : IEngineModule
         services.TryAddSingleton(sp => new EngineLogSource(sp.GetRequiredService<AppPaths>().LogsDir));
         services.TryAddSingleton<ISqlRunnerFactory>(sp => new SessionSqlRunnerFactory(sp.GetRequiredService<ProviderRegistry>(), sp.GetRequiredService<ConnectionStore>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<SessionSqlRunnerFactory>>()));
-        services.TryAddSingleton<IRedisLogGateway>(sp => new RespRedisGateway(sp.GetRequiredService<ConnectionStore>().GetPassword));
+        services.TryAddSingleton<IRedisLogGateway>(sp =>
+        {
+            var store = sp.GetRequiredService<ConnectionStore>();
+            return new RespRedisGateway(store.GetPassword, (p, ct) => store.ResolveForOpenAsync(p, ct)); // WP-SSH
+        });
         services.TryAddSingleton<IMongoLogGateway>(sp => new ReflectionMongoGateway(sp.GetRequiredService<SourceClientManager>()));
         services.TryAddSingleton<IKafkaLogGateway>(sp => new ReflectionKafkaGateway(sp.GetRequiredService<SourceClientManager>(), sp));
 

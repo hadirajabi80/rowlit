@@ -31,7 +31,7 @@ public sealed class PostgreSqlProvider : IDbProvider, IObjectBrowserProvider, ID
     public string Id => "postgresql";
     public string DisplayName => "PostgreSQL";
     public Dialect Dialect => Dialect.PgSql;
-    public ConnectionFormSpec FormSpec => PgConnectionStrings.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(PgConnectionStrings.FormSpec); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new PgDdlGenerator();
     public ISqlDiagnostics? Diagnostics { get; } = new PgPrepareDiagnostics();
     public IdentifierRules Identifiers { get; } = new('"', '"', "lower", PgReservedWords.All);

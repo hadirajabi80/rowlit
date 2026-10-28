@@ -128,7 +128,7 @@ public sealed class ImportService(ConnectionStore connections, ProviderRegistry 
 
     private (ConnectionProfile Profile, IDbProvider Provider, ImportDialect Dialect, string? Password) Resolve(string connectionId)
     {
-        var profile = connections.WithSecrets(connections.Get(connectionId));
+        var profile = connections.ResolveForOpen(connections.Get(connectionId)); // WP-SSH
         var provider = providers.Find(profile.ProviderId)
                        ?? throw EngineException.Validation($"'{profile.Name}' is not a relational connection; import needs a table to write to.", new { field = "cid" });
         if (provider.Dialect == Dialect.Cql)
@@ -138,7 +138,7 @@ public sealed class ImportService(ConnectionStore connections, ProviderRegistry 
 
     public ImportCapabilitiesDto Capabilities(string connectionId)
     {
-        var profile = connections.WithSecrets(connections.Get(connectionId));
+        var profile = connections.WithSecrets(connections.Get(connectionId)); // no connection opened here
         var provider = providers.Find(profile.ProviderId);
         if (provider is null || provider.Dialect == Dialect.Cql)
             return new ImportCapabilitiesDto(profile.ProviderId, provider is null ? "none" : CoreJson.ToWire(provider.Dialect), false,

@@ -19,7 +19,7 @@ public sealed class ClickHouseProvider : IDbProvider, IObjectBrowserProvider, ID
     public string Id => "clickhouse";
     public string DisplayName => "ClickHouse";
     public Dialect Dialect => Dialect.ClickHouse;
-    public ConnectionFormSpec FormSpec => ChConnections.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(ChConnections.FormSpec); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new ChDdlGenerator();
     public ISqlDiagnostics? Diagnostics => null;
 

@@ -37,7 +37,8 @@ export type ApiErrorCode =
 // ---------- 3.1 Meta ----------
 export interface Health { status: 'ok'; version: string; pid: number; dev: boolean }
 
-export type FormFieldType = 'text' | 'password' | 'number' | 'bool' | 'select' | 'file' | 'list';
+/** 'note' (WP-SSH): read-only text in `help`, no value. */
+export type FormFieldType = 'text' | 'password' | 'number' | 'bool' | 'select' | 'file' | 'list' | 'note';
 export interface FormField {
   key: string;
   label: string;
@@ -50,6 +51,8 @@ export interface FormField {
   visibleWhen?: Record<string, string> | null;
   fileFilter?: string | null;
   help?: string | null;
+  /** WP-SSH: a collapsible block of the connection dialog ('ssh'); null = the main block. */
+  section?: string | null;
 }
 export interface ProviderInfo {
   id: ProviderId;
@@ -139,6 +142,10 @@ export interface TestConnectionResult {
   serverInfo: ServerInfo | null;
   elapsedMs: number;
   error: ErrorInfo | null;
+  /** WP-SSH: the hop that failed through a tunnel: 'ssh' (the SSH server) or 'db' (the server behind it). */
+  hop?: 'ssh' | 'db' | null;
+  /** WP-SSH: the SSH server the test went through ("user@bastion:22"). */
+  via?: string | null;
 }
 
 // ---------- 3.3 Catalog ----------

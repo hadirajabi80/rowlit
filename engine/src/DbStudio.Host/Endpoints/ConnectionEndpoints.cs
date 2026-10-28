@@ -1,6 +1,7 @@
 using DbStudio.Core.Catalog;
 using DbStudio.Core.Models;
 using DbStudio.Core.Services;
+using DbStudio.Core.Services.Tunnels;
 using DbStudio.Host.Contracts;
 
 namespace DbStudio.Host.Endpoints;
@@ -39,6 +40,7 @@ public static class ConnectionEndpoints
             await streams.CloseForConnectionAsync(id, "connection deleted"); // M2
             await clients.CloseAsync(id, "connection deleted");
             store.Delete(id);
+            if (store.Tunnels is { } tunnels) await tunnels.CloseAsync(id); // WP-SSH
             catalog.Forget(id);
             filters.DeleteForConnection(id); // M1.5 saved filters of the connection
             diagrams.DeleteForConnection(id); // M2-ER saved diagram layouts of the connection
@@ -65,6 +67,8 @@ public static class ConnectionEndpoints
             // Snowflake browser SSO waits up to 120 s for the person to finish the identity provider's login (MFA included)
             if (string.Equals(req.Profile.GetString("authenticator"), "externalbrowser", StringComparison.OrdinalIgnoreCase)) seconds = Math.Max(seconds, 135);
             timeout.CancelAfter(TimeSpan.FromSeconds(seconds));
+            // WP-SSH: the whole chain on a private tunnel; reports which hop failed
+            if (SshSettings.IsEnabled(profile)) return await TunnelConnectionTest.RunAsync(provider, store.Tunnels, profile, password, timeout.Token, ct);
             try
             {
                 return await provider.TestAsync(profile, password, timeout.Token);

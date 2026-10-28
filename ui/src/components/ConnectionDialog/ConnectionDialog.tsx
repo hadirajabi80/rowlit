@@ -1,5 +1,5 @@
-import { CircleAlert, CircleCheck, FolderOpen, LoaderCircle, Plug } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, FolderOpen, LoaderCircle, Plug } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { errorMessage } from '../../api/client';
 import type { ConnectionInput, ConnectionProfile, FormField, ProviderId, ProviderInfo, TestConnectionResult } from '../../api/types';
 import { getPlatform } from '../../platform';
@@ -10,6 +10,7 @@ import { isMac } from '../../commands/keys';
 import { runCommand } from '../../commands/registry';
 import { CONNECTION_PALETTE, connColorCss } from '../../theme/connColors';
 import { fileFilterExtensions } from '../../lib/fileFilter';
+import { SSH_ENABLED, sshVia } from '../../lib/sshTunnel';
 import { Dialog } from '../common/Dialog';
 import { connectionHint } from './connectionHints';
 import { Select } from '../common/Select';
@@ -41,10 +42,25 @@ export function isFieldVisible(f: FormField, values: Values): boolean {
   return Object.entries(f.visibleWhen).every(([k, v]) => String(values[k] ?? '') === String(v));
 }
 
+// ---- WP-SSH: fields with a `section` (engine FormField.Section) render in their own collapsible block after the main ones.
+
+/** Titles of the engine's form sections. */
+const SECTION_LABEL: Record<string, string> = { ssh: 'SSH tunnel' };
+/** Visible fields grouped by section, in form order (main block first). */
+function sectionsOf(fields: FormField[]): { id: string; fields: FormField[] }[] {
+  const out: { id: string; fields: FormField[] }[] = [];
+  for (const f of fields) {
+    if (!f.section) continue;
+    const s = out.find((x) => x.id === f.section) ?? (out.push({ id: f.section, fields: [] }), out[out.length - 1]);
+    s.fields.push(f);
+  }
+  return out;
+}
+
 function defaults(p: ProviderInfo): Values {
   const v: Values = {};
   for (const f of p.formSpec.fields) {
-    if (f.type === 'password') continue;
+    if (f.type === 'password' || f.type === 'note') continue;
     if (f.default !== undefined && f.default !== null) v[f.key] = f.default;
     else if (f.type === 'bool') v[f.key] = false;
     else if (f.type === 'select' && f.options?.length) v[f.key] = f.options[0].value;
@@ -132,6 +148,10 @@ export function ConnectionDialog({ state, onClose }: Props) {
   const folders = useMemo(() => [...new Set(connections.map((c) => c.folder).filter((f): f is string => !!f))].sort(), [connections]);
   const fields = (provider?.formSpec.fields ?? []).map((f) => fieldText(provider?.id, f));
   const visible = fields.filter((f) => isFieldVisible(f, values));
+  const mainVisible = visible.filter((f) => !f.section);
+  const sections = sectionsOf(visible);
+  // WP-SSH: a block opens by itself when the profile already uses it
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({ ssh: values[SSH_ENABLED] === true }));
   const effectiveName = nameTouched ? name : name || suggestName(provider, values);
   const hasStored = !!editing?.hasPassword && state.mode === 'edit';
 
@@ -163,6 +183,9 @@ export function ConnectionDialog({ state, onClose }: Props) {
     }
     if (!forTest && !effectiveName.trim()) e.__name = 'Name is required';
     setErrors(e);
+    // an invalid field in a collapsed block: open it so the message (and the focus) can be seen
+    const closed = visible.filter((f) => f.section && e[f.key] && !openSections[f.section]).map((f) => f.section as string);
+    if (closed.length) setOpenSections((prev) => ({ ...prev, ...Object.fromEntries(closed.map((s) => [s, true])) }));
     const first = Object.keys(e)[0];
     if (first) setTimeout(() => document.getElementById(first === '__name' ? 'conn-name' : `conn-f-${first}`)?.focus(), 0);
     return Object.keys(e).length === 0;
@@ -172,7 +195,7 @@ export function ConnectionDialog({ state, onClose }: Props) {
   const cleanProps = (): Values => {
     const out: Values = {};
     for (const f of fields) {
-      if (!isFieldVisible(f, values)) continue;
+      if (!isFieldVisible(f, values) || f.type === 'note') continue;
       if (f.type === 'password') {
         if (f.key !== MAIN_SECRET && secrets[f.key]) out[f.key] = secrets[f.key];
         continue;
@@ -227,6 +250,24 @@ export function ConnectionDialog({ state, onClose }: Props) {
       setSaving(false);
     }
   };
+
+  const fieldRow = (f: FormField) => (
+    <FieldRow
+      key={f.key}
+      field={f}
+      allowNewFile={values.createIfMissing === true}
+      value={values[f.key]}
+      error={errors[f.key]}
+      password={f.key === MAIN_SECRET ? password : secrets[f.key] ?? ''}
+      hasStoredPassword={f.key === MAIN_SECRET ? hasStored : isEdit}
+      onChange={(v) => setValue(f.key, v)}
+      onPassword={(v) => {
+        if (f.key === MAIN_SECRET) setPassword(v);
+        else setSecrets((prev) => ({ ...prev, [f.key]: v ?? '' }));
+        setTestResult(null);
+      }}
+    />
+  );
 
   const title = isEdit ? `Edit connection — ${editing!.name}` : 'New connection';
   // "Connect" (new connections, default action) saves and opens a console in one step.
@@ -321,23 +362,28 @@ export function ConnectionDialog({ state, onClose }: Props) {
               {errors.__name && <div className="form-error" id="conn-name-error" role="alert">{errors.__name}</div>}
             </div>
 
-            {visible.map((f) => (
-              <FieldRow
-                key={f.key}
-                field={f}
-                allowNewFile={values.createIfMissing === true}
-                value={values[f.key]}
-                error={errors[f.key]}
-                password={f.key === MAIN_SECRET ? password : secrets[f.key] ?? ''}
-                hasStoredPassword={f.key === MAIN_SECRET ? hasStored : isEdit}
-                onChange={(v) => setValue(f.key, v)}
-                onPassword={(v) => {
-                  if (f.key === MAIN_SECRET) setPassword(v);
-                  else setSecrets((prev) => ({ ...prev, [f.key]: v ?? '' }));
-                  setTestResult(null);
-                }}
-              />
-            ))}
+            {mainVisible.map((f) => fieldRow(f))}
+
+            {/* WP-SSH: sections (the SSH tunnel), collapsed unless in use */}
+            {sections.map((s) => {
+              const open = !!openSections[s.id];
+              const via = s.id === 'ssh' ? sshVia(values) : null;
+              return (
+                <Fragment key={s.id}>
+                  <button
+                    type="button"
+                    className="form-section form-section-toggle"
+                    aria-expanded={open}
+                    onClick={() => setOpenSections((prev) => ({ ...prev, [s.id]: !open }))}
+                  >
+                    {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {SECTION_LABEL[s.id] ?? s.id}
+                    {!open && via && <span className="form-section-state">via {via}</span>}
+                  </button>
+                  {open && s.fields.map((f) => fieldRow(f))}
+                </Fragment>
+              );
+            })}
 
             <div className="form-section">General</div>
             <span className="form-label">Color</span>
@@ -400,13 +446,17 @@ export function ConnectionDialog({ state, onClose }: Props) {
 
 function TestResultPanel({ r }: { r: TestConnectionResult }) {
   if (!r.ok) {
-    const hint = connectionHint([r.error?.message, r.error?.detail].filter(Boolean).join(' '));
+    const hint = connectionHint([r.error?.message, r.error?.detail].filter(Boolean).join(' '), r.hop);
+    // WP-SSH: which hop of the tunnel failed
+    const title =
+      r.hop === 'ssh' ? `SSH connection failed${r.via ? ` (${r.via})` : ''}` : r.hop === 'db' ? `Connection failed behind the SSH tunnel${r.via ? ` (via ${r.via})` : ''}` : 'Connection failed';
     return (
       <div className="test-result error" role="alert">
         <CircleAlert size={16} />
         <div>
-          <div className="test-title">Connection failed</div>
+          <div className="test-title">{title}</div>
           <div className="test-detail">{r.error?.message ?? 'Unknown error'}</div>
+          {r.hop && typeof r.error?.detail === 'string' && r.error.detail && <div className="test-detail">{r.error.detail}</div>}
           {hint && <div className="test-detail test-hint">{hint}</div>}
         </div>
       </div>
@@ -417,7 +467,9 @@ function TestResultPanel({ r }: { r: TestConnectionResult }) {
     <div className="test-result ok" role="status">
       <CircleCheck size={16} />
       <div>
-        <div className="test-title">Connected in {r.elapsedMs} ms</div>
+        <div className="test-title">
+          Connected in {r.elapsedMs} ms{r.via ? ` via SSH ${r.via}` : ''}
+        </div>
         {s && (
           <dl className="test-info">
             <dt>Server</dt>
@@ -471,6 +523,16 @@ function FieldRow({ field: f, allowNewFile, value, error, password, hasStoredPas
   // Accessible error state: the message under the field describes the invalid control.
   const aria = error ? { 'aria-invalid': true as const, 'aria-describedby': `${id}-error` } : {};
   let control: ReactNode;
+  // WP-SSH: read-only text (e.g. why a provider has no SSH tunnel)
+  if (f.type === 'note')
+    return (
+      <>
+        <span className="form-label" />
+        <div className="form-control form-note" id={id}>
+          {f.help}
+        </div>
+      </>
+    );
   switch (f.type) {
     case 'password':
       control = (

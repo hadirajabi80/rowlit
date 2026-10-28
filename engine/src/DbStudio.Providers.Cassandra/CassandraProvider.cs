@@ -22,7 +22,7 @@ public sealed class CassandraProvider(CqlClusterPool pool) : IDbProvider, IObjec
     public string Id => ProviderId;
     public string DisplayName => "Cassandra";
     public Dialect Dialect => Dialect.Cql;
-    public ConnectionFormSpec FormSpec => CqlConnectionSettings.FormSpec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(CqlConnectionSettings.FormSpec, "Connect through an SSH server (bastion / jump host). One contact point: the driver talks to that node only."); // WP-SSH
     public IDdlGenerator DdlGenerator { get; } = new CqlDdl.Generator();
     public ISqlDiagnostics? Diagnostics => null;
     public IdentifierRules Identifiers { get; } = new('"', '"', "lower", CqlReservedWords.All);

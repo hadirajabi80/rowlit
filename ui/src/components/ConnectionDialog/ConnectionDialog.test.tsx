@@ -152,6 +152,114 @@ describe('ConnectionDialog', () => {
     expect(c.hasPassword).toBe(true);
   });
 
+  describe('WP-SSH tunnel section', () => {
+    const sshToggle = () => screen.getByRole('button', { name: /SSH tunnel/ });
+
+    it('is collapsed, opens, and shows its fields only when switched on', async () => {
+      const user = userEvent.setup();
+      render(<ConnectionDialog state={{ mode: 'new', providerId: 'postgresql' }} onClose={() => {}} />);
+      expect(sshToggle()).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('checkbox', { name: 'Use SSH tunnel' })).not.toBeInTheDocument();
+      await user.click(sshToggle());
+      expect(sshToggle()).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.queryByLabelText(/^SSH host/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole('checkbox', { name: 'Use SSH tunnel' }));
+      expect(screen.getByLabelText(/^SSH host/)).toBeInTheDocument();
+      expect(screen.getByLabelText('SSH port')).toHaveValue(22);
+      expect(screen.getByLabelText('SSH password')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/Private key file/)).not.toBeInTheDocument();
+
+      // collapsed again: the header says where it goes
+      await user.type(screen.getByLabelText(/^SSH host/), 'bastion');
+      await user.type(screen.getByLabelText(/^SSH user/), 'deploy');
+      await user.click(sshToggle());
+      expect(sshToggle()).toHaveTextContent('via deploy@bastion');
+    });
+
+    it('key authentication: the file picker fills the key path, and the props carry the SSH settings and secrets', async () => {
+      const user = userEvent.setup();
+      const showOpenDialog = vi.fn(async () => 'C:\\Users\\me\\.ssh\\id ed25519');
+      setPlatform({ ...createBrowserPlatform(), hasFileSystem: true, showOpenDialog });
+      const saved = { id: 'c_new', name: 'pg', providerId: 'postgresql', props: {}, readOnly: false, savePassword: true, hasPassword: false } as never;
+      const save = vi.fn().mockResolvedValue(saved);
+      useConnections.setState({ save });
+      try {
+        render(<ConnectionDialog state={{ mode: 'new', providerId: 'postgresql', connectAfter: false }} onClose={() => {}} />);
+        await user.type(screen.getByLabelText(/^Host/), 'db.internal');
+        await user.type(screen.getByLabelText(/^User/), 'shop');
+        await user.click(sshToggle());
+        await user.click(screen.getByRole('checkbox', { name: 'Use SSH tunnel' }));
+        await user.type(screen.getByLabelText(/^SSH host/), 'bastion.example.com');
+        await user.type(screen.getByLabelText(/^SSH user/), 'deploy');
+        await user.click(screen.getByLabelText('SSH authentication'));
+        await user.click(screen.getAllByRole('option').find((o) => o.getAttribute('data-value') === 'key')!);
+        expect(screen.queryByLabelText('SSH password')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Browse' }));
+        expect(screen.getByLabelText(/Private key file/)).toHaveValue('C:\\Users\\me\\.ssh\\id ed25519');
+        await user.type(screen.getByLabelText('Key passphrase'), 'pass phrase');
+        await user.click(screen.getByRole('button', { name: 'Create' }));
+        await waitFor(() => expect(save).toHaveBeenCalled());
+        const input = save.mock.calls[0][0];
+        expect(input.props).toMatchObject({
+          host: 'db.internal',
+          'ssh.enabled': true,
+          'ssh.host': 'bastion.example.com',
+          'ssh.port': 22,
+          'ssh.user': 'deploy',
+          'ssh.auth': 'key',
+          'ssh.keyPath': 'C:\\Users\\me\\.ssh\\id ed25519',
+          sshPassphrase: 'pass phrase',
+          'ssh.keepAlive': true,
+        });
+        expect(input.props.sshPassword).toBeUndefined();
+        expect(input.password).toBeNull();
+      } finally {
+        setPlatform(null);
+      }
+    });
+
+    it('a required SSH field in the collapsed section opens it on Save', async () => {
+      const user = userEvent.setup();
+      render(<ConnectionDialog state={{ mode: 'new', providerId: 'postgresql', connectAfter: false }} onClose={() => {}} />);
+      await user.type(screen.getByLabelText(/^Host/), 'db');
+      await user.type(screen.getByLabelText(/^User/), 'shop');
+      await user.click(sshToggle());
+      await user.click(screen.getByRole('checkbox', { name: 'Use SSH tunnel' }));
+      await user.click(sshToggle());
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+      expect(sshToggle()).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('SSH host is required')).toBeInTheDocument();
+    });
+
+    it('Test names the failing hop and gives SSH advice', async () => {
+      const user = userEvent.setup();
+      render(<ConnectionDialog state={{ mode: 'new', providerId: 'postgresql' }} onClose={() => {}} />);
+      await user.type(screen.getByLabelText(/^Host/), 'db');
+      await user.type(screen.getByLabelText(/^User/), 'shop');
+      await user.click(sshToggle());
+      await user.click(screen.getByRole('checkbox', { name: 'Use SSH tunnel' }));
+      await user.type(screen.getByLabelText(/^SSH host/), 'nowhere');
+      await user.type(screen.getByLabelText(/^SSH user/), 'deploy');
+      await user.click(screen.getByRole('button', { name: /Test connection/ }));
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('SSH connection failed (deploy@nowhere)');
+      expect(alert).toHaveTextContent(/Check the SSH host and port/);
+
+      await user.clear(screen.getByLabelText(/^SSH host/));
+      await user.type(screen.getByLabelText(/^SSH host/), 'bastion');
+      await user.click(screen.getByRole('button', { name: /Test connection/ }));
+      expect(await screen.findByRole('status')).toHaveTextContent(/Connected in \d+ ms via SSH deploy@bastion/);
+    });
+
+    it('a provider without tunnels explains why in the section', async () => {
+      const user = userEvent.setup();
+      render(<ConnectionDialog state={{ mode: 'new', providerId: 'kafka' }} onClose={() => {}} />);
+      await user.click(sshToggle());
+      expect(screen.getByText(/not available for Kafka/)).toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: 'Use SSH tunnel' })).not.toBeInTheDocument();
+    });
+  });
+
   it('sends extra password-typed fields (key passphrase, OAuth token) as props, never as the main password', async () => {
     const user = userEvent.setup();
     const saved = { id: 'c_new', name: 'sf', providerId: 'snowflake', props: {}, readOnly: false, savePassword: true, hasPassword: false } as never;

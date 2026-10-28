@@ -43,7 +43,12 @@ public sealed class ConnectionProfile
     public string? Color { get; set; }
     public string? Folder { get; set; }
     public bool ReadOnly { get; set; }
-    /// <summary>Provider-specific fields keyed by ConnectionFormSpec field keys (server, auth, user, database, host, port, serviceName, path, ...).</summary>
+    /// <summary>
+    /// Provider-specific fields keyed by ConnectionFormSpec field keys (server, auth, user, database, host, port, serviceName, path, ...).
+    /// WP-SSH tunnel keys (every tunnel-capable provider): <c>ssh.enabled</c> (bool), <c>ssh.host</c>, <c>ssh.port</c> (22),
+    /// <c>ssh.user</c>, <c>ssh.auth</c> (password | key), <c>ssh.keyPath</c>, <c>ssh.keepAlive</c> (bool); the secrets
+    /// <c>sshPassword</c> and <c>sshPassphrase</c> are password-typed fields kept in the secret store (D12).
+    /// </summary>
     public Dictionary<string, JsonNode?> Props { get; set; } = new();
     public bool HasPassword { get; set; }
     public bool SavePassword { get; set; } = true;
@@ -76,7 +81,11 @@ public sealed class ConnectionProfile
 
 public sealed record ConnectionFormSpec(IReadOnlyList<FormField> Fields);
 
-/// <summary>type: text | password | number | bool | select | file | list.</summary>
+/// <summary>
+/// type: text | password | number | bool | select | file | list | note (read-only text in <c>Help</c>, carries no value).
+/// <c>Section</c> groups fields into a collapsible block of the connection dialog (WP-SSH: "ssh", see
+/// <see cref="Services.Tunnels.SshFormFields"/>); null = the main block.
+/// </summary>
 public sealed record FormField(
     string Key,
     string Label,
@@ -88,13 +97,16 @@ public sealed record FormField(
     /// <summary>Show only when every listed field equals the value, e.g. { "auth": "sql" }.</summary>
     IReadOnlyDictionary<string, string>? VisibleWhen = null,
     string? FileFilter = null,
-    string? Help = null);
+    string? Help = null,
+    string? Section = null);
 
 public sealed record FormOption(string Value, string Label);
 
 public sealed record ServerInfo(string Version, string? ProductVersion, string? ServerName, string? User, string? Database);
 
-public sealed record TestConnectionResult(bool Ok, ServerInfo? ServerInfo, long ElapsedMs, ErrorInfo? Error);
+/// <param name="Hop">WP-SSH: the hop that failed, "ssh" (the tunnel) or "db" (the server behind it); null without a tunnel.</param>
+/// <param name="Via">WP-SSH: the SSH server the connection went through ("user@bastion:22"), or null.</param>
+public sealed record TestConnectionResult(bool Ok, ServerInfo? ServerInfo, long ElapsedMs, ErrorInfo? Error, string? Hop = null, string? Via = null);
 
 public sealed record SessionOptions(string SessionId, string? Database, TransactionMode TxMode, bool CaptureServerOutput);
 

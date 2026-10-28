@@ -38,10 +38,14 @@ public sealed class RespRedisGateway : IRedisLogGateway, IAsyncDisposable
     private readonly ConcurrentDictionary<string, Pool> _pools = new(StringComparer.Ordinal);
     private readonly Timer _reaper;
 
+    private readonly Func<ConnectionProfile, CancellationToken, Task<ConnectionProfile>>? _resolve;
+
     /// <param name="passwordOf">Secret of a connection id (ConnectionStore.GetPassword).</param>
-    public RespRedisGateway(Func<string, string?> passwordOf)
+    /// <param name="resolve">WP-SSH: the profile to connect with (ConnectionStore.ResolveForOpenAsync: through the SSH tunnel); null = as stored.</param>
+    public RespRedisGateway(Func<string, string?> passwordOf, Func<ConnectionProfile, CancellationToken, Task<ConnectionProfile>>? resolve = null)
     {
         _passwordOf = passwordOf;
+        _resolve = resolve;
         _reaper = new Timer(_ => _ = ReapAsync(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
@@ -84,6 +88,7 @@ public sealed class RespRedisGateway : IRedisLogGateway, IAsyncDisposable
     private async Task<List<RedisEndpoint>> ResolveAsync(LogTarget target, CancellationToken ct)
     {
         var p = target.Profile ?? throw EngineException.Validation("A Redis connection is required.");
+        if (_resolve is not null) p = await _resolve(p, ct).ConfigureAwait(false); // WP-SSH
         var tpl = Template(p, _passwordOf(target.ConnectionId));
         var mode = p.GetString("mode") ?? "standalone";
         switch (mode)

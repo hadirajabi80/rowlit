@@ -333,3 +333,27 @@ services:
       - ./seed-cassandra.cql:/seed/seed-cassandra.cql:ro
     entrypoint: ["/bin/sh", "-c", "cqlsh cassandra 9042 -f /seed/seed-cassandra.cql"]
     restart: "no"
+
+  # ---- WP-SSH (Rowlit 1.7): an SSH bastion (profile "ssh") for the tunnel tests. Inside the compose network it reaches
+  # the other services by name (postgres:5432, mysql:3306, ...). The ssh-tunnel mod turns on AllowTcpForwarding.
+  #   docker compose -f engine/tests/docker/compose.yml --profile ssh up -d postgres ssh
+  #   ssh -p 12222 rowlit@localhost   (password "rowlit")
+  ssh:
+    image: lscr.io/linuxserver/openssh-server:latest
+    profiles: ["ssh"]
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: "Etc/UTC"
+      USER_NAME: rowlit
+      USER_PASSWORD: "${SSH_PASSWORD:-rowlit}"
+      PASSWORD_ACCESS: "true"
+      DOCKER_MODS: linuxserver/mods:openssh-server-ssh-tunnel
+    ports:
+      - "${SSH_PORT:-12222}:2222"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2222"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s

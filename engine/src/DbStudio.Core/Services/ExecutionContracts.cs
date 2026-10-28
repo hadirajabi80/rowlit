@@ -55,5 +55,7 @@ public static class ErrorCodes
         // Resources (docs/resources.md): closing a connection would roll back a transaction or cancel running work.
         ResourceBusy = "RESOURCE_BUSY",
         // The database server does not answer (connection broken / timeout): 503, message "Server not reachable: …".
-        Unreachable = "SERVER_UNREACHABLE";
+        Unreachable = "SERVER_UNREACHABLE",
+        // WP-SSH: the SSH hop of a tunnelled connection failed (unreachable, authentication, host key): 503, detail.hop = "ssh".
+        SshTunnel = "SSH_TUNNEL";
 }

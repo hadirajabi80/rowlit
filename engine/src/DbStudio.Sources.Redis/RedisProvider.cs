@@ -16,7 +16,7 @@ public sealed class RedisProvider : IDataSourceProvider
     public string Id => "redis";
     public string DisplayName => "Redis";
     public SourceKind Kind => SourceKind.KeyValue;
-    public ConnectionFormSpec FormSpec => Spec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(Spec, "Connect through an SSH server (bastion / jump host). Standalone mode only: Cluster and Sentinel hand out node addresses the tunnel cannot reach."); // WP-SSH
 
     private static Dictionary<string, string> When(string mode) => new() { ["mode"] = mode };
 

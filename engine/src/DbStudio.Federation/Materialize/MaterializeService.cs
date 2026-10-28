@@ -80,7 +80,7 @@ public sealed class MaterializeService(
         var dialect = ImportDialect.For(provider.Dialect, provider.Id);
         var db = string.IsNullOrWhiteSpace(request.Database) ? null : request.Database.Trim();
         var schema = string.IsNullOrWhiteSpace(request.Schema) ? null : request.Schema.Trim();
-        return new Target(connections.WithSecrets(profile), provider, dialect, connections.GetPassword(profile.Id), db, schema, request.Table.Trim());
+        return new Target(connections.ResolveForOpen(profile) /* WP-SSH */, provider, dialect, connections.GetPassword(profile.Id), db, schema, request.Table.Trim());
     }
 
     private string QuerySql(string linkId, MaterializeRequest request)

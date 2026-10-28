@@ -20,7 +20,7 @@ public sealed class EsProvider(Func<EsSettings, HttpMessageHandler?>? handlerFac
     public string Id => "elasticsearch";
     public string DisplayName => "Elasticsearch / OpenSearch";
     public SourceKind Kind => SourceKind.Search;
-    public ConnectionFormSpec FormSpec => Spec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.Append(Spec, "Connect through an SSH server (bastion / jump host). One node URL."); // WP-SSH
 
     private static readonly Dictionary<string, string> BasicOnly = new() { ["auth"] = "basic" };
 

@@ -3,6 +3,21 @@ import type {
   CatalogColumnTuple, CatalogObject, CellValue, ColumnInfo, ColumnKind, ConnectionProfile, ProviderInfo,
 } from '../api/types';
 import { MOCK_PACKS } from './packs';
+import type { FormField } from '../api/types';
+
+/** WP-SSH: the engine's SSH block (SshFormFields.Append) as the providers report it. */
+const SSH_ON = { 'ssh.enabled': 'true' };
+export const SSH_FIELDS: FormField[] = [
+  { key: 'ssh.enabled', label: 'Use SSH tunnel', type: 'bool', default: false, help: 'Connect through an SSH server (bastion / jump host).', section: 'ssh' },
+  { key: 'ssh.host', label: 'SSH host', type: 'text', required: true, placeholder: 'bastion.example.com', visibleWhen: SSH_ON, section: 'ssh' },
+  { key: 'ssh.port', label: 'SSH port', type: 'number', default: 22, visibleWhen: SSH_ON, section: 'ssh' },
+  { key: 'ssh.user', label: 'SSH user', type: 'text', required: true, visibleWhen: SSH_ON, section: 'ssh' },
+  { key: 'ssh.auth', label: 'SSH authentication', type: 'select', default: 'password', options: [{ value: 'password', label: 'Password' }, { value: 'key', label: 'Private key' }], visibleWhen: SSH_ON, section: 'ssh' },
+  { key: 'sshPassword', label: 'SSH password', type: 'password', visibleWhen: { ...SSH_ON, 'ssh.auth': 'password' }, section: 'ssh' },
+  { key: 'ssh.keyPath', label: 'Private key file', type: 'file', required: true, visibleWhen: { ...SSH_ON, 'ssh.auth': 'key' }, section: 'ssh' },
+  { key: 'sshPassphrase', label: 'Key passphrase', type: 'password', visibleWhen: { ...SSH_ON, 'ssh.auth': 'key' }, section: 'ssh' },
+  { key: 'ssh.keepAlive', label: 'Send keep-alives', type: 'bool', default: true, visibleWhen: SSH_ON, section: 'ssh' },
+];
 
 export const PROVIDERS: ProviderInfo[] = [
   {
@@ -75,6 +90,7 @@ export const PROVIDERS: ProviderInfo[] = [
         { key: 'applicationName', label: 'Application name', type: 'text', default: 'Rowlit' },
         { key: 'connectTimeout', label: 'Connect timeout (s)', type: 'number', default: 15 },
         { key: 'options', label: 'Server options', type: 'text', placeholder: '-c statement_timeout=0', help: 'Extra -c name=value server options (advanced).' },
+        ...SSH_FIELDS,
       ],
     },
   },
@@ -143,6 +159,7 @@ export const PROVIDERS: ProviderInfo[] = [
         { key: 'schemaRegistryUrl', label: 'Schema Registry URL', type: 'text', placeholder: 'http://localhost:8081' },
         { key: 'schemaRegistryUser', label: 'Schema Registry user', type: 'text' },
         { key: 'schemaRegistrySecret', label: 'Schema Registry secret', type: 'password' },
+        { key: 'ssh.unsupported', label: 'SSH tunnel', type: 'note', section: 'ssh', help: 'SSH tunnels are not available for Kafka: the brokers advertise their own addresses, which one forwarded port cannot reach.' },
         { key: 'clientId', label: 'Client id', type: 'text', default: 'Rowlit' },
         { key: 'requestTimeoutMs', label: 'Request timeout (ms)', type: 'number', default: 15000 },
         { key: 'extra', label: 'Extra librdkafka settings', type: 'text', placeholder: 'key=value;key2=value2', help: 'Passed to librdkafka as is (advanced).' },

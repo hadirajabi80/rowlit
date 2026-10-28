@@ -112,10 +112,19 @@ public sealed partial class LinkRuntime : ILinkRuntime
         var display = relational?.DisplayName ?? source?.DisplayName ?? stored.ProviderId;
         if (f is null)
             return new MemberHandle(index, member, stored.ProviderId, null, null, $"{display} connections cannot be members of a linked database yet.", display);
+        ConnectionProfile memberProfile;
+        try
+        {
+            memberProfile = _connections.ResolveForOpen(stored); // WP-SSH: a member with a tunnel is fetched through it
+        }
+        catch (EngineException ex)
+        {
+            return new MemberHandle(index, member, stored.ProviderId, null, null, $"The member '{member.Alias}': {ex.Message}", display);
+        }
         var context = new SourceContext
         {
             Member = member,
-            Profile = _connections.WithSecrets(stored),
+            Profile = memberProfile,
             Password = _connections.GetPassword(stored.Id),
             Provider = relational,
             Source = source,

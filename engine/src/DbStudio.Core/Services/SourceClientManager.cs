@@ -105,7 +105,7 @@ public sealed class SourceClientManager : IAsyncDisposable
             IDataSourceClient client;
             try
             {
-                client = await provider.OpenAsync(_connections.WithSecrets(profile), _connections.GetPassword(connectionId), ct).ConfigureAwait(false);
+                client = await provider.OpenAsync(await _connections.ResolveForOpenAsync(profile, ct).ConfigureAwait(false), _connections.GetPassword(connectionId), ct).ConfigureAwait(false); // WP-SSH
             }
             catch (EngineException)
             {

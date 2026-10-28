@@ -172,7 +172,7 @@ public sealed class CatalogService
 
     private (IDbProvider Provider, ConnectionProfile Profile, string? Password) Resolve(string connectionId)
     {
-        var profile = _connections.WithSecrets(_connections.Get(connectionId));
+        var profile = _connections.ResolveForOpen(_connections.Get(connectionId)); // WP-SSH: through the tunnel when there is one
         if (_caches.TryGetValue(connectionId, out var cc)) cc.LastUsed = _time.GetUtcNow(); // pooled catalog connections in use
         return (_providers.Get(profile.ProviderId), profile, _connections.GetPassword(connectionId));
     }
@@ -445,8 +445,9 @@ public sealed class CatalogService
 
     private async Task InvalidateCoreAsync(string connectionId, ConnectionCatalog cc, Dialect dialect, string? sessionDatabase, List<DdlTarget> targets)
     {
-        var profile = _connections.Find(connectionId);
-        if (profile is null) return;
+        var stored = _connections.Find(connectionId);
+        if (stored is null) return;
+        var profile = await _connections.ResolveForOpenAsync(stored).ConfigureAwait(false); // WP-SSH
         var provider = _providers.Get(profile.ProviderId);
         await cc.Gate.WaitAsync().ConfigureAwait(false);
         try

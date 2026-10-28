@@ -77,6 +77,8 @@ public static class HistoryAndSqlEndpoints
                         throw EngineException.Validation("The connection's dialect does not match the requested dialect.", new { field = "dialect" });
                 }
                 password = connections.GetPassword(profile.Id);
+                // WP-SSH: diagnostics never open a tunnel (they run while typing): through the open one, or offline
+                profile = connections.CurrentForOpen(profile);
             }
             var diagnostics = provider.Diagnostics
                               ?? throw new EngineException(400, ErrorCodes.NotSupported, $"Server diagnostics are not available for {provider.DisplayName} in this version.");

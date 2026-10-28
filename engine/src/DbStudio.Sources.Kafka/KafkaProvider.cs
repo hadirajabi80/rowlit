@@ -24,7 +24,7 @@ public sealed class KafkaProvider(
     public string Id => "kafka";
     public string DisplayName => "Apache Kafka";
     public SourceKind Kind => SourceKind.Stream;
-    public ConnectionFormSpec FormSpec => Spec;
+    public ConnectionFormSpec FormSpec { get; } = Core.Services.Tunnels.SshFormFields.WithUnsupportedNote(Spec, "SSH tunnels are not available for Kafka: the brokers advertise their own addresses, which one forwarded port cannot reach. Use a VPN, or a listener the brokers advertise on an address this computer reaches."); // WP-SSH
 
     public static ConnectionFormSpec Spec { get; } = new(
     [
