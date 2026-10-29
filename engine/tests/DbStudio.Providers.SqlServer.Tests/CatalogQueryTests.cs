@@ -71,6 +71,23 @@ public sealed class CatalogQueryTests
     }
 
     [Fact]
+    public void SchemasQuery_ListsEverySchema_Unfiltered()
+    {
+        // The schema list shows every schema of sys.schemas (dbo, sys, INFORMATION_SCHEMA, guest, role-owned);
+        // SchemaFilter stays on the object-list queries (DependencyQueries) only.
+        var parser = ScriptDomDiagnostics.CreateParser();
+        var fragment = parser.Parse(new StringReader(SqlServerCatalogQueries.Schemas), out var errors);
+        Assert.True(errors.Count == 0, string.Join("; ", errors.Select(e => $"{e.Line}:{e.Column} {e.Message}")));
+        var select = Assert.IsType<SelectStatement>(Assert.IsType<TSqlScript>(fragment).Batches[0].Statements[0]);
+        var spec = Assert.IsType<QuerySpecification>(select.QueryExpression);
+        Assert.Null(spec.WhereClause);
+        // the object-count subquery legitimately keeps its own filters
+        var subquery = Assert.Single(spec.SelectElements.OfType<SelectScalarExpression>().Select(e => e.Expression).OfType<ScalarSubquery>());
+        var inner = Assert.IsType<QuerySpecification>(subquery.QueryExpression);
+        Assert.NotNull(inner.WhereClause);
+    }
+
+    [Fact]
     public void Queries_RunOnSqlServer2005()
     {
         Assert.DoesNotContain("is_readonly", SqlServerCatalogQueries.Parameters);

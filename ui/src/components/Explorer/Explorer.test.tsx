@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { http, HttpResponse } from 'msw';
 import { useCatalog } from '../../store/catalog';
 import { useConnections } from '../../store/connections';
 import { useTabs } from '../../store/tabs';
@@ -72,6 +73,60 @@ describe('Explorer', () => {
     await waitFor(() => expect(row('email')).toBeDefined());
     // Columns come from the already loaded snapshot: no extra request.
     expect(mock.hits('/catalog')).toHaveLength(1);
+  });
+
+  it('keeps a single Oracle schema explicit and loads objects only after it expands', async () => {
+    mock.server.use(http.get('*/api/v1/connections/c_ora/catalog/schemas', () => HttpResponse.json({ database: null, defaultSchema: 'SHOP', schemas: [{ name: 'SHOP', loaded: false, objectCount: 1 }] })));
+    render(<Explorer />);
+    await expand('Oracle Shop');
+    await waitFor(() => expect(row('SHOP')).toBeDefined());
+    expect(row('Tables')).toBeUndefined();
+    expect(mock.hits('/catalog/schemas')).toHaveLength(1);
+    expect(mock.hits('/catalog')).toHaveLength(0);
+
+    await expand('SHOP');
+    await waitFor(() => expect(row('Tables')).toBeDefined());
+    const catalogCalls = mock.hits('/catalog');
+    expect(catalogCalls).toHaveLength(1);
+    expect(catalogCalls[0].url.searchParams.get('schemas')).toBe('SHOP');
+    expect(catalogCalls[0].url.searchParams.get('database')).toBeNull();
+  });
+
+  it('keeps SQL Server single schema explicit: database → dbo → Tables (master)', async () => {
+    render(<Explorer />);
+    await expand('Prod SQL');
+    await waitFor(() => expect(row('master')).toBeDefined());
+
+    await expand('master');
+    await waitFor(() => expect(row('dbo')).toBeDefined());
+    expect(row('Tables')).toBeUndefined(); // objects load only when dbo expands
+    expect(mock.hits('/catalog/schemas')).toHaveLength(1);
+    expect(mock.hits('/catalog')).toHaveLength(0);
+
+    await expand('dbo');
+    await waitFor(() => expect(row('Tables')).toBeDefined());
+    const catalogCalls = mock.hits('/catalog');
+    expect(catalogCalls).toHaveLength(1);
+    expect(catalogCalls[0].url.searchParams.get('schemas')).toBe('dbo');
+    expect(catalogCalls[0].url.searchParams.get('database')).toBe('master');
+  });
+
+  it("Oracle's Tables folder lists every table of the expanded schema and none of another", async () => {
+    render(<Explorer />);
+    await expand('Oracle Shop');
+    await waitFor(() => expect(row('SHOP')).toBeDefined());
+    expect(row('HR')).toBeDefined();
+
+    await expand('SHOP');
+    await expand('Tables');
+    const tables = mock.ctx.engine.catalog('c_ora', null, ['SHOP']).schemas[0].objects.filter((o) => o.t === 'table');
+    expect(tables.length).toBeGreaterThan(1);
+    for (const o of tables) await waitFor(() => expect(row(o.n)).toBeDefined());
+    // HR owns a COUNTRIES table too: it stays out of SHOP's folder (the load asked for SHOP only)
+    expect(screen.getAllByRole('treeitem').filter((el) => el.querySelector('.tree-label')?.textContent === 'COUNTRIES')).toHaveLength(1);
+    const catalogCalls = mock.hits('/catalog');
+    expect(catalogCalls).toHaveLength(1);
+    expect(catalogCalls[0].url.searchParams.get('schemas')).toBe('SHOP');
   });
 
   it('skips the schema level when a database has a single schema (SQLite) and keeps connections independent', async () => {

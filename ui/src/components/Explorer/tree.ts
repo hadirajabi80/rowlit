@@ -176,7 +176,10 @@ export function databasesOf(conn: ConnectionProfile, cat: ConnCatalog | undefine
 }
 
 /** Whether the database node hides its single schema level. */
-export function singleSchema(d: DbCatalog | undefined): string | null {
+export function singleSchema(d: DbCatalog | undefined, providerId: ConnectionProfile['providerId']): string | null {
+  // Oracle and SQL Server namespace their objects by schema (SHOP, dbo, Sales): the schema stays an explicit level
+  // even when the catalog returns only one, like SSMS.
+  if (providerId === 'oracle' || providerId === 'sqlserver') return null;
   const list = d?.schemasResp?.schemas;
   return list && list.length === 1 ? list[0].name : null;
 }
@@ -269,7 +272,7 @@ function addConnection(rows: TreeRow[], input: TreeInput, c: ConnectionProfile, 
   const dbs = databasesOf(c, cat) ?? [];
   if (dbs.length === 1 && (dbs[0] === null || c.providerId === 'sqlite')) {
     // No database level (Oracle), or SQLite's lone "main": show its schemas/objects directly.
-    addSchemas(rows, input, c.id, dbs[0], depth + 1, id);
+    addSchemas(rows, input, c.id, c.providerId, dbs[0], depth + 1, id);
     return;
   }
   const current = cat.databases?.current ?? null;
@@ -280,11 +283,11 @@ function addConnection(rows: TreeRow[], input: TreeInput, c: ConnectionProfile, 
       id: did, kind: 'database', depth: depth + 1, label: db ?? '(default)', expandable: true, expanded: dOpen, connectionId: c.id, database: db,
       detail: db === current && dbs.length > 1 ? 'current' : undefined,
     });
-    if (dOpen) addSchemas(rows, input, c.id, db, depth + 2, did);
+    if (dOpen) addSchemas(rows, input, c.id, c.providerId, db, depth + 2, did);
   }
 }
 
-function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, db: string | null, depth: number, parent: string) {
+function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, providerId: ConnectionProfile['providerId'], db: string | null, depth: number, parent: string) {
   const d = input.dbs[dbKey(cid, db)];
   // A schema list that is already shown stays while it reloads: only a first load shows "Loading schemas…".
   const shown = !!d?.schemasResp && d.schemasStatus !== 'error';
@@ -295,7 +298,7 @@ function addSchemas(rows: TreeRow[], input: TreeInput, cid: string, db: string |
   if (d.schemasStatus === 'error') return status(rows, parent, depth, 'error', d.schemasError ?? 'Failed to load schemas', { loadTarget: target });
   const list = d.schemasResp?.schemas ?? [];
   if (list.length === 0) return status(rows, parent, depth, 'empty', 'No schemas');
-  const single = singleSchema(d);
+  const single = singleSchema(d, providerId);
   if (single) {
     addFolders(rows, input, cid, db, single, depth, parent);
     addSystemTypes(rows, input, cid, db, depth);

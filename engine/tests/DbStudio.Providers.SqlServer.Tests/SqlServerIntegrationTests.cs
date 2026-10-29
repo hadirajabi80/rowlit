@@ -178,8 +178,8 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fixture) : IClass
         Assert.Equal(("dbo", "Orders"), (fk.RefSchema, fk.RefTable));
 
         var schemas = await reader.ListSchemasAsync("shop", CancellationToken.None);
-        Assert.Contains(schemas, s => s.Name == "Sales");
-        Assert.DoesNotContain(schemas, s => s.Name is "sys" or "db_owner" or "INFORMATION_SCHEMA");
+        // every schema of the database is listed: user schemas and the built-ins alike
+        Assert.Contains(schemas, s => s.Name is "dbo" or "Sales" or "sys" or "INFORMATION_SCHEMA" or "guest" or "db_owner");
         Assert.Contains("shop", await reader.ListDatabasesAsync(CancellationToken.None), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -276,7 +276,7 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fixture) : IClass
                 $"CREATE DATABASE [{db}] COLLATE Persian_100_CS_AS",
                 $"ALTER DATABASE [{db}] SET COMPATIBILITY_LEVEL = 100",
                 $"CREATE LOGIN [{lowUser}] WITH PASSWORD = '{lowPassword}', CHECK_POLICY = OFF",
-                $"USE [{db}]; EXEC('CREATE SCHEMA Sales'); EXEC('CREATE SCHEMA hr AUTHORIZATION db_owner');",
+                $"USE [{db}]; EXEC('CREATE SCHEMA Sales'); EXEC('CREATE SCHEMA hr AUTHORIZATION db_owner'); EXEC('CREATE SCHEMA empty_role AUTHORIZATION db_datareader');",
                 $"""
                 USE [{db}];
                 CREATE TABLE dbo.Countries (Id INT NOT NULL CONSTRAINT PK_Countries PRIMARY KEY, Code CHAR(2) NOT NULL CONSTRAINT UQ_Countries_Code UNIQUE);
@@ -303,9 +303,10 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fixture) : IClass
         await using (var reader = await fixture.Provider.OpenCatalogReaderAsync(profile, endpoint.Password, CancellationToken.None))
         {
             var schemas = (await reader.ListSchemasAsync(db, CancellationToken.None)).Select(s => s.Name).ToList();
-            Assert.Contains("hr", schemas); // owned by db_owner, but holds a table
-            Assert.DoesNotContain("db_owner", schemas);
-            Assert.DoesNotContain("guest", schemas);
+            Assert.Contains("hr", schemas);
+            Assert.Contains("db_owner", schemas); // role-owned built-ins are listed too
+            Assert.Contains("guest", schemas);
+            Assert.Contains("empty_role", schemas); // empty and role-owned (AUTHORIZATION db_datareader): still listed
 
             var dbo = await reader.LoadSchemaAsync(db, "dbo", CancellationToken.None);
             Assert.Equal(new[] { "Sales", "hr" }, dbo.ReferencingSchemas);

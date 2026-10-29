@@ -26,13 +26,14 @@ function input(objects: CatalogObject[], over: Partial<TreeInput> = {}, provider
   };
   const conns: Record<string, ConnCatalog> = { c1: { databases: { databases: ['Shop'], current: 'Shop' }, status: 'ready', error: null } };
   return {
-    connections: [conn('c1', providerId)], conns, dbs: { [dbKey('c1', 'Shop')]: d }, expanded: new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop')]),
+    connections: [conn('c1', providerId)], conns, dbs: { [dbKey('c1', 'Shop')]: d },
+    expanded: new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop'), nodeId.schema('c1', 'Shop', 'dbo')]),
     collapsedFolders: new Set(), filter: '', ...over,
   };
 }
 
 const FID = nodeId.folder('c1', 'Shop', 'dbo', 'type');
-const opened = (...ids: string[]) => new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop'), FID, ...ids]);
+const opened = (...ids: string[]) => new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop'), nodeId.schema('c1', 'Shop', 'dbo'), FID, ...ids]);
 const shape = (rows: ReturnType<typeof buildTree>) => rows.map((r) => `${'  '.repeat(r.depth)}${r.kind}:${r.label}${r.count !== undefined ? ` (${r.count})` : ''}`);
 
 beforeEach(() => {
@@ -69,7 +70,7 @@ describe('Types folder', () => {
 
   it('a single kind stays flat (no sub-folder)', () => {
     const rows = buildTree(input([T('Phone', 'alias'), T('Zip', 'alias')], { expanded: opened() }));
-    expect(shape(rows).filter((s) => /folder:|object:/.test(s))).toEqual(['    folder:Types (2)', '      object:Phone', '      object:Zip']);
+    expect(shape(rows).filter((s) => /folder:|object:/.test(s))).toEqual(['      folder:Types (2)', '        object:Phone', '        object:Zip']);
     expect(rows.filter((r) => r.kind === 'folder' && r.typeKind)).toEqual([]);
     expect(rows.filter((r) => r.kind === 'object').map((r) => r.label)).toEqual(['Phone', 'Zip']);
   });

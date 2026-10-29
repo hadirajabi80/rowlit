@@ -50,13 +50,13 @@ function useLazyLoads(connections: ConnectionProfile[]) {
   const modules = useSourceModules((s) => s.modules);
   useEffect(() => {
     const cat = useCatalog.getState();
-    const ensureDb = (cid: string, db: string | null) => {
+    const ensureDb = (cid: string, providerId: ConnectionProfile['providerId'], db: string | null) => {
       const d = dbs[dbKey(cid, db)];
       if (!d || d.schemasStatus === 'idle') {
         void cat.loadSchemas(cid, db);
         return;
       }
-      const single = singleSchema(d);
+      const single = singleSchema(d, providerId);
       if (single && !d.schemaStatus[single]) void cat.loadSchema(cid, db, single);
     };
     for (const c of connections) {
@@ -77,9 +77,9 @@ function useLazyLoads(connections: ConnectionProfile[]) {
       }
       const list = databasesOf(c, cc);
       if (!list) continue;
-      if (list.length === 1 && (list[0] === null || c.providerId === 'sqlite')) ensureDb(c.id, list[0]);
+      if (list.length === 1 && (list[0] === null || c.providerId === 'sqlite')) ensureDb(c.id, c.providerId, list[0]);
       for (const db of list) {
-        if (db !== null && expanded.has(nodeId.db(c.id, db)) && !isCatalogClosed(closed, c.id, db)) ensureDb(c.id, db);
+        if (db !== null && expanded.has(nodeId.db(c.id, db)) && !isCatalogClosed(closed, c.id, db)) ensureDb(c.id, c.providerId, db);
       }
     }
     for (const d of Object.values(dbs)) {

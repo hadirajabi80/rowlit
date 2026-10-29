@@ -98,12 +98,59 @@ describe('explorer: saved queries', () => {
     expect(off.some((r) => r.kind === 'query')).toBe(false);
   });
 
+  it('keeps a single Oracle schema as an explicit expansion level', () => {
+    const base = input();
+    const d: DbCatalog = { ...base.dbs[dbKey('c1', 'Shop')], database: null, schemasResp: { database: null, defaultSchema: 'SHOP', schemas: [{ name: 'SHOP', loaded: true }] }, loaded: {}, schemaStatus: {} };
+    const rows = buildTree({
+      ...base, connections: [conn('c1', 'oracle')], conns: { c1: { databases: { databases: [], current: 'SHOP' }, status: 'ready', error: null } },
+      dbs: { [dbKey('c1', null)]: d }, expanded: new Set([nodeId.conn('c1')]),
+    });
+    expect(rows.some((r) => r.kind === 'schema' && r.label === 'SHOP')).toBe(true);
+    expect(rows.some((r) => r.kind === 'folder')).toBe(false);
+  });
+
+  it('lists every Oracle schema as an explicit node, the default one first', () => {
+    const base = input();
+    const d: DbCatalog = { ...base.dbs[dbKey('c1', 'Shop')], database: null, schemasResp: { database: null, defaultSchema: 'SHOP', schemas: [{ name: 'SHOP', loaded: false }, { name: 'HR', loaded: false }] }, loaded: {}, schemaStatus: {} };
+    const rows = buildTree({
+      ...base, connections: [conn('c1', 'oracle')], conns: { c1: { databases: { databases: [], current: 'SHOP' }, status: 'ready', error: null } },
+      dbs: { [dbKey('c1', null)]: d }, expanded: new Set([nodeId.conn('c1')]),
+    });
+    expect(rows.filter((r) => r.kind === 'schema').map((r) => r.label)).toEqual(['SHOP', 'HR']);
+    expect(rows.find((r) => r.label === 'SHOP')).toMatchObject({ detail: 'default', database: null });
+  });
+
+  it('keeps a single SQL Server schema (dbo) an explicit level too', () => {
+    const base = input();
+    const d: DbCatalog = { ...base.dbs[dbKey('c1', 'Shop')], schemasResp: { database: 'Shop', defaultSchema: 'dbo', schemas: [{ name: 'dbo', loaded: true }] } };
+    const rows = buildTree({ ...base, dbs: { [dbKey('c1', 'Shop')]: d }, expanded: new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop')]) });
+    expect(rows.filter((r) => r.kind === 'schema').map((r) => r.label)).toEqual(['dbo']);
+    expect(rows.some((r) => r.kind === 'folder')).toBe(false);
+  });
+
+  it('keeps identically named tables of two schemas under their owning schema', () => {
+    const base = input();
+    const d: DbCatalog = {
+      ...base.dbs[dbKey('c1', 'Shop')],
+      loaded: { dbo: { name: 'dbo', version: 1, objects: [{ t: 'table', n: 'Orders' }] }, sales: { name: 'sales', version: 1, objects: [{ t: 'table', n: 'Orders' }] } },
+      schemaStatus: { dbo: 'ready', sales: 'ready' },
+    };
+    const rows = buildTree({
+      ...base, dbs: { [dbKey('c1', 'Shop')]: d },
+      expanded: new Set([nodeId.conn('c1'), nodeId.db('c1', 'Shop'), nodeId.schema('c1', 'Shop', 'dbo'), nodeId.schema('c1', 'Shop', 'sales'),
+        nodeId.folder('c1', 'Shop', 'dbo', 'table'), nodeId.folder('c1', 'Shop', 'sales', 'table')]),
+    });
+    const orders = rows.filter((r) => r.kind === 'object' && r.label === 'Orders');
+    expect(orders.map((o) => o.id)).toEqual([nodeId.object('c1', 'Shop', 'dbo', 'table', 'Orders'), nodeId.object('c1', 'Shop', 'sales', 'table', 'Orders')]);
+    expect(orders.map((o) => o.schema)).toEqual(['dbo', 'sales']);
+  });
+
   it('Oracle-style schemas without a database level key the folder by the schema alone', () => {
     const base = input();
     const d: DbCatalog = { ...base.dbs[dbKey('c1', 'Shop')], database: null, schemasResp: { database: null, defaultSchema: 'SHOP', schemas: [{ name: 'SHOP', loaded: true }] }, loaded: { SHOP: { name: 'SHOP', version: 1, objects } }, schemaStatus: { SHOP: 'ready' } };
     const rows = buildTree({
       ...base, connections: [conn('c1', 'oracle')], conns: { c1: { databases: { databases: [], current: 'SHOP' }, status: 'ready', error: null } },
-      dbs: { [dbKey('c1', null)]: d }, expanded: new Set([nodeId.conn('c1'), nodeId.queries('c1', null, 'SHOP')]),
+      dbs: { [dbKey('c1', null)]: d }, expanded: new Set([nodeId.conn('c1'), nodeId.schema('c1', null, 'SHOP'), nodeId.queries('c1', null, 'SHOP')]),
       savedQueries: { c1: { status: 'ready', items: [q('q9', 'Open invoices', 'SHOP', null)] } },
     });
     expect(rows.find((r) => r.kind === 'qfolder')?.id).toBe('q:c1::SHOP');

@@ -7,8 +7,9 @@ namespace DbStudio.Providers.SqlServer;
 public static class SqlServerCatalogQueries
 {
     /// <summary>
-    /// Hides sys/INFORMATION_SCHEMA, and guest and role-owned schemas (db_owner, db_datareader...) unless they hold objects:
-    /// old databases often keep their tables in a schema created with <c>AUTHORIZATION db_owner</c> or another role.
+    /// Keeps sys/INFORMATION_SCHEMA, guest and role-owned schemas (db_owner, db_datareader...) out of object listings
+    /// (DependencyQueries). The schema list (<see cref="Schemas"/>) itself shows every schema: the tree groups objects
+    /// under their owning schema, and a schema with no user objects is a fact about it, not a reason to hide it.
     /// </summary>
     public const string SchemaFilter =
         "s.name NOT IN ('sys','INFORMATION_SCHEMA') AND ((s.name<>'guest' AND s.principal_id NOT IN (SELECT principal_id FROM sys.database_principals WHERE type='R')) " +
@@ -26,10 +27,11 @@ public static class SqlServerCatalogQueries
     public const string ServerInfo =
         "SELECT @@VERSION, CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), @@SERVERNAME, SUSER_SNAME(), DB_NAME()";
 
+    /// <summary>Every schema of the database (sys.schemas under the login's visibility), with its user-object count.</summary>
     public const string Schemas =
         "SELECT s.schema_id, s.name, " +
         "(SELECT COUNT(*) FROM sys.objects o WHERE o.schema_id=s.schema_id AND o.is_ms_shipped=0 AND o.type IN (" + ObjectTypeList + ")) AS object_count " +
-        "FROM sys.schemas s WHERE " + SchemaFilter + " ORDER BY s.name";
+        "FROM sys.schemas s ORDER BY s.name";
 
     public const string SchemaId = "SELECT SCHEMA_ID(@schema)";
 
