@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ForwardedRef } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { CellValue, ColumnInfo, ColumnKind } from '../../api/types';
+import type { CellValue, ColumnInfo, ColumnKind, Dialect } from '../../api/types';
 import { resolveKey } from '../../commands/dispatcher';
 import { runCommand } from '../../commands/registry';
 import { EMPTY_VIEW } from '../../filter/model';
@@ -76,6 +76,18 @@ describe('DataGrid', () => {
     useEdits.getState().reset('g1');
     setActiveGridKey(null);
     probe.props = null;
+  });
+
+  it.each<Dialect>(['tsql', 'plsql', 'pgsql', 'mysql', 'sqlite', 'clickhouse', 'snowflake', 'cql'])('shows a saved insert update immediately for %s without changing base rows', (dialect) => {
+    render(<DataGrid {...props({ dialect, editability: EDITABLE })} />);
+    act(() => useEdits.getState().commit('g1', { appended: [[21, 'New', 'new@example.com']] }));
+    const content = () => (probe.props!.getCellContent as (i: [number, number]) => { data: unknown })([1, 20]);
+    expect(content().data).toBe('New');
+    act(() => useEdits.getState().setCell('g1', 20, 1, 'Updated', 'New'));
+    expect(content().data).toBe('Updated');
+    act(() => useEdits.getState().commit('g1', { patched: { 20: [21, 'Updated (trigger)', 'new@example.com'] } }));
+    expect(content().data).toBe('Updated (trigger)');
+    expect(ROWS).toHaveLength(20);
   });
 
   it('measures column widths when columns and rows arrive in the same update (styles-r1-01)', () => {

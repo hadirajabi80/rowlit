@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { useCatalog } from '../../store/catalog';
 import { useConnections } from '../../store/connections';
+import { CONNECTION_FOLDERS_KEY } from '../../store/connectionFolders';
+import { DEFAULT_SETTINGS, useSettings } from '../../store/settings';
+import { useUi } from '../../store/ui';
 import { useTabs } from '../../store/tabs';
 import { installMockEngine } from '../../test/mockServer';
 import { Explorer, useExplorer } from './Explorer';
@@ -30,6 +33,8 @@ describe('Explorer', () => {
     useCatalog.setState({ conns: {}, dbs: {} });
     useConnections.setState({ providers: [], connections: [], loaded: false, error: null });
     useTabs.setState({ tabs: [], activeId: null, seq: 0 });
+    useSettings.setState({ settings: structuredClone(DEFAULT_SETTINGS) });
+    useUi.setState({ toasts: [] });
     await useConnections.getState().load();
   });
 
@@ -40,6 +45,65 @@ describe('Explorer', () => {
     expect(row('Prod SQL')).toBeDefined();
     expect(row('Oracle Shop')).toBeDefined();
     expect(mock.ctx.requests.filter((r) => r.url.pathname.includes('/catalog'))).toHaveLength(0);
+  });
+
+  it('creates an empty folder from the explorer and persists it across a settings reload', async () => {
+    useConnections.setState({ connections: [] });
+    render(<Explorer />);
+    fireEvent.click(screen.getByRole('button', { name: 'New folder' }));
+    fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: '  Production  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create folder' }));
+    expect(row('Production')).toBeDefined();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(mock.ctx.engine.settings.ui?.[CONNECTION_FOLDERS_KEY]).toEqual(['Production']));
+    await act(async () => {
+      useSettings.setState({ settings: structuredClone(DEFAULT_SETTINGS) });
+      await useSettings.getState().load();
+    });
+    expect(row('Production')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'New folder' }));
+    fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create folder' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('already exists');
+  });
+
+  it('drags a saved server into a collapsed folder, preserves its profile, and can move it back out', async () => {
+    useSettings.setState({ settings: { ...useSettings.getState().settings, ui: { [CONNECTION_FOLDERS_KEY]: ['Production'] } } });
+    useExplorer.setState({ collapsedFolders: new Set(['Production']) });
+    render(<Explorer />);
+    const original = useConnections.getState().connections.find((c) => c.id === 'c_prod')!;
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      types: [] as string[], effectAllowed: '', dropEffect: '',
+      setData(type: string, value: string) { data.set(type, value); this.types.push(type); },
+      getData(type: string) { return data.get(type) ?? ''; },
+    };
+    fireEvent.dragStart(row('Prod SQL')!, { dataTransfer });
+    expect(dataTransfer.effectAllowed).toBe('move');
+    fireEvent.dragOver(row('Production')!, { dataTransfer });
+    expect(row('Production')).toHaveClass('connection-drop-target');
+    fireEvent.drop(row('Production')!, { dataTransfer });
+    await waitFor(() => expect(useConnections.getState().connections.find((c) => c.id === original.id)?.folder).toBe('Production'));
+    const moved = useConnections.getState().connections.find((c) => c.id === original.id)!;
+    expect(moved).toMatchObject({ ...original, folder: 'Production' });
+    expect(row('Production')).toHaveAttribute('aria-expanded', 'true');
+    expect(row('Prod SQL')).toHaveAttribute('aria-level', '2');
+    fireEvent.drop(screen.getByRole('tree', { name: 'Connections' }), { dataTransfer });
+    await waitFor(() => expect(useConnections.getState().connections.find((c) => c.id === original.id)?.folder).toBeNull());
+    expect(row('Prod SQL')).toHaveAttribute('aria-level', '1');
+    expect(row('Production')).toBeDefined();
+    expect(mock.hits('/sessions')).toHaveLength(0);
+    await waitFor(() => expect(mock.ctx.engine.settings.ui?.[CONNECTION_FOLDERS_KEY]).toContain('Work'));
+  });
+
+  it('keeps the connection in its original folder when saving the move fails', async () => {
+    mock.server.use(http.put('*/connections/:id', () => HttpResponse.json({ error: { message: 'Could not save', code: 'IO_ERROR' } }, { status: 500 })));
+    render(<Explorer />);
+    const original = useConnections.getState().connections.find((c) => c.id === 'c_shop')!;
+    const dataTransfer = { types: ['application/x-rowlit-connection'], getData: () => original.id };
+    fireEvent.drop(row('Work')!, { dataTransfer });
+    await waitFor(() => expect(useUi.getState().toasts.some((t) => t.text === 'Could not move connection')).toBe(true));
+    expect(useConnections.getState().connections.find((c) => c.id === original.id)?.folder).toBe(original.folder);
   });
 
   it('loads databases, schemas and objects lazily, one level per expansion', async () => {

@@ -8,7 +8,7 @@ public static class OracleCatalogQueries
 {
     public const string ObjectTypeList = "'TABLE','VIEW','MATERIALIZED VIEW','PROCEDURE','FUNCTION','PACKAGE','SEQUENCE','SYNONYM','TYPE','TRIGGER'";
 
-    /// <summary>Oracle-maintained accounts hidden on 11g, where ALL_USERS.ORACLE_MAINTAINED does not exist.</summary>
+    /// <summary>Known Oracle accounts hidden from the schema picker, independently of server version.</summary>
     public static readonly string[] MaintainedSchemas =
     [
         "SYS", "SYSTEM", "XDB", "OUTLN", "DBSNMP", "APPQOSSYS", "ANONYMOUS", "AUDSYS", "CTXSYS", "DBSFWUSER", "DIP", "DVF", "DVSYS",
@@ -18,13 +18,11 @@ public static class OracleCatalogQueries
         "SYSRAC", "WMSYS", "XS$NULL", "APEX_PUBLIC_USER", "DGPDB_INT", "GSMROOTUSER", "PDBADMIN", "OPS$ORACLE",
     ];
 
-    public const string Schemas =
-        "SELECT username FROM all_users WHERE oracle_maintained='N' ORDER BY username";
-
-    /// <summary>11g fallback; the maintained list is appended as an IN list of literals.</summary>
-    public static string SchemasFallback =>
+    // ORACLE_MAINTAINED is absent on 11g / 12.1.0.1. It can also be Y for application users created by
+    // administrative scripts on newer servers. Neither case should make application schemas disappear.
+    public static string Schemas =>
         "SELECT username FROM all_users WHERE username NOT IN (" + string.Join(",", MaintainedSchemas.Select(OracleSqlText.Literal)) +
-        ") AND username NOT LIKE 'APEX\\_%' ESCAPE '\\' ORDER BY username";
+        ") AND username NOT LIKE 'APEX!_%' ESCAPE '!' ORDER BY username";
 
     public const string CurrentSchema = "SELECT SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM dual";
 
@@ -198,7 +196,7 @@ public static class OracleCatalogQueries
     /// <summary>Every catalog query, for the owner-bind unit test.</summary>
     public static IReadOnlyDictionary<string, string> All => new Dictionary<string, string>
     {
-        [nameof(Schemas)] = Schemas, [nameof(SchemasFallback)] = SchemasFallback, [nameof(CurrentSchema)] = CurrentSchema,
+        [nameof(Schemas)] = Schemas, [nameof(CurrentSchema)] = CurrentSchema,
         [nameof(SessionInfo)] = SessionInfo, [nameof(VersionBanner)] = VersionBanner, [nameof(VersionFallback)] = VersionFallback,
         [nameof(Objects)] = Objects, [nameof(TableComments)] = TableComments, [nameof(ColumnComments)] = ColumnComments,
         [nameof(Columns)] = Columns, [nameof(ColumnsNoIdentity)] = ColumnsNoIdentity, [nameof(IdentityAlways)] = IdentityAlways, [nameof(Constraints)] = Constraints,

@@ -563,12 +563,17 @@ export function ResultSetView({ exec, rs, dialect, theme }: { exec: ExecutionSta
   }
   if (editability?.editable) {
     toolbarItems.push({
-      id: 'edit', priority: 5, menu: () => commandMenuItems([{ command: 'grid.insertRow' }, { command: 'grid.undo' }, { command: 'grid.redo' }], gridArgs),
+      id: 'insert',
+      node: (
+        <button className="btn btn-xs" title={cv('grid.insertRow').tooltip} aria-label="Insert row" disabled={buffer.status === 'submitting'} onClick={insertRow}>
+          <Plus size={14} /> Insert row
+        </button>
+      ),
+    });
+    toolbarItems.push({
+      id: 'edit', priority: 5, menu: () => commandMenuItems([{ command: 'grid.undo' }, { command: 'grid.redo' }], gridArgs),
       node: (
         <span className="rs-pending">
-          <button className="icon-btn sm" title={cv('grid.insertRow').tooltip} aria-label="Insert row" onClick={insertRow}>
-            <Plus size={14} />
-          </button>
           <button className="icon-btn sm" title={cv('grid.undo').tooltip} aria-label="Undo" disabled={!buffer.undo.length} onClick={() => useEdits.getState().undo(key)}>
             <Undo2 size={14} />
           </button>

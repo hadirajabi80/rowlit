@@ -1,9 +1,10 @@
 import {
-  ChevronDown, ChevronRight, ChevronsDownUp, Circle, Columns3, Database, FileCode2, Folder, LoaderCircle, Lock, PanelsTopLeft, Plus, RefreshCw,
+  ChevronDown, ChevronRight, ChevronsDownUp, Circle, Columns3, Database, FileCode2, Folder, FolderPlus, LoaderCircle, Lock, PanelsTopLeft, Plus, RefreshCw,
   Search, SquareTerminal, Unplug, UserRoundCog, UsersRound, X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { CatalogObjectType, ConnectionProfile } from '../../api/types';
+import { errorMessage } from '../../api/client';
 import { activateObject, connectAndOpen, newConsole, openObjectDefault } from '../../app/actions';
 import { hasCommand, keyHint, runCommand } from '../../commands/registry';
 import { hasContextMenu, LINK_MENU_IDS } from '../../commands/menuModel';
@@ -16,6 +17,8 @@ import { dialectOf, getConnection, kindOf, providerKind, useConnections } from '
 import { ROWLIT_OBJECT_MIME, type RowlitObjectDrag } from '../../lib/dragObject';
 import { useSavedQueries } from '../../store/savedQueries';
 import { useSettings } from '../../store/settings';
+import { connectionFolderNames, moveConnectionToFolder, rememberConnectionFolders, savedConnectionFolders } from '../../store/connectionFolders';
+import { toast } from '../../store/ui';
 import { useSystemTypes } from '../../store/systemTypes';
 import { useSourceClients } from '../../store/sourceClients';
 import { connectionActivity, useSessions, type ConnectionActivity } from '../../store/sessions';
@@ -23,6 +26,7 @@ import { connColorCss, connColorName } from '../../theme/connColors';
 import { sshVia } from '../../lib/sshTunnel'; // WP-SSH
 import { ownScopeColor, readScopeColors, resolveScopeColor, scopeColorLabel } from '../../lib/scopeColors';
 import { showContextMenu } from '../common/Menu';
+import { Dialog } from '../common/Dialog';
 import { ColumnIcon, DatabaseIcon, ObjectIcon } from '../common/icons';
 import { ProviderLogo } from '../../theme/brand/ProviderLogo';
 import { activityTitle } from '../common/text';
@@ -37,6 +41,15 @@ import { buildTree, databasesOf, isSourceConnection, nodeId, parseSystemTypesId,
 export { useExplorer } from './explorerStore';
 
 const ROW_H = 24;
+const CONNECTION_MIME = 'application/x-rowlit-connection';
+
+async function dropConnection(id: string, folder: string | null) {
+  try {
+    await moveConnectionToFolder(id, folder);
+  } catch (e) {
+    toast('error', 'Could not move connection', errorMessage(e));
+  }
+}
 
 /** Focus requests (filter box, tree) already acted on. */
 const consumed = { filter: 0, tree: 0 };
@@ -209,6 +222,24 @@ function activateRow(r: TreeRow, toggle: (r: TreeRow, open?: boolean) => void) {
 export function Explorer() {
   useCommandContext();
   const connections = useConnections((s) => s.connections);
+  const settingsUi = useSettings((s) => s.settings.ui);
+  const connectionFolders = useMemo(() => savedConnectionFolders(settingsUi), [settingsUi]);
+  const [folderName, setFolderName] = useState<string | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const newFolder = () => { setFolderName(''); setFolderError(null); };
+  const createFolder = () => {
+    const name = folderName?.trim();
+    if (!name) return;
+    if (connectionFolderNames(connections, settingsUi).includes(name)) {
+      setFolderError('A folder with this name already exists.');
+      return;
+    }
+    rememberConnectionFolders(name);
+    if (useExplorer.getState().collapsedFolders.has(name)) useExplorer.getState().toggleFolder(name);
+    useExplorer.getState().setFilter('');
+    useExplorer.getState().select(nodeId.cfolder(name), null);
+    setFolderName(null);
+  };
   const conns = useCatalog((s) => s.conns);
   const dbs = useCatalog((s) => s.dbs);
   const expanded = useExplorer((s) => s.expanded);
@@ -247,10 +278,10 @@ export function Explorer() {
   const queriesFor = useMemo(() => (cid: string) => queriesShown(chipsFor({ chips: chipsMap, chipScope }, cid)), [chipsMap, chipScope]);
 
   const rows = useMemo(
-    () => buildTree({ connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, savedQueries, queriesFor, systemTypes }),
+    () => buildTree({ connections, connectionFolders, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, savedQueries, queriesFor, systemTypes }),
     // sourceVersion: source modules re-render their subtrees through notifySourceTreeChanged().
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [connections, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, sourceVersion, savedQueries, queriesFor, systemTypes],
+    [connections, connectionFolders, conns, dbs, expanded, collapsedFolders, filter, typesFor, searchColumns, sourceVersion, savedQueries, queriesFor, systemTypes],
   );
   // One definition of "connected" (shared with the status bar): an open session or a loaded catalog.
   const activityOf = useMemo(() => {
@@ -386,10 +417,22 @@ export function Explorer() {
   const offerScope = chipScope === ALL_CONNECTIONS && chips.length > 0 && !!selectedConn && connections.length > 1;
 
   return (
-    <div className="explorer dock-panel" aria-label="Database explorer" data-command-scope="explorer">
+    <div className="explorer dock-panel" aria-label="Database explorer" data-command-scope="explorer"
+      onContextMenu={(e) => {
+        if ((e.target as HTMLElement).closest('[role="treeitem"], input, button, [role="dialog"]')) return;
+        e.preventDefault();
+        showContextMenu(e, [
+          { label: 'New connection…', onClick: () => runCommand('file.newConnection') },
+          { label: 'New folder…', onClick: newFolder },
+        ]);
+      }}
+    >
       <div className="panel-header">
         <span className="panel-title">Explorer</span>
         <div className="panel-actions">
+          <button className="icon-btn" title="New folder" aria-label="New folder" onClick={newFolder}>
+            <FolderPlus size={16} strokeWidth={1.5} />
+          </button>
           <button className="icon-btn" title={`New connection${keyHint('file.newConnection', ' (', ')')}`} aria-label="New connection" onClick={() => runCommand('file.newConnection')}>
             <Plus size={16} strokeWidth={1.5} />
           </button>
@@ -484,7 +527,7 @@ export function Explorer() {
           </div>
         </div>
       )}
-      {connections.length === 0 ? (
+      {connections.length === 0 && connectionFolders.length === 0 ? (
         <EmptyState
           icon={<Database size={32} strokeWidth={1.25} />}
           title="Add your first connection"
@@ -506,6 +549,16 @@ export function Explorer() {
               if (!selected && rows[0]) select(rows[0]);
             }}
             onScroll={(e) => setScrollTop((e.target as HTMLElement).scrollTop)}
+            onDragOver={(e) => {
+              if (!e.dataTransfer.types.includes(CONNECTION_MIME) || (e.target as HTMLElement).closest('[role="treeitem"]')) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              if (!e.dataTransfer.types.includes(CONNECTION_MIME) || (e.target as HTMLElement).closest('[role="treeitem"]')) return;
+              e.preventDefault();
+              void dropConnection(e.dataTransfer.getData(CONNECTION_MIME), null);
+            }}
           >
             <div style={{ height: rows.length * ROW_H, position: 'relative' }}>
               {rows.slice(first, last).map((r, i) => (
@@ -537,6 +590,15 @@ export function Explorer() {
           )}
         </>
       )}
+      {folderName !== null && (
+        <Dialog title="New connection folder" width={400} onClose={() => setFolderName(null)} onSubmit={createFolder}
+          footer={<><button className="btn" onClick={() => setFolderName(null)}>Cancel</button><button className="btn btn-primary" disabled={!folderName.trim()} onClick={createFolder}>Create folder</button></>}
+        >
+          <label className="form-label" htmlFor="connection-folder-name">Folder name</label>
+          <input id="connection-folder-name" className="input" value={folderName} dir="auto" onChange={(e) => { setFolderName(e.target.value); setFolderError(null); }} />
+          {folderError && <div role="alert">{folderError}</div>}
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -553,9 +615,10 @@ interface RowProps {
 }
 
 function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onActivate, onMenu }: RowProps) {
+  const [dropOver, setDropOver] = useState(false);
   const active = !!activity;
   const conn = useConnections((s) => (r.kind === 'connection' ? s.connections.find((c) => c.id === r.connectionId) : undefined));
-  const draggable = r.kind === 'object' || r.kind === 'column' || r.kind === 'query';
+  const draggable = r.kind === 'connection' || r.kind === 'object' || r.kind === 'column' || r.kind === 'query';
   // Schema / database colour tags: a dot on the node itself, a stripe and a faint tint on everything inside it.
   const scopeHex = useSettings((s) => {
     if (!r.connectionId || r.kind === 'connection' || r.kind === 'cfolder' || r.kind === 'status' || r.kind === 'source' || r.kind === 'security') return null;
@@ -601,7 +664,7 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
   return (
     <div
       id={`tree-${r.id}`}
-      className={`tree-row${selected ? ' selected' : ''}${r.kind === 'status' ? ` status ${r.status}` : ''}${r.kind === 'connection' ? ' root' : ''}${scopeCss ? ` has-scope${scopeNode ? ' scope-node' : ''}` : ''}`}
+      className={`tree-row${selected ? ' selected' : ''}${dropOver ? ' connection-drop-target' : ''}${r.kind === 'status' ? ` status ${r.status}` : ''}${r.kind === 'connection' ? ' root' : ''}${scopeCss ? ` has-scope${scopeNode ? ' scope-node' : ''}` : ''}`}
       role="treeitem"
       aria-level={r.depth + 1}
       aria-expanded={r.expandable ? r.expanded : undefined}
@@ -612,6 +675,11 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       draggable={draggable}
       onDragStart={(e) => {
         if (!r.connectionId) return;
+        if (r.kind === 'connection') {
+          e.dataTransfer.setData(CONNECTION_MIME, r.connectionId);
+          e.dataTransfer.effectAllowed = 'move';
+          return;
+        }
         if (r.kind === 'query' && r.savedQuery) {
           // A saved query dropped into an editor inserts its text.
           e.dataTransfer.setData('text/plain', r.savedQuery.sql);
@@ -649,6 +717,26 @@ function TreeRowView({ row: r, top, selected, activity, onSelect, onToggle, onAc
       }}
       onContextMenu={onMenu}
       {...importDropHandlers(targetOfRow(r))}
+      {...(r.kind === 'cfolder' ? {
+        onDragOver: (e: ReactDragEvent) => {
+          if (!e.dataTransfer.types.includes(CONNECTION_MIME)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+          setDropOver(true);
+        },
+        onDragLeave: (e: ReactDragEvent) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOver(false);
+        },
+        onDrop: (e: ReactDragEvent) => {
+          if (!e.dataTransfer.types.includes(CONNECTION_MIME)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setDropOver(false);
+          void dropConnection(e.dataTransfer.getData(CONNECTION_MIME), r.label);
+          if (!r.expanded) onToggle();
+        },
+      } : {})}
       title={title}
     >
       {r.kind === 'connection' && color && <span className="tree-conn-bar" aria-hidden="true" />}

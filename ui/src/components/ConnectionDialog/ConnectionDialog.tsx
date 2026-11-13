@@ -4,6 +4,8 @@ import { errorMessage } from '../../api/client';
 import type { ConnectionInput, ConnectionProfile, FormField, ProviderId, ProviderInfo, TestConnectionResult } from '../../api/types';
 import { getPlatform } from '../../platform';
 import { useConnections } from '../../store/connections';
+import { connectionFolderNames } from '../../store/connectionFolders';
+import { useSettings } from '../../store/settings';
 import { toast, useUi, type ConnectionDialogState } from '../../store/ui';
 import { connectAndOpen } from '../../app/actions';
 import { isMac } from '../../commands/keys';
@@ -114,6 +116,7 @@ interface Props {
 export function ConnectionDialog({ state, onClose }: Props) {
   const providers = useConnections((s) => s.providers);
   const connections = useConnections((s) => s.connections);
+  const settingsUi = useSettings((s) => s.settings.ui);
   const save = useConnections((s) => s.save);
   const test = useConnections((s) => s.test);
 
@@ -145,7 +148,7 @@ export function ConnectionDialog({ state, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const folders = useMemo(() => [...new Set(connections.map((c) => c.folder).filter((f): f is string => !!f))].sort(), [connections]);
+  const folders = useMemo(() => connectionFolderNames(connections, settingsUi), [connections, settingsUi]);
   const fields = (provider?.formSpec.fields ?? []).map((f) => fieldText(provider?.id, f));
   const visible = fields.filter((f) => isFieldVisible(f, values));
   const mainVisible = visible.filter((f) => !f.section);

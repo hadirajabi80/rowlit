@@ -6,6 +6,7 @@ import { newCondition, newGroup } from '../../filter/model';
 import type { ExecParam } from '../../filter/wire';
 import { installGridMockEngine, until } from '../../mocks/m15/testServer';
 import { useConnections } from '../../store/connections';
+import { useEdits } from '../../store/edits';
 import { useSessions } from '../../store/sessions';
 import { useTabs, type ViewTab } from '../../store/tabs';
 import type { DataGridProps } from '../Grid/DataGrid';
@@ -84,6 +85,20 @@ describe('Data tab: paging, server filter, sort and count', () => {
     });
     await until(() => calls.some((c) => c.sql.includes('ORDER BY name DESC, id')), 3000);
     expect(calls.find((c) => c.sql.includes('ORDER BY'))!.sql).toBe('SELECT *\nFROM customers\nORDER BY name DESC, id\nLIMIT 1000 OFFSET 0');
+  });
+
+  it('offers Insert row in the top toolbar before the search, without loading the remaining pages', async () => {
+    render(<DataTabView tab={{ ...TAB, id: 'dt-insert' }} theme="light" visible />);
+    await until(() => gridProps?.rows.length === 1000);
+    const insert = screen.getByRole('button', { name: 'Insert row' });
+    expect(insert.closest('.dt-toolbar')).toBeTruthy();
+    expect(insert).toHaveTextContent('Insert row');
+    expect(insert.compareDocumentPosition(screen.getByRole('textbox', { name: 'Search text columns' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const before = calls.filter((c) => c.sql.includes('LIMIT')).length;
+    fireEvent.click(insert);
+    expect(useEdits.getState().get(gridProps!.gridKey).pending.inserts).toHaveLength(1);
+    expect(calls.filter((c) => c.sql.includes('LIMIT'))).toHaveLength(before);
+    act(() => useEdits.getState().reset(gridProps!.gridKey));
   });
 
   it('filters always run on the server with parameters, and the count uses the same predicate', async () => {

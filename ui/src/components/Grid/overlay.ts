@@ -19,7 +19,7 @@ export function overlayRows(base: { length: number; get(i: number): CellValue[] 
   return {
     baseLength: n,
     length: n + appended.length,
-    get: (i) => (i < n ? (hasPatches ? patched[i] ?? base.get(i) : base.get(i)) : appended[i - n]),
+    get: (i) => patched[i] ?? (i < n ? base.get(i) : appended[i - n]),
   };
 }
 

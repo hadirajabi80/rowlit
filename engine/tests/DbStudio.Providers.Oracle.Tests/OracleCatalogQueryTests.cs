@@ -57,10 +57,13 @@ public sealed partial class OracleCatalogQueryTests
     }
 
     [Fact]
-    public void SchemasFallback_ExcludesMaintainedAccounts()
+    public void Schemas_ExcludesKnownSystemAccountsWithoutVersionDependentColumns()
     {
-        var sql = OracleCatalogQueries.SchemasFallback;
+        var sql = OracleCatalogQueries.Schemas;
         foreach (var s in new[] { "'SYS'", "'SYSTEM'", "'XDB'", "'OUTLN'", "'DBSNMP'", "'APPQOSSYS'" }) Assert.Contains(s, sql);
+        Assert.DoesNotContain("oracle_maintained", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FROM all_users", sql);
+        Assert.Contains("NOT LIKE 'APEX!_%' ESCAPE '!'", sql);
     }
 
     [Fact]

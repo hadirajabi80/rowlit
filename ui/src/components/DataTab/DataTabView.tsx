@@ -812,6 +812,12 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         <button className="icon-btn sm" title={reloadCmd.tooltip} aria-label="Reload" onClick={() => void refresh()} disabled={data.loading}>
           <RefreshCw size={14} className={data.loading ? 'spin' : undefined} />
         </button>
+        {editability?.editable && (
+          <button className="btn btn-xs" title={cv('grid.insertRow').tooltip} aria-label="Insert row" disabled={buffer.status === 'submitting'}
+            onClick={() => { const g = gridController(gridKey); if (g?.insertRow) g.insertRow(); else useEdits.getState().addInsert(gridKey, columns.length); }}>
+            <Plus size={14} /> Insert row
+          </button>
+        )}
         <div className="rs-quick">
           <Search size={13} />
           <input
@@ -842,7 +848,6 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         ))}
         {editability?.editable && (
           <span className="rs-pending">
-            <button className="icon-btn sm" title={cv('grid.insertRow').tooltip} aria-label="Insert row" onClick={() => { const g = gridController(gridKey); if (g?.insertRow) g.insertRow(); else useEdits.getState().addInsert(gridKey, columns.length); }}><Plus size={14} /></button>
             <button className="icon-btn sm" title={cv('grid.undo').tooltip} aria-label="Undo" disabled={!buffer.undo.length} onClick={() => useEdits.getState().undo(gridKey)}><Undo2 size={14} /></button>
             <button className="icon-btn sm" title={cv('grid.redo').tooltip} aria-label="Redo" disabled={!buffer.redo.length} onClick={() => useEdits.getState().redo(gridKey)}><Redo2 size={14} /></button>
             {pending > 0 && (

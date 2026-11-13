@@ -143,6 +143,8 @@ export function typesOfChips(chips: readonly TypeChip[]): Set<CatalogObjectType>
 
 export interface TreeInput {
   connections: ConnectionProfile[];
+  /** Saved empty connection folders, in addition to the folders on profiles. */
+  connectionFolders?: string[];
   conns: Record<string, ConnCatalog>;
   dbs: Record<string, DbCatalog>;
   expanded: ReadonlySet<string>;
@@ -229,6 +231,7 @@ function isBusy(input: TreeInput, cid: string): boolean {
 function buildFull(input: TreeInput): TreeRow[] {
   const rows: TreeRow[] = [];
   const byFolder = new Map<string, ConnectionProfile[]>();
+  for (const folder of input.connectionFolders ?? []) byFolder.set(folder, []);
   const loose: ConnectionProfile[] = [];
   for (const c of input.connections) {
     if (c.folder) {

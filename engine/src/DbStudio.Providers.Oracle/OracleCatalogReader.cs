@@ -36,15 +36,7 @@ public sealed partial class OracleCatalogReader : ICatalogReader
 
     public async Task<IReadOnlyList<SchemaInfo>> ListSchemasAsync(string? database, CancellationToken ct)
     {
-        List<string> names;
-        try
-        {
-            names = await OracleDb.QueryAsync(_conn, OracleCatalogQueries.Schemas, r => r.GetString(0), ct).ConfigureAwait(false);
-        }
-        catch (OracleException ex) when (ex.Number == 904) // ORACLE_MAINTAINED missing (11g)
-        {
-            names = await OracleDb.QueryAsync(_conn, OracleCatalogQueries.SchemasFallback, r => r.GetString(0), ct).ConfigureAwait(false);
-        }
+        var names = await OracleDb.QueryAsync(_conn, OracleCatalogQueries.Schemas, r => r.GetString(0), ct).ConfigureAwait(false);
         var current = await CurrentSchemaAsync(ct).ConfigureAwait(false);
         if (!names.Contains(current, StringComparer.Ordinal))
         {

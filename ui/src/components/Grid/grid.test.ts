@@ -113,6 +113,21 @@ describe('edit buffer', () => {
     s.redo(K);
     expect(useEdits.getState().get(K).pending.updates).toEqual({ 0: { 1: 'a', 2: 5 } });
   });
+  it('updates a saved insert immediately, including repeated saves and trigger values', () => {
+    const s = useEdits.getState();
+    const base = [[1, 'Ada']];
+    s.commit(K, { appended: [[2, 'Grace']] });
+    s.setCell(K, 1, 1, 'Grace H.', 'Grace');
+    s.commit(K, { patched: { 1: [2, 'Grace H. (trigger)'] } });
+    const rows = overlayRows({ length: base.length, get: (i) => base[i] }, s.get(K).committed);
+    expect(rows.get(1)).toEqual([2, 'Grace H. (trigger)']);
+    s.setCell(K, 1, 1, 'Updated again', rows.get(1)![1]);
+    s.commit(K, { patched: { 1: [2, 'Updated again'] }, appended: [[3, 'New row']] });
+    const next = overlayRows({ length: base.length, get: (i) => base[i] }, s.get(K).committed);
+    expect(next.get(1)).toEqual([2, 'Updated again']);
+    expect(next.get(2)).toEqual([3, 'New row']);
+  });
+
   it('inserts, insert cells and removal', () => {
     const s = useEdits.getState();
     const id = s.addInsert(K, 3);

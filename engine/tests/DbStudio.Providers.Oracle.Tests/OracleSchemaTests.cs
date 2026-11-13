@@ -10,6 +10,17 @@ public sealed class OracleSchemaTests(OracleFixture fixture) : IClassFixture<Ora
     private void RequireAvailable() => Skip.IfNot(fixture.IsAvailable, fixture.SkipReason ?? "Oracle not available.");
 
     [SkippableFact]
+    public async Task SchemaDiscovery_UsesPortableDictionaryQuery_AndKeepsCurrentSchema()
+    {
+        RequireAvailable();
+        await using var reader = await fixture.Provider.OpenCatalogReaderAsync(fixture.Profile!, fixture.Password, CancellationToken.None);
+        var schemas = await reader.ListSchemasAsync(null, CancellationToken.None);
+        Assert.Contains(schemas, s => s.Name == "SHOP");
+        Assert.DoesNotContain(schemas, s => s.Name == "SYS");
+        Assert.Equal(schemas.Select(s => s.Name).OrderBy(n => n, StringComparer.Ordinal), schemas.Select(s => s.Name));
+    }
+
+    [SkippableFact]
     public async Task CurrentSchema_MirrorsTheCurrentSchema_AndChangeSchemaSetsIt()
     {
         RequireAvailable();

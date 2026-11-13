@@ -642,6 +642,11 @@ body.resizing-row .splitter-horizontal {
 .tree-row.selected {
   background: var(--bg-selected-inactive);
 }
+.tree-row.connection-drop-target {
+  background: var(--bg-selected);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .tree:focus .tree-row.selected {
   background: var(--bg-selected);
 }
@@ -2132,4 +2137,3 @@ body.resizing-row .splitter-horizontal {
     opacity: 0;
   }
 }
-
