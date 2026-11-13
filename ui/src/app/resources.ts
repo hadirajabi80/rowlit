@@ -7,7 +7,7 @@ import { engineSocket } from '../api/ws';
 import { useExplorer } from '../components/Explorer/explorerStore';
 import { useCatalog, type DbCatalog } from '../store/catalog';
 import { hasPending, useEdits } from '../store/edits';
-import { formatBytes, useResources } from '../store/resources';
+import { formatBytes, useResources, type MemoryTrimResult } from '../store/resources';
 import { useResults, viewKey } from '../store/results';
 import { isRunning, type ExecutionState } from '../store/resultsReducer';
 import { useSessions } from '../store/sessions';
@@ -79,6 +79,8 @@ function releasable(e: ExecutionState, visible: Set<string>): boolean {
 export interface PolicyOptions {
   now?: number;
   level?: MemoryLevel;
+  /** An explicit cleanup works even when automatic release is switched off. */
+  manual?: boolean;
 }
 
 /**
@@ -101,8 +103,8 @@ export function runResourcePolicy(opts: PolicyOptions = {}): number {
     released += useResults.getState().releaseRows(e.localId, RELEASE_KEEP_ROWS, reason, now);
   };
 
-  if (settings.autoRelease) {
-    const pressure = level !== 'normal' && settings.trimUnderPressure;
+  if (opts.manual || settings.autoRelease) {
+    const pressure = !!opts.manual || (level !== 'normal' && settings.trimUnderPressure);
     const idleMs = settings.releaseResultsMinutes > 0 ? settings.releaseResultsMinutes * 60_000 : Infinity;
     let total = Object.values(results.executions).reduce((n, e) => n + rowsOf(e), 0);
     for (const e of candidates) {
@@ -115,7 +117,7 @@ export function runResourcePolicy(opts: PolicyOptions = {}): number {
     }
   }
 
-  evictCatalogs(settings.catalogCacheMb, level, now);
+  evictCatalogs(opts.manual ? 0 : settings.catalogCacheMb, level, now);
   return released;
 }
 
@@ -177,18 +179,37 @@ export async function reloadReleased(localId: string): Promise<boolean> {
  * Resources popover "Free memory now": the engine runs its policies as under critical pressure (idle sessions without
  * transactions or temporary objects, caches, GC) and this window releases every background result.
  */
-export async function freeMemoryNow(): Promise<void> {
-  const released = runResourcePolicy({ level: 'critical' });
+let freeingMemory: Promise<MemoryTrimResult | null> | null = null;
+
+export function freeMemoryNow(): Promise<MemoryTrimResult | null> {
+  if (freeingMemory) return freeingMemory;
+  freeingMemory = freeMemoryPass().finally(() => { freeingMemory = null; });
+  return freeingMemory;
+}
+
+async function freeMemoryPass(): Promise<MemoryTrimResult | null> {
+  useResources.setState({ trimming: true, lastTrim: null });
   try {
-    const before = useResources.getState().snapshot?.memory.usedBytes ?? null;
+    const baseline = await useResources.getState().refresh() ?? useResources.getState().snapshot;
+    const released = runResourcePolicy({ level: 'critical', manual: true });
     const snap = await api.resources.trim();
-    useResources.setState({ snapshot: snap, level: snap.memory.level });
+    useResources.setState({ snapshot: snap, level: snap.memory.level, sampledAt: Date.now(), error: null });
+    // Read the app's processes again as well: result rows were released in this window, too.
+    const after = await useResources.getState().refresh() ?? snap;
     useSessions.getState().refreshSoon(200);
-    const freed = before !== null ? Math.max(0, before - snap.memory.usedBytes) : 0;
-    toast('info', 'Freed memory', [freed > 0 ? `${formatBytes(freed)} returned by the engine` : null,
-      released ? `${released.toLocaleString()} result rows released` : null].filter(Boolean).join(' · ') || undefined);
+    const result: MemoryTrimResult = {
+      beforeBytes: baseline?.memory.usedBytes ?? after.memory.usedBytes, afterBytes: after.memory.usedBytes,
+      freedBytes: Math.max(0, (baseline?.memory.usedBytes ?? after.memory.usedBytes) - after.memory.usedBytes), releasedRows: released,
+    };
+    useResources.setState({ lastTrim: result });
+    toast('info', 'Memory cleanup complete', [result.freedBytes > 0 ? `${formatBytes(result.freedBytes)} freed` : 'No measurable memory drop',
+      released ? `${released.toLocaleString()} background result rows released` : null].filter(Boolean).join(' · '));
+    return result;
   } catch (e) {
     toast('error', 'Could not free memory', e instanceof Error ? e.message : String(e));
+    return null;
+  } finally {
+    useResources.setState({ trimming: false });
   }
 }
 

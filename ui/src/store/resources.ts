@@ -6,6 +6,14 @@ import { api } from '../api/client';
 import type { ResourcesSnapshot } from '../api/resources';
 import type { MemoryLevel } from '../api/types';
 import { getPlatform } from '../platform';
+import type { AppMemoryInfo } from '../platform/types';
+
+export interface MemoryTrimResult {
+  beforeBytes: number;
+  afterBytes: number;
+  freedBytes: number;
+  releasedRows: number;
+}
 
 interface ResourcesState {
   snapshot: ResourcesSnapshot | null;
@@ -13,6 +21,10 @@ interface ResourcesState {
   level: MemoryLevel;
   /** Electron processes (desktop) or the page's JS heap (browser, when the browser tells), bytes; null when unknown. */
   appBytes: number | null;
+  appMemory: AppMemoryInfo | null;
+  sampledAt: number | null;
+  trimming: boolean;
+  lastTrim: MemoryTrimResult | null;
   error: string | null;
   refresh(): Promise<ResourcesSnapshot | null>;
   setLevel(level: MemoryLevel): void;
@@ -24,15 +36,22 @@ interface ResourcesState {
 interface PerformanceMemory { usedJSHeapSize?: number }
 
 /** Memory of this app outside the engine: Electron's processes, else Chrome's JS heap of this page. */
-export async function readAppBytes(): Promise<number | null> {
+async function readAppMemory(): Promise<{ appBytes: number | null; appMemory: AppMemoryInfo | null }> {
   try {
     const p = getPlatform();
-    if (p.getAppMemory) return (await p.getAppMemory()).totalBytes;
+    if (p.getAppMemory) {
+      const appMemory = await p.getAppMemory();
+      return { appBytes: appMemory.totalBytes, appMemory };
+    }
   } catch {
     // older preload or a failed IPC: fall through
   }
   const heap = (globalThis.performance as (Performance & { memory?: PerformanceMemory }) | undefined)?.memory?.usedJSHeapSize;
-  return typeof heap === 'number' && heap > 0 ? heap : null;
+  return { appBytes: typeof heap === 'number' && heap > 0 ? heap : null, appMemory: null };
+}
+
+export async function readAppBytes(): Promise<number | null> {
+  return (await readAppMemory()).appBytes;
 }
 
 let refreshing: Promise<ResourcesSnapshot | null> | null = null;
@@ -41,14 +60,18 @@ export const useResources = create<ResourcesState>((set) => ({
   snapshot: null,
   level: 'normal',
   appBytes: null,
+  appMemory: null,
+  sampledAt: null,
+  trimming: false,
+  lastTrim: null,
   error: null,
   refresh() {
     if (refreshing) return refreshing;
     refreshing = (async () => {
       try {
-        const appBytes = await readAppBytes();
+        const { appBytes, appMemory } = await readAppMemory();
         const snapshot = appBytes !== null ? await api.resources.report(appBytes) : await api.resources.snapshot();
-        set({ snapshot, appBytes, level: snapshot.memory.level, error: null });
+        set({ snapshot, appBytes, appMemory, sampledAt: Date.now(), level: snapshot.memory.level, error: null });
         return snapshot;
       } catch (e) {
         set({ error: e instanceof Error ? e.message : String(e) });

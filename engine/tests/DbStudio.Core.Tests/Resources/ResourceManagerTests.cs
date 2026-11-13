@@ -167,6 +167,27 @@ public class IdleReaperTests
     }
 
     [Fact]
+    public async Task ManualCleanup_WorksWithAutoReleaseOff_AndKeepsOpenTransactions()
+    {
+        await using var env = new ResourceEnv("""{ "autoRelease": false, "trimUnderPressure": false, "idleSessionMinutes": 0 }""");
+        var c = env.AddSqlite("manual-cleanup.sqlite");
+        var idle = await env.SessionAsync(c);
+        var withTx = await env.SessionAsync(c);
+        await withTx.Session.SetTransactionModeAsync(TransactionMode.Manual, CancellationToken.None);
+        await env.RunAsync(withTx.Id, "CREATE TABLE IF NOT EXISTS protected_work (id INTEGER)");
+        await env.RunAsync(withTx.Id, "INSERT INTO protected_work VALUES (1)");
+        Assert.True(withTx.Session.TxOpen);
+        env.Clock.Advance(TimeSpan.FromMinutes(2));
+        await env.Resources.RunPolicyAsync();
+        Assert.False(idle.Released);
+        await env.Resources.RunPolicyAsync(aggressive: true);
+        Assert.True(idle.Released);
+        Assert.False(withTx.Released);
+        Assert.True(withTx.Session.TxOpen);
+        await withTx.Session.RollbackAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task ThePing_DoesNotCountAsActivity()
     {
         await using var env = new ResourceEnv("""{ "idleSessionMinutes": 10 }""");

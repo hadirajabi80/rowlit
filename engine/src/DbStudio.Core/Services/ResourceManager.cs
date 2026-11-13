@@ -250,6 +250,8 @@ public sealed class ResourceManager : IAsyncDisposable
         try
         {
             var policy = Policy();
+            // The automatic policy toggle must not disable an explicit "Free memory now" request.
+            if (aggressive) policy = policy with { AutoRelease = true };
             var memory = Memory();
             var level = aggressive ? LevelCritical : policy.TrimUnderPressure ? memory.Level : LevelNormal;
             if (!aggressive && memory.Level != Volatile.Read(ref _level))
@@ -277,7 +279,7 @@ public sealed class ResourceManager : IAsyncDisposable
 
             ClearIdlePools(policy, level, now);
 
-            if (level == LevelCritical && now - _lastCollect > TimeSpan.FromMinutes(5))
+            if (aggressive || (level == LevelCritical && now - _lastCollect > TimeSpan.FromMinutes(5)))
             {
                 _lastCollect = now;
                 GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;

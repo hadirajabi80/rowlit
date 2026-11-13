@@ -4,6 +4,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError } from '../api/client';
+import { getPlatform, setPlatform } from '../platform';
 import type { CatalogSchema, SessionInfo } from '../api/types';
 import { initCommands } from '../commands';
 import { isEnabled } from '../commands/registry';
@@ -24,7 +25,7 @@ import { useTabs, type ConsoleTab } from '../store/tabs';
 import { useUi } from '../store/ui';
 import { installMockEngine } from '../test/mockServer';
 import { closeDatabase, disconnectConnection } from './actions';
-import { reloadReleased, RELEASE_KEEP_ROWS, resetResourcePolicyForTests, runResourcePolicy, setLastViewedForTests } from './resources';
+import { freeMemoryNow, reloadReleased, RELEASE_KEEP_ROWS, resetResourcePolicyForTests, runResourcePolicy, setLastViewedForTests } from './resources';
 
 const mock = installMockEngine({ frameDelay: 0 });
 beforeAll(() => initCommands(), 60_000);
@@ -62,7 +63,7 @@ beforeEach(() => {
   useSettings.setState({ settings: DEFAULT_SETTINGS, loaded: true });
   useTabs.setState({ tabs: [consoleTab('t_fg'), consoleTab('t_bg'), consoleTab('t_bg2')], activeId: 't_fg', mru: [], closed: [], groups: [{ id: 'g1', tabIds: ['t_fg', 't_bg', 't_bg2'], activeId: 't_fg' }] } as never);
   useEdits.setState({ buffers: {} });
-  useResources.setState({ level: 'normal', snapshot: null, open: false });
+  useResources.setState({ level: 'normal', snapshot: null, open: false, trimming: false, lastTrim: null, appMemory: null, error: null });
 });
 
 describe('background results', () => {
@@ -284,7 +285,7 @@ describe('released sessions in the sessions store', () => {
 });
 
 describe('status bar Resources item', () => {
-  afterEach(() => useResources.setState({ open: false }));
+  afterEach(() => { useResources.setState({ open: false }); setPlatform(null); vi.restoreAllMocks(); });
 
   it('shows memory, opens the popover with the connections and closes one', async () => {
     mock.ctx.engine.sessions.clear();
@@ -294,11 +295,17 @@ describe('status bar Resources item', () => {
     await act(async () => {
       await useResources.getState().refresh();
     });
-    render(<ResourcesItem />);
+    const { container } = render(<footer style={{ overflow: 'hidden', height: 24 }}><ResourcesItem /></footer>);
     const button = screen.getByRole('button', { name: /^Resources: / });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ x: 800, y: 700, top: 700, bottom: 720, left: 800, right: 900, width: 100, height: 20, toJSON() {} });
+    button.focus();
     expect(button).toHaveTextContent('180 MB');
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Resources' }, { timeout: 10_000 });
+    expect(container.contains(dialog)).toBe(false); // the clipped status bar cannot hide the portal
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.style.maxHeight).toBe('680px');
+    expect(button).toHaveAttribute('aria-controls', dialog.id);
     expect(within(dialog).getByText('Shop (SQLite)')).toBeInTheDocument();
     expect(within(dialog).getByText('1 open session')).toBeInTheDocument();
     expect(within(dialog).getByRole('progressbar', { name: 'Memory use' })).toBeInTheDocument();
@@ -308,6 +315,71 @@ describe('status bar Resources item', () => {
     await vi.waitFor(() => expect(mock.ctx.engine.sessions.get(info.sessionId)?.released).toBe(true));
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useResources.getState().open).toBe(false);
+    await vi.waitFor(() => expect(button).toHaveFocus());
+  });
+
+  it('shows engine, cache and desktop process details and stays open while using them', async () => {
+    setPlatform({ ...getPlatform(), getAppMemory: async () => ({ totalBytes: 300 * 1024 ** 2, rendererBytes: 200 * 1024 ** 2, processes: 5, systemBytes: 16 * 1024 ** 3 }) });
+    render(<ResourcesItem />);
+    fireEvent.click(screen.getByRole('button', { name: /^Resources: / }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resources' });
+    await within(dialog).findByText('480 MB');
+    expect(within(dialog).getByText('Managed heap')).toBeInTheDocument();
+    const summary = within(dialog).getByText('App & windows').closest('summary')!;
+    fireEvent.mouseDown(summary);
+    fireEvent.click(summary);
+    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(within(dialog).getByText('200 MB')).toBeInTheDocument();
+    expect(within(dialog).getByText('Other app processes')).toBeInTheDocument();
+    expect(within(dialog).getByText('100 MB')).toBeInTheDocument();
+    expect(within(dialog).getByText('Result cache')).toBeInTheDocument();
+    expect(within(dialog).getByText('Metadata cache')).toBeInTheDocument();
+    expect(useResources.getState().open).toBe(true);
+    fireEvent.mouseDown(document.body);
+    expect(useResources.getState().open).toBe(false);
+  });
+
+  it('cleans immediately with automatic release off, protects edits, coalesces clicks and shows measured savings', async () => {
+    setResults([finished('t_fg', 5000), finished('t_bg', 5000), finished('t_bg2', 5000)]);
+    useEdits.getState().setCell(viewKey('l_t_bg2', 0), 1, 0, 42 as never, 0 as never);
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, resources: { ...DEFAULT_SETTINGS.resources, autoRelease: false, trimUnderPressure: false } } });
+    const snap = await api.resources.snapshot();
+    let measured = 180 * 1024 ** 2;
+    const sampled = () => ({ ...snap, memory: { ...snap.memory, engineBytes: measured, usedBytes: measured } });
+    vi.spyOn(api.resources, 'snapshot').mockImplementation(async () => sampled());
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const trim = vi.spyOn(api.resources, 'trim').mockImplementation(async () => { await gate; measured = 100 * 1024 ** 2; return sampled(); });
+    render(<ResourcesItem />);
+    fireEvent.click(screen.getByRole('button', { name: /^Resources: / }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resources' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Free memory now' }));
+    await vi.waitFor(() => expect(trim).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole('button', { name: 'Freeing memory…' })).toBeDisabled();
+    const duplicate = freeMemoryNow();
+    await act(async () => { finish(); await duplicate; });
+    expect(trim).toHaveBeenCalledTimes(1);
+    expect(rowsOf('t_bg')).toBe(RELEASE_KEEP_ROWS);
+    expect(rowsOf('t_fg')).toBe(5000);
+    expect(rowsOf('t_bg2')).toBe(5000);
+    expect(within(dialog).getByRole('status')).toHaveTextContent('80 MB freed');
+    expect(within(dialog).getByRole('status')).toHaveTextContent('180 MB → 100 MB');
+    expect(within(dialog).getByRole('button', { name: 'Free memory now' })).toBeEnabled();
+  });
+
+  it('allows retry after a failed cleanup and never reports savings that did not happen', async () => {
+    const trim = vi.spyOn(api.resources, 'trim').mockRejectedValueOnce(new Error('Engine unavailable'));
+    render(<ResourcesItem />);
+    fireEvent.click(screen.getByRole('button', { name: /^Resources: / }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resources' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Free memory now' }));
+    await vi.waitFor(() => expect(useResources.getState().trimming).toBe(false));
+    expect(trim).toHaveBeenCalledTimes(1);
+    expect(useResources.getState().lastTrim).toBeNull();
+    expect(useUi.getState().toasts.at(-1)?.text).toBe('Could not free memory');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Free memory now' }));
+    await within(dialog).findByText('Cleanup complete');
+    expect(within(dialog).getByRole('status')).toHaveTextContent('No measurable drop yet');
   });
 });
 

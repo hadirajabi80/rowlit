@@ -1,5 +1,5 @@
-import { Gauge } from 'lucide-react';
-import { lazy, Suspense } from 'react';
+import { ChevronUp, Gauge, LoaderCircle } from 'lucide-react';
+import { lazy, Suspense, useId, useRef } from 'react';
 import { formatBytes, useResources } from '../../store/resources';
 import { pluralize } from '../common/text';
 import './resourcesItem.css';
@@ -12,9 +12,12 @@ const ResourcesPopover = lazy(() => import('./ResourcesPopover'));
  * resources; amber above 85% of the memory limit, red above it. A click opens the Resources popover.
  */
 export function ResourcesItem() {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
   const snapshot = useResources((s) => s.snapshot);
   const level = useResources((s) => s.level);
   const open = useResources((s) => s.open);
+  const trimming = useResources((s) => s.trimming);
   const setOpen = useResources((s) => s.setOpen);
   const used = snapshot?.memory.usedBytes ?? null;
   const limit = snapshot?.memory.limitBytes ?? null;
@@ -26,19 +29,22 @@ export function ResourcesItem() {
     <span className="sb-resources-anchor">
       <button
         type="button"
-        className={`sb-item sb-button sb-resources level-${level}`}
+        ref={anchorRef}
+        className={`sb-item sb-button sb-resources level-${level}${open ? ' on' : ''}`}
         onClick={() => setOpen(!open)}
         title={title}
         aria-label={`Resources: ${snapshot ? `${formatBytes(used)} memory, ${pluralize(conns ?? 0, 'open connection')}` : 'memory and connections'}`}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-controls={open ? popoverId : undefined}
       >
-        <Gauge size={12} aria-hidden="true" />
-        {snapshot ? <span className="tabular">{formatBytes(used)}</span> : null}
+        {trimming ? <LoaderCircle size={12} className="spin" aria-hidden="true" /> : <Gauge size={12} aria-hidden="true" />}
+        <span className="tabular">{snapshot ? formatBytes(used) : 'Memory'}</span>
+        <ChevronUp size={10} className="sb-resources-chevron" aria-hidden="true" />
       </button>
       {open && (
         <Suspense fallback={null}>
-          <ResourcesPopover onClose={() => setOpen(false)} />
+          <ResourcesPopover id={popoverId} anchorRef={anchorRef} onClose={() => setOpen(false)} />
         </Suspense>
       )}
     </span>

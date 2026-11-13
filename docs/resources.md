@@ -41,7 +41,7 @@ is lost, which is why the automatic policies never release a session that:
 | Catalog cache (per schema snapshot, LRU by last snapshot request) | 128 MB budget, entries used in the last 10 min stay | ½ budget, 2 min / ¼ budget, 0 |
 | Stored result rows (paging, full cells, "export loaded rows") | 256 MB cap (LRU, existing), unread completed results expire after 30 min | expire after 5 min, ½ cap / 1 min, ¼ cap |
 | Pooled catalog connections (SQL Server, PostgreSQL per database, MySQL, Oracle) | cleared once a connection's metadata was not read for the idle timeout | same, with the shorter timeout |
-| Full compacting GC | — | critical: at most every 5 min |
+| Full compacting GC | — | critical: at most every 5 min; explicit cleanup collects immediately |
 
 An evicted catalog schema reloads lazily; the reload bumps the database version, so its ETag changes and a client that
 kept the old copy fetches the fresh one. Forgotten databases (Close database, Close connection, edited profile) keep
@@ -112,10 +112,18 @@ here, so the prompt then only offers Discard or Cancel.
 
 ## Status bar and popover
 
-The status bar shows memory in use (amber at `high`, red at `critical`). A click opens the Resources popover (loaded
-lazily): memory against the limit (engine, windows, result cache, metadata), every connection with what it holds
-(open / released sessions, client, live views, jobs, metadata size) and a **Close** button, **Free memory now** (one
-engine pass as under critical pressure plus releasing every background result), **Disconnect all** and Settings.
+The status bar shows memory in use (amber at `high`, red at `critical`) with a disclosure arrow. A click opens a
+viewport-positioned Resources inspector outside the status bar's clipped overflow. It refreshes every five seconds:
+memory against the limit, expandable engine and app/window totals, the managed heap, desktop renderer/process details,
+result-cache usage and cap, metadata-cache size and schema count, and every connection's held resources.
+
+**Free memory now** performs an explicit engine cleanup and releases eligible background result rows and unused
+window catalogs, even when automatic release or trimming under pressure is disabled. Manual engine cleanup bypasses
+the automatic five-minute GC cooldown. Running work, visible results, unsaved edits, transactions and temporary
+objects retain their existing protections. Concurrent clicks share one cleanup; controls show progress until it
+finishes. Memory is sampled before and after (including app processes), with measured savings and released row counts
+shown in the inspector. A zero reduction is reported honestly rather than counted as freed memory. Connection close,
+**Disconnect all** and memory settings remain available from the inspector.
 
 ## Settings (`settings.json` › `resources`, Settings › Connections › Resources)
 
