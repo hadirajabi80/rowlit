@@ -546,8 +546,8 @@ public sealed class ResourceManager : IAsyncDisposable
                 foreach (var j in _jobs?.List() ?? [])
                     if (j.ConnectionId == connectionId && _jobs!.Cancel(j.JobId)) cancelled++;
             // Give cancelled statements a moment to end so their sessions can be released.
-            var deadline = _time.GetUtcNow() + TimeSpan.FromSeconds(5);
-            while (scope.Any(h => h.IsRunning) && _time.GetUtcNow() < deadline)
+            var wait = System.Diagnostics.Stopwatch.StartNew();
+            while (scope.Any(h => h.IsRunning) && wait.Elapsed < TimeSpan.FromSeconds(5))
                 await Task.Delay(50).ConfigureAwait(false);
         }
         var sessions = 0;
@@ -556,11 +556,29 @@ public sealed class ResourceManager : IAsyncDisposable
         {
             if (automatic && !IsReleasable(h)) continue;
             var hadTx = !h.Released && h.Session.TxOpen;
-            if (await _sessions.ReleaseAsync(h, reason, force).ConfigureAwait(false))
+            var released = await _sessions.ReleaseAsync(h, reason, force).ConfigureAwait(false);
+            if (!automatic && !released && h.HoldsConnection && h.ActiveOperation is "ping" or "release")
+            {
+                // An idle health check can reserve the session between blocker inspection and release.
+                // Wait for it instead of reporting a successful close with the socket still open.
+                var wait = System.Diagnostics.Stopwatch.StartNew();
+                while (!released && h.HoldsConnection && h.ActiveOperation is "ping" or "release" && wait.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    await Task.Delay(50).ConfigureAwait(false);
+                    released = await _sessions.ReleaseAsync(h, reason, force).ConfigureAwait(false);
+                }
+            }
+            if (released)
             {
                 sessions++;
                 if (hadTx) rolledBack++;
             }
+        }
+        if (!automatic && scope.Any(h => h.HoldsConnection))
+        {
+            var remaining = scope.Where(h => h.HoldsConnection)
+                .Select(h => new ResourceBlocker("query", $"{h.DisplayName} — still busy; retry closing when it stops", connectionId, h.Id, h.TabId)).ToList();
+            throw new EngineException(409, ErrorCodes.ResourceBusy, "Some sessions are still busy and could not be closed.", new { blockers = remaining });
         }
         var streams = 0;
         var clients = 0;

@@ -339,6 +339,23 @@ describe('status bar Resources item', () => {
     expect(useResources.getState().open).toBe(false);
   });
 
+  it('Disconnect all closes engine resources even when the window has no cached sessions or catalog', async () => {
+    mock.ctx.engine.sessions.clear();
+    await useConnections.getState().load();
+    const info = await api.createSession({ connectionId: 'c_shop', database: null, txMode: 'auto', captureServerOutput: false });
+    useSessions.setState({ sessions: {}, byTab: {} });
+    useCatalog.setState({ conns: {}, dbs: {}, closed: {} });
+    await act(() => useResources.getState().refresh());
+    render(<ResourcesItem />);
+    fireEvent.click(screen.getByRole('button', { name: /^Resources: / }));
+    const dialog = await screen.findByRole('dialog', { name: 'Resources' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect all' }));
+    await vi.waitFor(() => expect(mock.ctx.engine.sessions.get(info.sessionId)?.released).toBe(true));
+    await vi.waitFor(() => expect(within(dialog).getByRole('button', { name: 'Close Shop (SQLite)' })).toHaveTextContent('Closed'));
+    expect(within(dialog).getByRole('button', { name: 'Disconnect all' })).toBeDisabled();
+    expect(useResources.getState().snapshot?.totals.openConnections).toBe(0);
+  });
+
   it('cleans immediately with automatic release off, protects edits, coalesces clicks and shows measured savings', async () => {
     setResults([finished('t_fg', 5000), finished('t_bg', 5000), finished('t_bg2', 5000)]);
     useEdits.getState().setCell(viewKey('l_t_bg2', 0), 1, 0, 42 as never, 0 as never);

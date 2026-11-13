@@ -960,11 +960,11 @@ export async function closeDatabase(connectionId: string, database: string | nul
 }
 
 /** Connections ▸ Disconnect all: every connection this window holds or has cached (another window's sessions stay open). */
-export async function disconnectAll(): Promise<void> {
+export async function disconnectAll(resourceConnectionIds: readonly string[] = []): Promise<void> {
   const mine = closableSessions();
   const ids = [...new Set(mine.map((s) => s.connectionId))];
   const cached = Object.keys(useCatalog.getState().conns);
-  const all = [...new Set([...ids, ...cached, ...Object.keys(useSourceClients.getState().clients)])];
+  const all = [...new Set([...ids, ...cached, ...Object.keys(useSourceClients.getState().clients), ...resourceConnectionIds])];
   if (!all.length) return;
   if (!(await resolvePendingEdits('Disconnect all', ''))) return;
   const r = await closeWithConfirm('Disconnect all', '', mine.filter((s) => s.txOpen), runningItems(), (force) => api.resources.closeAll(force));

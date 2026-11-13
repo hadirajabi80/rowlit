@@ -44,14 +44,15 @@ const TAB: ViewTab = { kind: 'view', id: 'dt1', title: 'customers', view: 'data'
 let confirm: ReturnType<typeof vi.fn>;
 let choice: ReturnType<typeof vi.fn>;
 
-beforeAll(async () => {
-  await useConnections.getState().load();
-  setSqlRunner(async (_sid, sql) => {
+const defaultRunner = async (_sid: string, sql: string) => {
     runs.push(sql);
     if (sql.includes('WHERE 1 = 0')) return outcome(COLUMNS, []);
     if (sql.startsWith('SELECT COUNT(*)')) return outcome([col('row_count', 'int', 0)], [[3]]);
     return outcome(COLUMNS, [[1, 'a'], [2, 'b'], [3, 'c']]);
-  });
+};
+beforeAll(async () => {
+  await useConnections.getState().load();
+  setSqlRunner(defaultRunner);
 });
 afterAll(() => setSqlRunner(null));
 
@@ -82,6 +83,28 @@ async function openTabs() {
 }
 
 describe('Close connection with an open console and Data tab', () => {
+  it('does not start the page query when an outstanding describe finishes after disconnect', async () => {
+    let finish!: (result: QueryOutcome) => void;
+    const probe = new Promise<QueryOutcome>((resolve) => { finish = resolve; });
+    setSqlRunner(async (sid, sql) => {
+      if (sql.includes('WHERE 1 = 0')) { runs.push(sql); return probe; }
+      return defaultRunner(sid, sql);
+    });
+    try {
+      render(<DataTabView tab={TAB} theme="light" visible />);
+      await until(() => runs.some((sql) => sql.includes('WHERE 1 = 0')));
+      await act(() => disconnectConnection('c_shop'));
+      await act(async () => { finish(outcome(COLUMNS, [])); await probe; });
+      await settle();
+      expect(runs.filter((sql) => sql.includes('LIMIT'))).toEqual([]);
+      expect(useCatalog.getState().closed.c_shop).toBe(true);
+      expect(useSessions.getState().forTab('dt1')?.released).toBe(true);
+    } finally {
+      finish(outcome(COLUMNS, []));
+      setSqlRunner(defaultRunner);
+    }
+  });
+
   it('releases both sessions, keeps the tabs and their rows, and says Disconnected', async () => {
     const { con, data } = await openTabs();
     mock.ctx.requests.length = 0;
@@ -96,6 +119,7 @@ describe('Close connection with an open console and Data tab', () => {
     expect(screen.getByRole('button', { name: /Reconnect/ })).toBeInTheDocument();
     expect(useTabs.getState().tabs.map((t) => t.id)).toEqual(['dt1']);
     expect(useCatalog.getState().closed.c_shop).toBe(true);
+    expect(gridProps!.onReachEnd).toBeUndefined();
   });
 
   it('nothing reconnects by itself: no catalog load, no session, no query after the close', async () => {

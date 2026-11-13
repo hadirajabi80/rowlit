@@ -32,6 +32,7 @@ import { useTabs } from '../../store/tabs';
 import { toast, useUi } from '../../store/ui';
 import type { TabViewProps } from '../layout/tabViews';
 import { commandMenuItems } from '../layout/commandMenu';
+import { OverflowToolbar, type OverflowItem } from '../layout/OverflowToolbar';
 import { showMenuBelow } from '../common/Menu';
 import { Splitter } from '../common/Splitter';
 import { DeferredNotice } from '../FilterBar/DeferredNotice';
@@ -58,8 +59,8 @@ import { RecordView } from '../RecordView/RecordView';
 import { ExecutedQueryLine } from '../ResultsPane/ExecutedQueryLine';
 import type { ExecutedQuery } from '../ResultsPane/executedQuery';
 import { openExportDialog } from '../Export/open';
-import { GRID_EXPORT_MENU } from '../ResultsPane/toolbarModel';
-import { chartBodyClass, useResultView } from '../Charts/chartMode';
+import { GRID_EXPORT_MENU, GRID_SAVE_MENU } from '../ResultsPane/toolbarModel';
+import { chartBodyClass, chartToggleMenu, useResultView } from '../Charts/chartMode';
 import { ChartPanel, ChartToggle } from '../Charts/ChartToggle';
 import { consumeGridFocus, dataGridKey, hasPendingGridFocus, openDataTab, type DataTabState, type SortByName } from './open';
 import { getSqlRunner } from './runner';
@@ -308,7 +309,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
 
   /** COUNT(*) on the tab's own session, queued behind the page that asked for it. */
   const runCountNow = async (where: string | null, params: ExecParam[], seq: number, t: TableTarget) => {
-    if (seq !== loadSeq.current) return; // a newer load replaced the rows
+    if (seq !== loadSeq.current || isCatalogClosed(useCatalog.getState().closed, connectionId, catDb)) return;
     setCount({ value: null, loading: true, error: null });
     countRunning.current = true;
     try {
@@ -391,6 +392,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     }
     return exclusive(async () => {
       if (req === 'next') moreQueued.current = false;
+      if (isCatalogClosed(useCatalog.getState().closed, connectionId, catDb)) return;
       // Cancel ("Still loading…") ends the wait even when the server never answers, so the queue behind it is free.
       const cancelled = new Promise<void>((resolve) => { cancelWaiter.current = resolve; });
       try {
@@ -399,7 +401,18 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
         cancelWaiter.current = null;
       }
     });
-  }, [exclusive, tab.id]);
+  }, [exclusive, tab.id, connectionId, catDb]);
+
+  useEffect(() => {
+    if (!catalogClosed) return;
+    // A pending page/count must not reopen the connection after an explicit disconnect.
+    loadSeq.current++;
+    moreQueued.current = false;
+    useSessions.getState().cancelPending(tab.id);
+    cancelWaiter.current?.();
+    setCount((c) => ({ ...c, loading: false }));
+    setData((d) => ({ ...d, loading: false }));
+  }, [catalogClosed, tab.id]);
 
   // A load that takes SLOW_LOAD_MS (a server that does not answer) shows "Still loading…" with Cancel / Retry.
   useEffect(() => {
@@ -463,9 +476,11 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
     const source = { tabId: tab.id, title: tab.title };
     try {
       const s = await ensureSession();
+      if (seq !== loadSeq.current) return;
       let cols = colsRef.current;
       if (!cols) {
         const probe = await run(s.sessionId, describeSql(target, dialect), [], { label: 'data', maxRows: 1, source, skipHistory: true });
+        if (seq !== loadSeq.current) return;
         if (probe.error || !probe.resultSets[0]) {
           throw Object.assign(new Error(probe.error?.message ?? `${state.name} returned no columns: it has none, or the server cannot describe it.`), { code: probe.error?.code ?? null });
         }
@@ -482,6 +497,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       // is only worth its full sort while the object is known to be small; above that, pages are read unordered.
       let keys = found?.obj.pk?.length ? found.obj.pk : cols.filter((c) => c.isKey).map((c) => c.name);
       if (!keys.length) keys = (await uniqueKeyFor(cols)) ?? [];
+      if (seq !== loadSeq.current) return;
       let fallback: string[] | null = null;
       /** COUNT(*) done before the page: 'known' / 'failed' (shown, not repeated) or 'retry' (count after the page). */
       let counted: 'known' | 'failed' | 'retry' | null = null;
@@ -516,7 +532,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       const runPage = () => run(s.sessionId, page.sql, pred.params, { label: 'data', maxRows: limit, source, ...(req === 'next' ? { skipHistory: true } : {}) });
       let res = await runPage();
       if (seq !== loadSeq.current) return;
-      if ((res.error || res.status === 'error') && withRowid.current && req === 0) {
+      if (res.status !== 'cancelled' && (res.error || res.status === 'error') && withRowid.current && req === 0) {
         // An object without ROWID (a complex view opened as a table, an external table: ORA-01445/01446/02031): read it
         // without, read-only. When that fails too, the error is not about ROWID (a bad filter) and ROWID stays.
         const first = page;
@@ -580,7 +596,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const started = useRef(false);
   const anyPending = pending > 0;
   useEffect(() => {
-    if (!connectionId) return;
+    if (!connectionId || catalogClosed) return;
     if (!started.current) {
       started.current = true; // refs survive StrictMode's effect re-run: page 0 and COUNT run once
       void load(0);
@@ -593,7 +609,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       void load(0);
     }, 350);
     return () => clearTimeout(t);
-  }, [sigNow, connectionId, anyPending]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sigNow, connectionId, anyPending, catalogClosed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The table was opened again (explorer, Ctrl+P, a list…) while its last load had failed: load it again.
   useEffect(() => {
@@ -616,6 +632,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
 
   const loadMore = useCallback(() => {
     if (!hasMoreRef.current) return;
+    useCatalog.getState().reopen(connectionId, catDb);
     const b = useEdits.getState().get(gridKey);
     if (b.committed.appended.length || Object.keys(b.committed.hidden).length) {
       // Rows inserted/deleted since the first page shift positions: start over to keep pages consistent.
@@ -625,7 +642,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       return;
     }
     void load('next');
-  }, [gridKey, load]);
+  }, [gridKey, load, connectionId, catDb]);
 
   const refresh = useCallback(async () => {
     if (hasPending(useEdits.getState().get(gridKey))) {
@@ -635,8 +652,9 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
       if (!ok) return;
     }
     useEdits.getState().reset(gridKey);
+    useCatalog.getState().reopen(connectionId, catDb);
     void load(0);
-  }, [gridKey, load]);
+  }, [gridKey, load, connectionId, catDb]);
 
   /**
    * Actions that cannot be deferred (the empty-result "Clear filter"): ask before discarding pending edits. On
@@ -665,6 +683,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const applyNow = () => {
     if (hasPending(useEdits.getState().get(gridKey))) return;
     useEdits.getState().reset(gridKey);
+    useCatalog.getState().reopen(connectionId, catDb);
     void load(0);
   };
 
@@ -803,95 +822,120 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
   const filterTip = cv('grid.filter').tooltip;
   const idle = data.errorCode === 'SESSION_LIMIT' ? idleSessionTabs(connectionId).filter((t) => t !== tab.id) : [];
 
+  const insertRow = () => {
+    const g = gridController(gridKey);
+    if (g?.insertRow) g.insertRow();
+    else useEdits.getState().addInsert(gridKey, columns.length);
+  };
+  const toolbarItems: OverflowItem[] = [
+    {
+      id: 'title', priority: 8,
+      node: <span className="dt-heading"><Table2 size={15} className="dt-icon" /><span className="dt-title" title={title}>{title}</span></span>,
+    },
+    { id: 'connection', priority: 0, node: <span className="dt-conn muted">{conn?.name}</span> },
+    {
+      id: 'reload', priority: 9,
+      node: <button className="icon-btn sm" title={reloadCmd.tooltip} aria-label="Reload" onClick={() => void refresh()} disabled={data.loading}><RefreshCw size={14} className={data.loading ? 'spin' : undefined} /></button>,
+      menu: () => [{ label: 'Reload data', disabled: data.loading, onClick: () => void refresh() }],
+    },
+  ];
+  if (editability?.editable) toolbarItems.push({
+    id: 'insert',
+    node: <button className="btn btn-xs" title={cv('grid.insertRow').tooltip} aria-label="Insert row" disabled={buffer.status === 'submitting'} onClick={insertRow}><Plus size={14} /><span className="dt-primary-label">Insert row</span></button>,
+  });
+  toolbarItems.push(
+    {
+      id: 'search',
+      node: <div className="rs-quick">
+        <Search size={13} />
+        <input className="input xs borderless" placeholder="Search text columns" aria-label="Search text columns" dir="auto" value={quick} spellCheck={false}
+          onChange={(e) => changeQuick(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && quick && changeQuick('')} />
+        {quick && <button className="icon-btn xs" aria-label="Clear search" onClick={() => changeQuick('')}><X size={12} /></button>}
+      </div>,
+    },
+    {
+      id: 'filter', priority: 10,
+      node: <button className={`btn btn-xs${barOpen || n ? ' on' : ''}`} onClick={() => setBarOpen(!barOpen)} aria-label={`Filter${n ? ` (${n})` : ''}`} aria-pressed={barOpen} title={filterTip}><Funnel size={12} /><span className="dt-primary-label">Filter</span>{n ? ` (${n})` : ''}</button>,
+      menu: () => [{ label: `Filter${n ? ` (${n})` : ''}`, checked: barOpen, onClick: () => setBarOpen(!barOpen) }],
+    },
+  );
+  if (sortKeys.length) toolbarItems.push({
+    id: 'sort', priority: 3,
+    node: <button className="btn btn-xs" onClick={() => changeSort([])} title={cv('grid.clearSort').title}>Sorted by {sortKeys.map((s) => `${columns[s.column]?.name} ${s.dir}`).join(', ')} <X size={11} /></button>,
+    menu: () => [{ label: 'Clear sort', onClick: () => changeSort([]) }],
+  });
+  toolbarItems.push({ id: 'spacer', spacer: true });
+  if (editability) toolbarItems.push({
+    id: 'editability', priority: 0,
+    node: editability.editable
+      ? <span className="rs-badge editable" title={`Key: ${editability.target?.keyColumns.join(', ')}`}><PencilLine size={11} /> Editable</span>
+      : <span className="rs-badge" title={disconnected ? 'Reconnect to edit this table' : editability.reason ?? undefined}><Lock size={11} />{disconnected ? 'Read-only while disconnected' : editability.reason}</span>,
+  });
+  if (editability?.editable) {
+    toolbarItems.push({
+      id: 'undo-redo', priority: 1,
+      node: <span className="rs-pending">
+        <button className="icon-btn sm" title={cv('grid.undo').tooltip} aria-label="Undo" disabled={!buffer.undo.length} onClick={() => useEdits.getState().undo(gridKey)}><Undo2 size={14} /></button>
+        <button className="icon-btn sm" title={cv('grid.redo').tooltip} aria-label="Redo" disabled={!buffer.redo.length} onClick={() => useEdits.getState().redo(gridKey)}><Redo2 size={14} /></button>
+      </span>,
+      menu: () => commandMenuItems([{ command: 'grid.undo' }, { command: 'grid.redo' }], gridArgs),
+    });
+    if (pending) toolbarItems.push({
+      id: 'save', priority: 11,
+      node: <span className="rs-pending"><PendingBar gridKey={gridKey} count={pending} actions={pendingActions} /></span>,
+      menu: () => [{ label: `Save (${pending})`, disabled: buffer.status === 'submitting', onClick: () => {
+        const g = gridController(gridKey);
+        if (g?.submit) g.submit();
+        else void pendingActions.save();
+      } }, ...commandMenuItems(GRID_SAVE_MENU, gridArgs)],
+    });
+  }
+  toolbarItems.push(
+    { id: 'sep-export', separator: true },
+    { id: 'chart', priority: 2, node: <ChartToggle viewKey={gridKey} disabled={!data.columns} />, menu: () => chartToggleMenu(gridKey, !data.columns) },
+    {
+      id: 'export', priority: 4,
+      node: <button className="btn btn-xs" aria-haspopup="menu" disabled={!data.columns} title="Export or copy the loaded rows" aria-label="Export"
+        onClick={(e) => showMenuBelow(e.currentTarget, commandMenuItems(GRID_EXPORT_MENU, { gridKey, all: true }))}><Download size={12} /><span className="dt-btn-label">Export</span><ChevronDown size={11} /></button>,
+      menu: () => commandMenuItems(GRID_EXPORT_MENU, { gridKey, all: true }),
+    },
+  );
+  if (importCmd.enabled) toolbarItems.push({
+    id: 'import', priority: 2,
+    node: <button className="btn btn-xs" aria-label="Import data" title="Import data from a CSV, Excel or JSON file into this table" onClick={() => runCommand('import.open', importTarget)}><FileInput size={12} /><span className="dt-btn-label">Import…</span></button>,
+    menu: () => commandMenuItems([{ command: 'import.open' }], importTarget),
+  });
+  if (generateCmd.enabled) toolbarItems.push({
+    id: 'generate', priority: 1,
+    node: <button className="btn btn-xs" aria-label="Generate data" title="Fill this table with generated test rows" onClick={() => runCommand('data.generate', importTarget)}><Dices size={12} /><span className="dt-btn-label">Generate…</span></button>,
+    menu: () => commandMenuItems([{ command: 'data.generate' }], importTarget),
+  });
+  toolbarItems.push(
+    {
+      id: 'code', priority: 2,
+      node: <button className="btn btn-xs" aria-label="Generate code" title={codeCmd.tooltip} disabled={!codeCmd.enabled} onClick={() => runCommand('dataTab.codegen', tabArgs)}><Code2 size={12} /><span className="dt-btn-label">Code</span></button>,
+      menu: () => commandMenuItems([{ command: 'dataTab.codegen' }], tabArgs),
+    },
+    {
+      id: 'design', priority: 2,
+      node: <button className="btn btn-xs" aria-label="Design table" title={designCmd.tooltip} disabled={!designCmd.enabled} onClick={() => runCommand('dataTab.design', tabArgs)}><PencilRuler size={12} /><span className="dt-btn-label">Design</span></button>,
+      menu: () => commandMenuItems([{ command: 'dataTab.design' }], tabArgs),
+    },
+    {
+      id: 'viewer', priority: 1,
+      node: <button className={`icon-btn sm${valueOpen ? ' on' : ''}`} title={cv('grid.toggleValueViewer').tooltip} aria-label="Value viewer" aria-pressed={valueOpen} onClick={() => setValueOpen(!valueOpen)}><PanelRight size={14} /></button>,
+      menu: () => [{ label: 'Value viewer', checked: valueOpen, onClick: () => setValueOpen(!valueOpen) }],
+    },
+    {
+      id: 'record', priority: 1,
+      node: <button className={`icon-btn sm${recordOpen ? ' on' : ''}`} title={cv('grid.toggleRecordView').tooltip} aria-label="Record view" aria-pressed={recordOpen} onClick={() => setRecordOpen(!recordOpen)}><Rows3 size={14} /></button>,
+      menu: () => [{ label: 'Record view', checked: recordOpen, onClick: () => setRecordOpen(!recordOpen) }],
+    },
+  );
+
   return (
     <div className="dt" style={{ display: visible ? undefined : 'none' }} data-command-scope="dataTab">
-      <div className="dt-toolbar">
-        <Table2 size={15} className="dt-icon" />
-        <span className="dt-title" title={title}>{title}</span>
-        <span className="dt-conn muted">{conn?.name}</span>
-        <button className="icon-btn sm" title={reloadCmd.tooltip} aria-label="Reload" onClick={() => void refresh()} disabled={data.loading}>
-          <RefreshCw size={14} className={data.loading ? 'spin' : undefined} />
-        </button>
-        {editability?.editable && (
-          <button className="btn btn-xs" title={cv('grid.insertRow').tooltip} aria-label="Insert row" disabled={buffer.status === 'submitting'}
-            onClick={() => { const g = gridController(gridKey); if (g?.insertRow) g.insertRow(); else useEdits.getState().addInsert(gridKey, columns.length); }}>
-            <Plus size={14} /> Insert row
-          </button>
-        )}
-        <div className="rs-quick">
-          <Search size={13} />
-          <input
-            className="input xs borderless"
-            placeholder="Search text columns"
-            aria-label="Search text columns"
-            dir="auto"
-            value={quick}
-            spellCheck={false}
-            onChange={(e) => changeQuick(e.target.value)}
-            onKeyDown={(e) => e.key === 'Escape' && quick && changeQuick('')}
-          />
-          {quick && <button className="icon-btn xs" aria-label="Clear search" onClick={() => changeQuick('')}><X size={12} /></button>}
-        </div>
-        <button className={`btn btn-xs${barOpen || n ? ' on' : ''}`} onClick={() => setBarOpen(!barOpen)} aria-pressed={barOpen} title={filterTip}>
-          <Funnel size={12} /> Filter{n ? ` (${n})` : ''}
-        </button>
-        {sortKeys.length > 0 && (
-          <button className="btn btn-xs" onClick={() => changeSort([])} title={cv('grid.clearSort').title}>
-            Sorted by {sortKeys.map((s) => `${columns[s.column]?.name} ${s.dir}`).join(', ')} <X size={11} />
-          </button>
-        )}
-        <div className="flex-1" />
-        {editability && (editability.editable ? (
-          <span className="rs-badge editable" title={`Key: ${editability.target?.keyColumns.join(', ')}`}><PencilLine size={11} /> Editable</span>
-        ) : (
-          <span className="rs-badge" title={disconnected ? 'Reconnect to edit this table' : editability.reason ?? undefined}><Lock size={11} /> {disconnected ? 'Read-only while disconnected' : editability.reason}</span>
-        ))}
-        {editability?.editable && (
-          <span className="rs-pending">
-            <button className="icon-btn sm" title={cv('grid.undo').tooltip} aria-label="Undo" disabled={!buffer.undo.length} onClick={() => useEdits.getState().undo(gridKey)}><Undo2 size={14} /></button>
-            <button className="icon-btn sm" title={cv('grid.redo').tooltip} aria-label="Redo" disabled={!buffer.redo.length} onClick={() => useEdits.getState().redo(gridKey)}><Redo2 size={14} /></button>
-            {pending > 0 && (
-              <>
-                <PendingBar gridKey={gridKey} count={pending} actions={pendingActions} />
-              </>
-            )}
-          </span>
-        )}
-        <span className="rs-sep" />
-        <ChartToggle viewKey={gridKey} disabled={!data.columns} />
-        <button
-          className="btn btn-xs"
-          aria-haspopup="menu"
-          disabled={!data.columns}
-          title="Export or copy the loaded rows"
-          aria-label="Export"
-          onClick={(e) => showMenuBelow(e.currentTarget, commandMenuItems(GRID_EXPORT_MENU, { gridKey, all: true }))}
-        >
-          <Download size={12} /> <span className="dt-btn-label">Export</span> <ChevronDown size={11} />
-        </button>
-        {importCmd.enabled && (
-          <button className="btn btn-xs" aria-label="Import data" title="Import data from a CSV, Excel or JSON file into this table" onClick={() => runCommand('import.open', importTarget)}>
-            <FileInput size={12} /> <span className="dt-btn-label">Import…</span>
-          </button>
-        )}
-        {generateCmd.enabled && (
-          <button className="btn btn-xs" aria-label="Generate data" title="Fill this table with generated test rows" onClick={() => runCommand('data.generate', importTarget)}>
-            <Dices size={12} /> <span className="dt-btn-label">Generate…</span>
-          </button>
-        )}
-        <button className="btn btn-xs" aria-label="Generate code" title={codeCmd.tooltip} disabled={!codeCmd.enabled} onClick={() => runCommand('dataTab.codegen', tabArgs)}>
-          <Code2 size={12} /> <span className="dt-btn-label">Code</span>
-        </button>
-        <button className="btn btn-xs" aria-label="Design table" title={designCmd.tooltip} disabled={!designCmd.enabled} onClick={() => runCommand('dataTab.design', tabArgs)}>
-          <PencilRuler size={12} /> <span className="dt-btn-label">Design</span>
-        </button>
-        <button className={`icon-btn sm${valueOpen ? ' on' : ''}`} title={cv('grid.toggleValueViewer').tooltip} aria-label="Value viewer" aria-pressed={valueOpen} onClick={() => setValueOpen(!valueOpen)}>
-          <PanelRight size={14} />
-        </button>
-        <button className={`icon-btn sm${recordOpen ? ' on' : ''}`} title={cv('grid.toggleRecordView').tooltip} aria-label="Record view" aria-pressed={recordOpen} onClick={() => setRecordOpen(!recordOpen)}>
-          <Rows3 size={14} />
-        </button>
-      </div>
+      <OverflowToolbar className="dt-toolbar" ariaLabel="Table data toolbar" moreLabel="More table actions" items={toolbarItems} />
       {barOpen && data.columns && (
         <FilterBar
           columns={columns}
@@ -984,7 +1028,7 @@ export function DataTabView({ tab, theme, visible }: TabViewProps) {
                   setBarOpen(true);
                   setFocusReq({ column: column ?? null, nonce: Date.now() });
                 }}
-                onReachEnd={loadMore}
+                onReachEnd={catalogClosed ? undefined : loadMore}
                 onSubmit={pendingActions.save}
                 onToggleRecord={() => setRecordOpen((o) => !o)}
                 onShowDistinct={(col, pos) => setDistinct({ col, x: pos.clientX, y: pos.clientY })}

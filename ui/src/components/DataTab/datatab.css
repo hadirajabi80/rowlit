@@ -6,16 +6,27 @@
   min-height: 0;
   min-width: 0;
   background: var(--bg-panel);
+  container-type: inline-size;
 }
-.dt-toolbar {
+.dt-toolbar.overflow-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
   height: 36px;
+  min-height: 36px;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  background: transparent;
+}
+.dt-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: clamp(56px, 14cqi, 220px);
+  min-width: 0;
 }
 .dt-icon {
   color: var(--accent);
@@ -24,41 +35,40 @@
 .dt-title {
   font-weight: 600;
   white-space: nowrap;
-  max-width: 280px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .dt-conn {
   font-size: var(--fs-sm);
   white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dt .resultset-body {
   flex: 1;
   min-height: 0;
 }
 
-/* The toolbar degrades instead of scrolling: the table name keeps a minimum, the connection name and button
-   labels give way first (Export / Code / Design keep their icons and tooltips). */
-.dt {
-  container-type: inline-size;
-}
-.dt-title {
-  flex-shrink: 1;
-  min-width: 64px;
-}
-.dt-conn {
-  flex-shrink: 3;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Keep insertion and search visible; OverflowToolbar moves other actions into its menu. */
 .dt-toolbar .rs-quick {
-  flex-shrink: 1;
-  min-width: 120px;
+  flex: none;
+  width: clamp(72px, 22cqi, 210px);
+  min-width: 0;
+}
+.dt-toolbar .rs-quick input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
 }
 @container (max-width: 960px) {
-  .dt-conn,
   .dt-btn-label {
+    display: none;
+  }
+}
+@container (max-width: 640px) {
+  .dt-primary-label {
     display: none;
   }
 }

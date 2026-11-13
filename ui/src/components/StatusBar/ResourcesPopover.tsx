@@ -32,6 +32,7 @@ export default function ResourcesPopover({ id, anchorRef, onClose }: { id: strin
   const lastTrim = useResources((s) => s.lastTrim);
   const sampledAt = useResources((s) => s.sampledAt);
   const ref = useRef<HTMLDivElement>(null);
+  const [closing, setClosing] = useState<string | null>(null);
   const [position, setPosition] = useState({ left: 12, bottom: 32, maxHeight: Math.max(0, window.innerHeight - 48) });
   useRestoreFocus(true, ref);
 
@@ -86,6 +87,17 @@ export default function ResourcesPopover({ id, anchorRef, onClose }: { id: strin
   const pct = m && m.limitBytes > 0 ? Math.round((m.usedBytes / m.limitBytes) * 100) : 0;
   const rows = snapshot?.connections ?? [];
   const refresh = () => void useResources.getState().refresh();
+  const closeResources = async (connectionId?: string) => {
+    if (closing) return;
+    setClosing(connectionId ?? '*');
+    try {
+      if (connectionId) await disconnectConnection(connectionId);
+      else await disconnectAll(rows.map((c) => c.connectionId));
+      await useResources.getState().refresh();
+    } finally {
+      setClosing(null);
+    }
+  };
   const engineShare = m && m.usedBytes > 0 ? Math.min(100, (m.engineBytes / m.usedBytes) * 100) : 100;
 
   return createPortal(
@@ -143,12 +155,12 @@ export default function ResourcesPopover({ id, anchorRef, onClose }: { id: strin
           <ul className="resources-list">{rows.map((c) => <li key={c.connectionId} className="resources-row">
             <span className={`resources-dot${c.connected ? ' on' : ''}`} aria-hidden="true" />
             <div className="resources-connection-info"><strong className="resources-name" title={c.name}>{c.name}</strong><div className="resources-desc muted">{describe(c)}</div></div>
-            <button type="button" className="link-btn" aria-label={`Close ${c.name}`} disabled={trimming} title="Release the connection and its cached metadata" onClick={() => void disconnectConnection(c.connectionId).then(refresh)}><Unplug size={11} /> Close</button>
+            <button type="button" className="link-btn" aria-label={`Close ${c.name}`} disabled={trimming || closing !== null || (!c.connected && !c.catalogBytes && !c.jobs)} title="Release the connection and its cached metadata" onClick={() => void closeResources(c.connectionId)}>{closing === c.connectionId ? <LoaderCircle size={11} className="spin" /> : <Unplug size={11} />}{closing === c.connectionId ? 'Closing…' : !c.connected && !c.catalogBytes && !c.jobs ? 'Closed' : 'Close'}</button>
           </li>)}</ul>
         </section>
       </div>
       <footer className="resources-foot">
-        <button type="button" className="link-btn" disabled={!rows.length || trimming} onClick={() => void disconnectAll().then(refresh)}><Unplug size={12} /> Disconnect all</button>
+        <button type="button" className="link-btn" disabled={!rows.some((c) => c.connected || c.catalogBytes || c.jobs) || trimming || closing !== null} onClick={() => void closeResources()}>{closing === '*' ? <LoaderCircle size={12} className="spin" /> : <Unplug size={12} />}{closing === '*' ? 'Disconnecting…' : 'Disconnect all'}</button>
         <div className="flex-1" />
         <button type="button" className="link-btn" onClick={() => { onClose(); openSettings('connections'); }}><SettingsIcon size={12} /> Memory settings</button>
       </footer>

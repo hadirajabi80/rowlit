@@ -439,6 +439,46 @@ public class ConnectionLimitTests
 public class CloseConnectionTests
 {
     [Fact]
+    public async Task Close_WaitsForAnIdlePing_InsteadOfSilentlyLeavingTheConnectionOpen()
+    {
+        await using var env = new ResourceEnv();
+        var c = env.AddSqlite("ping-close.sqlite");
+        var h = await env.SessionAsync(c);
+        Assert.True(h.TryReserve("ping"));
+        var closing = env.Resources.CloseAsync(c.Id, null, force: false, clientId: null);
+        try
+        {
+            Assert.False(closing.IsCompleted);
+        }
+        finally
+        {
+            h.Release();
+        }
+        var r = await closing;
+        Assert.Equal(1, r.Sessions);
+        Assert.False(env.Resources.Describe(c.Id).Connected);
+    }
+
+    [Fact]
+    public async Task ForceClose_DoesNotClaimSuccess_WhileAQueryRefusesToStop()
+    {
+        await using var env = new ResourceEnv();
+        var c = env.AddSqlite("busy-close.sqlite");
+        var h = await env.SessionAsync(c);
+        Assert.True(h.TryReserve("export"));
+        try
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(() => env.Resources.CloseAsync(c.Id, null, force: true, clientId: null));
+            Assert.Equal(ErrorCodes.ResourceBusy, error.Code);
+            Assert.False(h.Released);
+        }
+        finally
+        {
+            h.Release();
+        }
+    }
+
+    [Fact]
     public async Task Close_ListsBlockers_ThenForceRollsBack_ReleasesSessions_AndDropsTheCatalog()
     {
         await using var env = new ResourceEnv();
